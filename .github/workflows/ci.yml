@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.12"
+      - run: uv python install 3.11
+      - run: uv sync --frozen --dev
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy src apps
+      - run: uv run bandit -q -r src apps
+
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_DB: secragraph_test
+          POSTGRES_USER: secragraph
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U secragraph -d secragraph_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+      qdrant:
+        image: qdrant/qdrant:v1.19.1
+        ports:
+          - 56333:6333
+        options: >-
+          --health-cmd "bash -c ':> /dev/tcp/127.0.0.1/6333'"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      SECRAGRAPH_DATABASE_URL: postgresql+psycopg://secragraph@127.0.0.1:55432/secragraph_test
+      SECRAGRAPH_TEST_DATABASE_URL: postgresql+psycopg://secragraph@127.0.0.1:55432/secragraph_test
+      SECRAGRAPH_TEST_QDRANT_URL: http://127.0.0.1:56333
+      SECRAGRAPH_QDRANT_URL: http://127.0.0.1:56333
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.12"
+      - run: uv python install 3.11
+      - run: uv sync --frozen --dev
+      - name: Create isolated read-only database role
+        run: |
+          docker cp infra/postgres/init/002_reader_login.sh \
+            "${{ job.services.postgres.id }}:/tmp/002_reader_login.sh"
+          docker exec \
+            -e SECRAGRAPH_READER_PASSWORD="$(openssl rand -hex 24)" \
+            "${{ job.services.postgres.id }}" \
+            sh /tmp/002_reader_login.sh
+      - run: uv run alembic upgrade head
+      - run: uv run security-review import-intelligence --cwe data/samples/cwe.csv --cve data/samples/cve.csv
+      - run: uv run security-review bootstrap-qdrant
+      - name: Run full suite with live API
+        run: uv run python -m scripts.ci_full_tests
+
+  dependency-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.12"
+      - run: uv python install 3.11
+      - run: uv sync --frozen --dev
+      - run: uv run python scripts/ci_dependency_audit.py
+
+  container-build:
+    needs: [quality, tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build --target runtime --tag secragraph:ci .

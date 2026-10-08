@@ -1,0 +1,3 @@
+cve_id,cwe_id,vendor,product,severity,cvss_score,published_at,summary,source_url
+CVE-2099-0001,CWE-89,SecRAGraph Labs,Demo API,high,8.2,2099-01-02,Synthetic record for parameterized-query demonstrations,https://example.invalid/secragraph/cve/2099-0001
+CVE-2099-0002,CWE-95,SecRAGraph Labs,Demo Worker,critical,9.4,2099-01-03,Synthetic record for unsafe-evaluation demonstrations,https://example.invalid/secragraph/cve/2099-0002

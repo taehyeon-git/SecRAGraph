@@ -1,0 +1,189 @@
+name: secragraph
+
+x-database-environment: &database-environment
+  SECRAGRAPH_DATABASE_URL: >-
+    postgresql+psycopg://${POSTGRES_USER:-secragraph}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-secragraph}
+
+x-intelligence-database-environment: &intelligence-database-environment
+  SECRAGRAPH_INTELLIGENCE_DATABASE_URL: >-
+    postgresql+psycopg://secragraph_text2sql:${SECRAGRAPH_READER_PASSWORD:?SECRAGRAPH_READER_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-secragraph}
+
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-secragraph}
+      POSTGRES_USER: ${POSTGRES_USER:-secragraph}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      SECRAGRAPH_READER_PASSWORD: ${SECRAGRAPH_READER_PASSWORD:?SECRAGRAPH_READER_PASSWORD is required}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-secragraph} -d ${POSTGRES_DB:-secragraph}",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  qdrant-bootstrap:
+    build:
+      context: .
+      target: runtime
+    command: ["/app/.venv/bin/security-review", "bootstrap-qdrant"]
+    environment:
+      SECRAGRAPH_QDRANT_URL: http://qdrant:6333
+      SECRAGRAPH_QDRANT_COLLECTION: ${SECRAGRAPH_QDRANT_COLLECTION:-secragraph-security-documents}
+      SECRAGRAPH_QDRANT_VECTOR_DIMENSION: ${SECRAGRAPH_QDRANT_VECTOR_DIMENSION:-1536}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  migrate:
+    build:
+      context: .
+      target: runtime
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
+    environment:
+      <<: *database-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      reader-bootstrap:
+        condition: service_completed_successfully
+    restart: "no"
+
+  reader-bootstrap:
+    image: postgres:16.15-alpine
+    command: ["sh", "/bootstrap/002_reader_login.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-secragraph}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-secragraph}
+      POSTGRES_USER: ${POSTGRES_USER:-secragraph}
+      SECRAGRAPH_READER_PASSWORD: ${SECRAGRAPH_READER_PASSWORD:?SECRAGRAPH_READER_PASSWORD is required}
+    volumes:
+      - ./infra/postgres/init/002_reader_login.sh:/bootstrap/002_reader_login.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: runtime
+    environment:
+      <<: [*database-environment, *intelligence-database-environment]
+      TMPDIR: /tmp/secragraph
+      SECRAGRAPH_ENVIRONMENT: ${SECRAGRAPH_ENVIRONMENT:-production}
+      SECRAGRAPH_MAX_REQUEST_BYTES: ${SECRAGRAPH_MAX_REQUEST_BYTES:-6000000}
+      SECRAGRAPH_MAX_UPLOAD_BYTES: ${SECRAGRAPH_MAX_UPLOAD_BYTES:-5000000}
+      SECRAGRAPH_MAX_EXTRACTED_BYTES: ${SECRAGRAPH_MAX_EXTRACTED_BYTES:-20000000}
+      SECRAGRAPH_MAX_ARCHIVE_FILES: ${SECRAGRAPH_MAX_ARCHIVE_FILES:-500}
+      SECRAGRAPH_QDRANT_URL: http://qdrant:6333
+      SECRAGRAPH_QDRANT_COLLECTION: ${SECRAGRAPH_QDRANT_COLLECTION:-secragraph-security-documents}
+      SECRAGRAPH_QDRANT_VECTOR_DIMENSION: ${SECRAGRAPH_QDRANT_VECTOR_DIMENSION:-1536}
+      SECRAGRAPH_OPENAI_API_KEY: ${SECRAGRAPH_OPENAI_API_KEY:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp/secragraph:rw,nosuid,nodev,mode=1777,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: "1.0"
+    pids_limit: 256
+    init: true
+    stop_grace_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      qdrant-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/app/.venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).read()",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: runtime
+    command:
+      - /app/.venv/bin/streamlit
+      - run
+      - apps/web/streamlit_app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --server.maxUploadSize=5
+      - --server.maxMessageSize=8
+    environment:
+      SECRAGRAPH_API_BASE_URL: http://api:8000
+      TMPDIR: /tmp/secragraph
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8501}:8501"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp/secragraph:rw,nosuid,nodev,mode=1777,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: "0.5"
+    pids_limit: 128
+    init: true
+    stop_grace_period: 20s
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:

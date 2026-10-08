@@ -1,0 +1,2 @@
+infra/postgres/init/*.sh text eol=lf
+infra/scripts/*.sh text eol=lf

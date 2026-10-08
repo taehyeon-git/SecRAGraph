@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible SecRAGraph problem using synthetic or public test data.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use a minimal synthetic or public example. Do not include credentials, tokens, private source files, or unredacted scan output.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release version or commit where you observed the problem.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the command or request and a safe minimal input.
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Describe the result; redact sensitive values from any excerpt.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Python version, and whether Docker is involved.
+    validations:
+      required: false

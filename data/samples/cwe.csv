@@ -1,0 +1,3 @@
+cwe_id,name,description,source_url
+CWE-89,SQL command injection,Untrusted text changes the structure of a database query in this synthetic training category,https://example.invalid/secragraph/cwe/89
+CWE-95,Dynamic evaluation risk,Untrusted text reaches a dynamic code evaluation feature in this synthetic training category,https://example.invalid/secragraph/cwe/95
