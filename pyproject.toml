@@ -14,7 +14,7 @@ dependencies = [
   "pydantic-settings>=2,<3",
   "python-multipart>=0.0.9,<1",
   "qdrant-client>=1.19.1",
-  "rich>=13,<15",
+  "rich>=13,<16",
   "sqlalchemy>=2,<3",
   "sqlglot==30.21.0",
   "streamlit>=1.65.0",
