@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from security_review.cli import app
@@ -75,10 +76,11 @@ def test_documented_cli_commands_and_options_appear_in_help() -> None:
     commands = re.findall(r"\bsecurity-review\s+([a-z][a-z-]*)([^\r\n]*)", examples)
     assert commands
     for command, rest_of_line in commands:
-        result = runner.invoke(app, [command, "--help"])
+        result = runner.invoke(app, [command, "--help"], color=True)
         assert result.exit_code == 0, command
+        help_output = strip_ansi(result.output)
         for option in re.findall(r"(?<![\w-])--[a-z][a-z-]*", rest_of_line):
-            assert option in result.output, f"{command}: {option}"
+            assert option in help_output, f"{command}: {option}"
 
 
 def test_readme_separates_focused_tests_from_live_integration_prerequisites() -> None:
