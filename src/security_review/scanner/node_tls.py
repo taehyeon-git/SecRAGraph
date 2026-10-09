@@ -7,11 +7,11 @@ interpolations, are deliberately unassessed and can contain false negatives.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _JS_ASSIGNMENT = re.compile(
     r"process[ \t]*\.[ \t]*env[ \t]*\.[ \t]*NODE_TLS_REJECT_UNAUTHORIZED"
-    r"[ \t]*=[ \t]*(?:\"0\"|'0'|0)(?=[ \t]*(?:;|//|[\r\n]|$))"
+    r"[ \t]*=[ \t]*(?:\"0\"|'0'|0)"
 )
 _ENV_ASSIGNMENT = re.compile(
     r"[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*(?:0|\"0\"|'0')"
@@ -32,6 +32,7 @@ _REGEX_PREFIX_WORDS = frozenset(
         "await",
     }
 )
+_CONTROL_PAREN_WORDS = frozenset({"if", "while", "for", "switch", "catch", "with"})
 _PRECEDING_NON_BOUNDARY = frozenset("._$'\"`])")
 
 
@@ -41,6 +42,8 @@ class _CodeContext:
 
     interpolation_depth: int = 0
     regex_allowed: bool = True
+    control_before_paren: bool = False
+    control_parens: list[bool] = field(default_factory=list)
 
 
 def _skip_quoted(text: str, start: int) -> int:
@@ -65,7 +68,7 @@ def _skip_regex(text: str, start: int) -> int:
             index += 2
             continue
         if char in "\r\n":
-            return len(text)
+            return index
         if char == "[":
             in_class = True
         elif char == "]":
@@ -77,6 +80,23 @@ def _skip_regex(text: str, start: int) -> int:
             return index
         index += 1
     return len(text)
+
+
+def _ends_literal_assignment(text: str, start: int) -> bool:
+    """Check the token after literal zero, allowing only trivia and expression ends."""
+
+    index = start
+    while index < len(text):
+        if text[index] in " \t":
+            index += 1
+        elif text.startswith("/*", index):
+            close = text.find("*/", index + 2)
+            if close < 0:
+                return False
+            index = close + 2
+        else:
+            break
+    return index == len(text) or text[index] in ";,)]}\r\n" or text.startswith("//", index)
 
 
 def _detect_js_assignments(text: str) -> tuple[int, ...]:
@@ -108,10 +128,22 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             if context.interpolation_depth == 0:
                 frames.pop()
             end = index + 1
+        elif char == "(":
+            context.control_parens.append(context.control_before_paren)
+            context.control_before_paren = False
+            context.regex_allowed = True
+            end = index + 1
+        elif char == ")":
+            context.regex_allowed = (
+                context.control_parens.pop() if context.control_parens else False
+            )
+            context.control_before_paren = False
+            end = index + 1
         elif char == "{":
             if context.interpolation_depth:
                 context.interpolation_depth += 1
             context.regex_allowed = True
+            context.control_before_paren = False
             end = index + 1
         elif char in "'\"":
             end = _skip_quoted(text, index)
@@ -136,23 +168,32 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             if not context.interpolation_depth and char == "p":
                 assignment = _JS_ASSIGNMENT.match(text, index)
                 preceding = text[index - 1] if index else ""
-                if assignment is not None and not (
-                    preceding.isalnum() or preceding in _PRECEDING_NON_BOUNDARY
+                if (
+                    assignment is not None
+                    and _ends_literal_assignment(text, assignment.end())
+                    and not (preceding.isalnum() or preceding in _PRECEDING_NON_BOUNDARY)
                 ):
                     matches.add(line)
             end = index + 1
             while end < len(text) and (text[end].isalnum() or text[end] in "_$"):
                 end += 1
-            context.regex_allowed = text[index:end] in _REGEX_PREFIX_WORDS
+            word = text[index:end]
+            context.control_before_paren = word in _CONTROL_PAREN_WORDS and context.regex_allowed
+            context.regex_allowed = word in _REGEX_PREFIX_WORDS
         elif char.isdigit():
             end = index + 1
             while end < len(text) and (text[end].isalnum() or text[end] in "._"):
                 end += 1
             context.regex_allowed = False
+        elif char in "+-" and text[index : index + 2] == char * 2:
+            # Postfix ++/-- leaves a complete expression before a division slash.
+            end = index + 2
+            context.control_before_paren = False
         else:
             end = index + 1
             if not char.isspace():
                 context.regex_allowed = char not in ".)]}"
+                context.control_before_paren = False
 
         line += text.count("\n", index, end)
         index = end

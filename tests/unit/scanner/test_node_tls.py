@@ -61,6 +61,41 @@ def test_comments_and_strings_do_not_hide_later_assignments() -> None:
     assert _detect(source, ".ts") == (3,)
 
 
+def test_regex_literal_after_if_condition_is_not_code() -> None:
+    source = 'if (ok) /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);'
+
+    assert _detect(source, ".js") == ()
+
+
+def test_postfix_division_does_not_hide_next_line_assignment() -> None:
+    source = 'n++ / 2;\nprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+
+    assert _detect(source, ".js") == (2,)
+
+
+def test_postfix_division_does_not_hide_same_line_assignment() -> None:
+    source = 'n++ / 2; process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; /ok/.test(value);'
+
+    assert _detect(source, ".js") == (1,)
+
+
+def test_unterminated_regex_does_not_hide_following_line() -> None:
+    source = 'const broken = /unfinished\nprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+
+    assert _detect(source, ".js") == (2,)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" /* comment */;',
+        'use(process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0");',
+    ],
+)
+def test_detects_literal_zero_before_safe_trailing_syntax(source: str) -> None:
+    assert _detect(source, ".ts") == (1,)
+
+
 def test_template_interpolation_is_unassessed() -> None:
     # This is a known coverage gap, not evidence that the interpolation is safe.
     source = 'const setup = `${process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"}`;'
