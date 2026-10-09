@@ -156,3 +156,47 @@ def test_conditional_branches_merge_alias_certainty() -> None:
     )
 
     assert detect_python_calls(source) == ()
+
+
+def test_uniterated_generator_does_not_apply_walrus_to_module_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "generator = ((sp := object()) for _ in [1])\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 3)
+    ]
+
+
+def test_exhaustive_match_with_same_import_keeps_alias_certain() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "match value:\n"
+        "    case 0:\n        import subprocess as sp\n"
+        "    case _:\n        import subprocess as sp\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 6)
+    ]
+
+
+def test_returning_if_branch_does_not_weaken_reachable_import() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "def work(flag):\n"
+        "    if flag:\n        return\n"
+        "    else:\n        import subprocess as sp\n"
+        "    sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 6)
+    ]

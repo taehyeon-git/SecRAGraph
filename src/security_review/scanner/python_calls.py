@@ -238,6 +238,26 @@ class _CallVisitor(ast.NodeVisitor):
             self.visit(statement)
         return self._snapshot(scopes)
 
+    @staticmethod
+    def _irrefutable_pattern(pattern: ast.pattern) -> bool:
+        if isinstance(pattern, ast.MatchAs):
+            return pattern.pattern is None or _CallVisitor._irrefutable_pattern(pattern.pattern)
+        if isinstance(pattern, ast.MatchOr):
+            return any(_CallVisitor._irrefutable_pattern(option) for option in pattern.patterns)
+        return False
+
+    @staticmethod
+    def _definitely_terminates(statements: Sequence[ast.stmt]) -> bool:
+        for statement in statements:
+            if isinstance(statement, (ast.Return, ast.Raise)):
+                return True
+            if isinstance(statement, ast.If) and statement.orelse:
+                if _CallVisitor._definitely_terminates(
+                    statement.body
+                ) and _CallVisitor._definitely_terminates(statement.orelse):
+                    return True
+        return False
+
     def _binding_scope(self, name: str) -> _Scope:
         if name in self._scope.global_names:
             return self._module
@@ -347,7 +367,12 @@ class _CallVisitor(ast.NodeVisitor):
         self.visit(node.subject)
         scopes = self._active_scopes()
         initial = self._snapshot(scopes)
-        states = [initial]
+        exhaustive = bool(
+            node.cases
+            and node.cases[-1].guard is None
+            and self._irrefutable_pattern(node.cases[-1].pattern)
+        )
+        states = [] if exhaustive else [initial]
         for case in node.cases:
             self._restore(scopes, initial)
             self.visit(case.pattern)
@@ -364,7 +389,12 @@ class _CallVisitor(ast.NodeVisitor):
         initial = self._snapshot(scopes)
         body_state = self._visit_branch(node.body, scopes, initial)
         else_state = self._visit_branch(node.orelse, scopes, initial)
-        self._merge(scopes, (body_state, else_state))
+        reachable = []
+        if not self._definitely_terminates(node.body):
+            reachable.append(body_state)
+        if not self._definitely_terminates(node.orelse):
+            reachable.append(else_state)
+        self._merge(scopes, reachable or (initial,))
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
@@ -465,7 +495,11 @@ class _CallVisitor(ast.NodeVisitor):
             self._scope = parent
 
     def _visit_comprehension(
-        self, generators: Sequence[ast.comprehension], values: Sequence[ast.expr]
+        self,
+        generators: Sequence[ast.comprehension],
+        values: Sequence[ast.expr],
+        *,
+        lazy: bool = False,
     ) -> None:
         if not generators:
             return
@@ -474,8 +508,12 @@ class _CallVisitor(ast.NodeVisitor):
         for generator in generators:
             collector.visit(generator.target)
         parent = self._scope
+        module = self._module
+        enclosing = parent
+        if lazy:
+            enclosing, self._module = self._fork_scope(parent)
         self._scope = _Scope(
-            parent=parent,
+            parent=enclosing,
             kind="comprehension",
             local_names=frozenset(collector.names),
         )
@@ -490,6 +528,7 @@ class _CallVisitor(ast.NodeVisitor):
                 self.visit(value)
         finally:
             self._scope = parent
+            self._module = module
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._visit_comprehension(node.generators, (node.elt,))
@@ -498,7 +537,7 @@ class _CallVisitor(ast.NodeVisitor):
         self._visit_comprehension(node.generators, (node.elt,))
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
-        self._visit_comprehension(node.generators, (node.elt,))
+        self._visit_comprehension(node.generators, (node.elt,), lazy=True)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
         self._visit_comprehension(node.generators, (node.key, node.value))
