@@ -17,7 +17,7 @@ _ENV_ASSIGNMENT = re.compile(
     r"[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*(?:0|\"0\"|'0')"
     r"[ \t]*(?:\#.*)?"
 )
-_WORD_CONTINUATION = re.compile(r"(?:in|instanceof)\b")
+_WORD_CONTINUATION = re.compile(r"(?:in|instanceof)(?![\w$])")
 _REGEX_PREFIX_WORDS = frozenset(
     {
         "return",
@@ -46,6 +46,7 @@ class _CodeContext:
     regex_allowed: bool = True
     control_before_paren: bool = False
     after_else: bool = False
+    after_dot: bool = False
     control_parens: list[bool] = field(default_factory=list)
 
 
@@ -141,6 +142,7 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             and not text.startswith(("//", "/*"), index)
         ):
             context.after_else = False
+            context.after_dot = char == "."
         if context is None:
             # Skip all template content, including ${...} code and nested templates.
             if char == "\\":
@@ -214,8 +216,9 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             context.control_before_paren = word in _CONTROL_PAREN_WORDS and (
                 context.regex_allowed or context.after_else
             )
-            context.after_else = word == "else"
-            context.regex_allowed = word in _REGEX_PREFIX_WORDS
+            context.after_else = word == "else" and not context.after_dot
+            context.after_dot = False
+            context.regex_allowed = word in _REGEX_PREFIX_WORDS or context.after_else
         elif char.isdigit():
             end = index + 1
             while end < len(text) and (text[end].isalnum() or text[end] in "._"):

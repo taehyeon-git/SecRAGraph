@@ -334,6 +334,18 @@ def test_node_tls_public_scan_excludes_regex_and_continued_rhs() -> None:
     assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 4)]
 
 
+def test_node_tls_public_scan_respects_else_regex_and_dollar_identifier() -> None:
+    source = (
+        'if (ok) work(); else /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\n'
+        "in$foo;\n"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
 def test_node_tls_env_finding_is_part_of_scan_path(tmp_path: Path) -> None:
     target = tmp_path / ".env"
     target.write_text("NODE_TLS_REJECT_UNAUTHORIZED=0\n", encoding="utf-8")

@@ -87,6 +87,17 @@ def test_regex_literal_after_else_if_block_condition_is_not_code() -> None:
     assert _detect(source, ".js") == ()
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        'if (ok) work(); else /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);',
+        'if (ok) { work(); } else /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);',
+    ],
+)
+def test_regex_literal_after_else_is_not_code(source: str) -> None:
+    assert _detect(source, ".js") == ()
+
+
 def test_property_named_else_does_not_turn_division_into_regex() -> None:
     source = 'const x = obj.else / 2; process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
 
@@ -156,6 +167,25 @@ def test_line_continuation_is_not_a_literal_zero_assignment(continuation: str) -
 )
 def test_new_statement_after_literal_zero_keeps_finding(ending: str) -> None:
     source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"{ending}'
+
+    assert _detect(source, ".js") == (1,)
+
+
+@pytest.mark.parametrize(
+    "next_statement",
+    [
+        "in$foo;",
+        "instanceof$foo;",
+        "in_foo;",
+        "instanceof_foo;",
+        "inner;",
+        "instanceofThing;",
+        "in2;",
+        "instanceof2;",
+    ],
+)
+def test_identifier_after_line_break_does_not_continue_literal_rhs(next_statement: str) -> None:
+    source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\n{next_statement}'
 
     assert _detect(source, ".js") == (1,)
 
