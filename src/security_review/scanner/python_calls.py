@@ -37,8 +37,12 @@ _DEFAULT_BINDINGS: dict[str, str] = {
     "os": "os",
     "requests": "requests",
     "subprocess": "subprocess",
+    "yaml": "yaml",
 }
-_DIRECT_IMPORTS = frozenset({"builtins", "os", "requests", "subprocess"})
+_DIRECT_IMPORTS = frozenset({"builtins", "os", "requests", "subprocess", "yaml"})
+_UNSAFE_YAML_LOADERS = frozenset(
+    {"yaml.Loader", "yaml.UnsafeLoader", "yaml.CLoader", "yaml.CUnsafeLoader"}
+)
 
 
 class _ComprehensionWalrusBindings(ast.NodeVisitor):
@@ -397,6 +401,12 @@ class _CallVisitor(ast.NodeVisitor):
             for keyword in node.keywords
         )
 
+    def _uses_unsafe_yaml_loader(self, node: ast.Call) -> bool:
+        loader = next((kw.value for kw in node.keywords if kw.arg == "Loader"), None)
+        if loader is None and len(node.args) > 1:
+            loader = node.args[1]
+        return loader is not None and self._symbol(loader) in _UNSAFE_YAML_LOADERS
+
     def visit_Call(self, node: ast.Call) -> None:
         symbol = self._symbol(node.func)
         rule_id: str | None = None
@@ -410,6 +420,10 @@ class _CallVisitor(ast.NodeVisitor):
         elif symbol is not None and symbol.startswith("requests."):
             if self._literal_keyword(node, "verify", False):
                 rule_id = "PY003"
+        elif symbol == "yaml.unsafe_load":
+            rule_id = "PY004"
+        elif symbol == "yaml.load" and self._uses_unsafe_yaml_loader(node):
+            rule_id = "PY004"
         if rule_id is not None:
             self.matches.append(PythonCallMatch(rule_id, node.lineno))
         self.generic_visit(node)

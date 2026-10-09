@@ -89,6 +89,17 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         extensions=_PYTHON_EXTENSIONS,
     ),
     Rule(
+        rule_id="PY004",
+        category="code_pattern",
+        pattern=None,
+        severity=Severity.HIGH,
+        confidence=Confidence.MEDIUM,
+        message="An explicit unsafe PyYAML loader is used.",
+        remediation="Use yaml.safe_load for untrusted YAML instead of an unsafe loader.",
+        cwe_ids=("CWE-502",),
+        extensions=_PYTHON_EXTENSIONS,
+    ),
+    Rule(
         rule_id="SEC001",
         category="secret",
         pattern=_SECRET_ASSIGNMENT_PATTERN,

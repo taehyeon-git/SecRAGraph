@@ -34,6 +34,51 @@ def test_detects_supported_calls_at_call_start(
 
 
 @pytest.mark.parametrize(
+    ("source", "line"),
+    [
+        ("yaml.unsafe_load(data)\n", 1),
+        ("import yaml\nyaml.unsafe_load(data)\n", 2),
+        ("import yaml as parser\nparser.unsafe_load(data)\n", 2),
+        ("from yaml import unsafe_load as parse\nparse(data)\n", 2),
+        ("import yaml\nyaml.load(\n    data,\n    Loader=yaml.UnsafeLoader,\n)\n", 2),
+        ("from yaml import load as parse, UnsafeLoader as Risky\nparse(data, Loader=Risky)\n", 2),
+        ("import yaml\nyaml.load(data, yaml.Loader)\n", 2),
+        ("import yaml\nyaml.load(data, Loader=yaml.CUnsafeLoader)\n", 2),
+        ("import yaml\nyaml.load(data, Loader=yaml.CLoader)\n", 2),
+    ],
+)
+def test_detects_explicit_unsafe_yaml_loaders_at_call_start(source: str, line: int) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY004", line)
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "# yaml.unsafe_load(data)\n",
+        "example = 'yaml.unsafe_load(data)'\n",
+        "import yaml\nyaml.safe_load(data)\n",
+        "import yaml\nyaml.load(data, Loader=yaml.SafeLoader)\n",
+        "import yaml\nyaml.load(data, Loader=yaml.CSafeLoader)\n",
+        "import yaml\nyaml.load(data, Loader=yaml.FullLoader)\n",
+        "import yaml\nyaml.load(data)\n",
+        "import yaml\nyaml.load(data, Loader=choose_loader())\n",
+        "import yaml as parser\nparser = object()\nparser.unsafe_load(data)\n",
+        "import yaml\ndef work(yaml):\n    yaml.unsafe_load(data)\n",
+        "from yaml import load as parse, UnsafeLoader as Risky\n"
+        "Risky = other\nparse(data, Loader=Risky)\n",
+    ],
+)
+def test_rejects_safe_or_uncertain_yaml_loaders(source: str) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert detect_python_calls(source) == ()
+
+
+@pytest.mark.parametrize(
     "source",
     [
         "# eval(user_input)\n",
