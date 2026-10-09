@@ -282,3 +282,30 @@ def test_eager_comprehension_iterates_its_generator_iterable() -> None:
     )
 
     assert detect_python_calls(source) == ()
+
+
+def test_caught_raise_after_for_consumes_generator_keeps_alias_uncertain() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "try:\n"
+        "    for _ in ((sp := object()) for _ in [1]):\n"
+        "        raise ValueError()\n"
+        "except ValueError:\n"
+        "    sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_consuming_outer_generator_expands_starred_inner_generator() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "list((*((sp := object()) for _ in [1]),) for _ in [1])\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()

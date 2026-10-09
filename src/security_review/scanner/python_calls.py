@@ -63,7 +63,14 @@ class _ComprehensionWalrusBindings(ast.NodeVisitor):
             # Only the outer iterable runs when the generator is created.
             self.visit(node.generators[0].iter)
 
-    def _consume_iterable(self, node: ast.expr) -> None:
+    def visit_Starred(self, node: ast.Starred) -> None:
+        if self._eager_only and isinstance(node.ctx, ast.Load):
+            self.consume_iterable(node.value)
+        else:
+            self.visit(node.value)
+
+    def consume_iterable(self, node: ast.expr) -> None:
+        """Collect bindings from evaluating and then iterating an expression."""
         self.visit(node)
         if isinstance(node, ast.GeneratorExp):
             self.consume_generator(node)
@@ -72,7 +79,7 @@ class _ComprehensionWalrusBindings(ast.NodeVisitor):
         """Collect walruses that may run while a generator is iterated."""
         for index, generator in enumerate(node.generators):
             if index:
-                self._consume_iterable(generator.iter)
+                self.consume_iterable(generator.iter)
             elif isinstance(generator.iter, ast.GeneratorExp):
                 # Its creation was visited already; iteration runs its body.
                 self.consume_generator(generator.iter)
@@ -84,7 +91,7 @@ class _ComprehensionWalrusBindings(ast.NodeVisitor):
         self, generators: Sequence[ast.comprehension], values: Sequence[ast.expr]
     ) -> None:
         for generator in generators:
-            self._consume_iterable(generator.iter)
+            self.consume_iterable(generator.iter)
             for condition in generator.ifs:
                 self.visit(condition)
         for value in values:
@@ -160,6 +167,25 @@ class _LocalBindings(ast.NodeVisitor):
             self._collect_comprehension_walrus(node)
         else:
             self.generic_visit(node)
+
+    def visit_Starred(self, node: ast.Starred) -> None:
+        if self._eager_only and isinstance(node.ctx, ast.Load):
+            self._collect_comprehension_walrus(node)
+        else:
+            self.generic_visit(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        if self._eager_only:
+            collector = _ComprehensionWalrusBindings(eager_only=True)
+            collector.consume_iterable(node.iter)
+            self.names.update(collector.names)
+        self.generic_visit(node)
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._collect_comprehension_walrus(node)
@@ -389,10 +415,31 @@ class _CallVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         for expression in (*node.args, *(keyword.value for keyword in node.keywords)):
             if isinstance(expression, ast.GeneratorExp):
-                collector = _ComprehensionWalrusBindings(eager_only=True)
-                collector.consume_generator(expression)
-                for name in collector.names:
-                    self._bind(name)
+                self._bind_consumed_iterable_walrus(expression)
+
+    def _bind_consumed_iterable_walrus(self, node: ast.expr) -> None:
+        collector = _ComprehensionWalrusBindings(eager_only=True)
+        collector.consume_iterable(node)
+        for name in collector.names:
+            self._bind(name)
+
+    def visit_Starred(self, node: ast.Starred) -> None:
+        self.visit(node.value)
+        if isinstance(node.ctx, ast.Load):
+            self._bind_consumed_iterable_walrus(node.value)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_for(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_for(node)
+
+    def _visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self._bind_consumed_iterable_walrus(node.iter)
+        self.visit(node.target)
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
