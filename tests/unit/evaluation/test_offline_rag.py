@@ -197,3 +197,218 @@ def test_malformed_json_fails_before_qdrant_creation(
 
     with pytest.raises(ValueError):
         load_rag_cases(path)
+
+
+def _write_cases(tmp_path: Path, cases: list[dict[str, object]]) -> Path:
+    path = tmp_path / "cases.json"
+    path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
+    return path
+
+
+def test_real_graph_evaluation_reports_completed_paths_and_bounded_evidence() -> None:
+    evaluation = offline_rag.run_rag_evaluation(CASES, GUIDE)
+    direct, rewritten, abstained, forged = evaluation.cases
+
+    assert evaluation.passed
+    assert [case.case_id for case in evaluation.cases] == [
+        "direct_parameterized_queries",
+        "rewrite_then_secret_rotation",
+        "abstain_without_evidence",
+        "reject_forged_citation",
+    ]
+    assert direct.completed_nodes == (
+        "classify_intent",
+        "vector_search",
+        "evaluate_vector_results",
+        "generate_grounded_answer",
+    )
+    assert rewritten.completed_nodes == (
+        "classify_intent",
+        "vector_search",
+        "evaluate_vector_results",
+        "rewrite_query",
+        "vector_search",
+        "evaluate_vector_results",
+        "generate_grounded_answer",
+    )
+    assert abstained.completed_nodes == (
+        "classify_intent",
+        "vector_search",
+        "evaluate_vector_results",
+        "rewrite_query",
+        "vector_search",
+        "evaluate_vector_results",
+    )
+    assert forged.completed_nodes == ("classify_intent", "vector_search", "evaluate_vector_results")
+    assert [case.attempts for case in evaluation.cases] == [1, 2, 2, 1]
+    assert direct.retrieved[0].section == "Injection-resistant data access"
+    assert rewritten.retrieved[0].section == "Secrets and credential handling"
+    assert rewritten.cited_ids == (rewritten.retrieved[0].id,)
+    assert all(
+        "text" not in item.model_dump() for case in evaluation.cases for item in case.retrieved
+    )
+    assert all(
+        len(item.excerpt) <= 240 for case in evaluation.cases for item in case.cited_evidence
+    )
+    assert direct.cited_evidence[0].id == direct.cited_ids[0]
+    assert abstained.retrieved == abstained.cited_evidence == abstained.cited_ids == ()
+    assert abstained.warnings == ("insufficient_evidence",)
+    assert forged.failure_stage == "grounded_answer_validation"
+    assert forged.error == "invalid_source_citation"
+    assert forged.answer is None
+    assert forged.cited_evidence == ()
+    assert evaluation.metrics.path_match.model_dump() == {
+        "numerator": 4,
+        "denominator": 4,
+        "not_applicable": 0,
+        "value": 1.0,
+    }
+    assert evaluation.metrics.retrieval_hit_at_k.model_dump() == {
+        "numerator": 3,
+        "denominator": 3,
+        "not_applicable": 1,
+        "value": 1.0,
+    }
+    assert evaluation.metrics.cited_section_correctness.model_dump() == {
+        "numerator": 2,
+        "denominator": 2,
+        "not_applicable": 2,
+        "value": 1.0,
+    }
+    assert evaluation.metrics.citation_id_validity.model_dump() == {
+        "numerator": 2,
+        "denominator": 2,
+        "not_applicable": 2,
+        "value": 1.0,
+    }
+    assert evaluation.metrics.source_alignment.model_dump() == {
+        "numerator": 2,
+        "denominator": 2,
+        "not_applicable": 2,
+        "value": 1.0,
+    }
+    assert evaluation.metrics.abstention_success.model_dump() == {
+        "numerator": 1,
+        "denominator": 1,
+        "not_applicable": 3,
+        "value": 1.0,
+    }
+    assert evaluation.embedding_algorithm_version == "token-hash-v1"
+    assert len(evaluation.manifest_sha256) == len(evaluation.corpus_sha256) == 64
+    assert len(evaluation.git_revision) == 40
+    assert len(evaluation.source_fingerprint) == 64
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value", "check_name"),
+    [
+        ("expected_retrieved_section", "Wrong retrieval section", "retrieval_hit_at_k"),
+        ("expected_cited_section", "Wrong cited section", "cited_section_correctness"),
+        (
+            "expected_completed_nodes",
+            ["classify_intent", "vector_search", "evaluate_vector_results"],
+            "path_match",
+        ),
+    ],
+)
+def test_wrong_retrieval_citation_or_path_label_fails_evaluation(
+    tmp_path: Path, field: str, wrong_value: object, check_name: str
+) -> None:
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    direct[field] = wrong_value
+
+    evaluation = offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), GUIDE)
+
+    assert not evaluation.passed
+    assert not evaluation.cases[0].passed
+    assert getattr(evaluation.cases[0].checks, check_name) is False
+
+
+def test_retrieval_hit_does_not_credit_an_unrelated_cited_section(tmp_path: Path) -> None:
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    direct["question"] = (
+        "parameterized SQL queries bind application values exposed credentials "
+        "rotate revoke access logs"
+    )
+    path = _write_cases(tmp_path, [direct])
+
+    evaluation = offline_rag.run_rag_evaluation(path, GUIDE)
+    case = evaluation.cases[0]
+
+    assert [item.section for item in case.retrieved] == [
+        "Secrets and credential handling",
+        "Injection-resistant data access",
+    ]
+    assert case.cited_evidence[0].section == "Secrets and credential handling"
+    assert case.checks.retrieval_hit_at_k is True
+    assert case.checks.cited_section_correctness is False
+    assert evaluation.metrics.retrieval_hit_at_k.numerator == 1
+    assert evaluation.metrics.cited_section_correctness.numerator == 0
+    assert not evaluation.passed
+
+
+def test_unknown_citation_stops_before_completed_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    normal_model = offline_rag._OfflineChatModel
+
+    class UnknownCitationModel(normal_model):
+        def complete(self, system: str, user: str) -> str:
+            answer = super().complete(system, user)
+            if "[source:" in answer:
+                return "Unknown source [source:never-retrieved]"
+            return answer
+
+    monkeypatch.setattr(offline_rag, "_OfflineChatModel", UnknownCitationModel)
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+
+    evaluation = offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), GUIDE)
+    case = evaluation.cases[0]
+
+    assert case.completed_nodes == ("classify_intent", "vector_search", "evaluate_vector_results")
+    assert case.failure_stage == "grounded_answer_validation"
+    assert case.error == "invalid_source_citation"
+    assert case.cited_ids == ("never-retrieved",)
+    assert case.cited_evidence == ()
+    assert not evaluation.passed
+
+
+def test_duplicate_citation_ids_are_deduplicated_and_sources_stay_aligned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    normal_model = offline_rag._OfflineChatModel
+
+    class DuplicateCitationModel(normal_model):
+        def complete(self, system: str, user: str) -> str:
+            answer = super().complete(system, user)
+            if "[source:" in answer:
+                return f"{answer} Repeated {answer[answer.index('[source:') :]}"
+            return answer
+
+    monkeypatch.setattr(offline_rag, "_OfflineChatModel", DuplicateCitationModel)
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+
+    evaluation = offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), GUIDE)
+    case = evaluation.cases[0]
+
+    assert evaluation.passed
+    assert len(case.cited_ids) == len(case.cited_evidence) == 1
+    assert case.cited_ids == (case.retrieved[0].id,)
+    assert case.checks.citation_id_validity is True
+    assert case.checks.source_alignment is True
+
+
+def test_abstention_stops_at_two_searches_without_retrying_further(tmp_path: Path) -> None:
+    abstain = json.loads(CASES.read_text(encoding="utf-8"))["cases"][2]
+
+    evaluation = offline_rag.run_rag_evaluation(_write_cases(tmp_path, [abstain]), GUIDE)
+    case = evaluation.cases[0]
+
+    assert evaluation.passed
+    assert case.attempts == 2
+    assert case.completed_nodes.count("vector_search") == 2
+    assert case.completed_nodes.count("rewrite_query") == 1
+    assert case.cited_ids == case.cited_evidence == case.retrieved == ()
+    assert case.checks.abstention_success is True
+    assert evaluation.metrics.retrieval_hit_at_k.denominator == 0
+    assert evaluation.metrics.retrieval_hit_at_k.value is None

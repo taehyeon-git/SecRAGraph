@@ -6,6 +6,7 @@ from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from security_review.domain.models import SourceReference
 from security_review.orchestrator.knowledge_graph import MAX_QUESTION_CHARACTERS
 
 RagOutcome: TypeAlias = Literal["answer", "abstain", "invalid_source_citation"]
@@ -70,3 +71,98 @@ class RagCase(BaseModel):
         ):
             raise ValueError("invalid citation cases must stop before completed generation")
         return self
+
+
+class CitedEvidence(BaseModel):
+    """Only validated cited metadata and a short excerpt, never a full chunk."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    title: str
+    source_url: str | None = None
+    page: int | None = None
+    section: str | None = None
+    score: float
+    excerpt: str = Field(min_length=1, max_length=240)
+
+
+class RagCaseChecks(BaseModel):
+    """Case-level labels; None means the measure does not apply."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path_match: bool
+    retrieval_hit_at_k: bool | None
+    cited_section_correctness: bool | None
+    citation_id_validity: bool | None
+    source_alignment: bool | None
+    abstention_success: bool | None
+    outcome_match: bool
+    failure_stage_match: bool
+
+
+class RagCaseResult(BaseModel):
+    """One graph execution with only bounded public diagnostics."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    case_id: str
+    expected_completed_nodes: tuple[RagNode, ...]
+    completed_nodes: tuple[RagNode, ...]
+    expected_failure_stage: str | None
+    failure_stage: str | None
+    expected_outcome: RagOutcome
+    actual_outcome: str
+    expected_retrieved_section: str | None
+    expected_cited_section: str | None
+    attempts: int = Field(ge=0)
+    search_queries: tuple[str, ...]
+    retrieved: tuple[SourceReference, ...]
+    cited_evidence: tuple[CitedEvidence, ...]
+    cited_ids: tuple[str, ...]
+    answer: str | None = None
+    warnings: tuple[str, ...] = ()
+    error: str | None = None
+    checks: RagCaseChecks
+    passed: bool
+
+
+class RagMetric(BaseModel):
+    """An explicit ratio and its count of inapplicable cases."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    numerator: int = Field(ge=0)
+    denominator: int = Field(ge=0)
+    not_applicable: int = Field(ge=0)
+    value: float | None
+
+
+class RagMetrics(BaseModel):
+    """Workflow and evidence-contract scores over their applicable cases."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path_match: RagMetric
+    retrieval_hit_at_k: RagMetric
+    cited_section_correctness: RagMetric
+    citation_id_validity: RagMetric
+    source_alignment: RagMetric
+    abstention_success: RagMetric
+
+
+class RagEvaluation(BaseModel):
+    """Reproducible local workflow evidence for one fixed manifest and corpus."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cases: tuple[RagCaseResult, ...]
+    metrics: RagMetrics
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    embedding_algorithm_version: str
+    git_revision: str
+    git_dirty: bool
+    source_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    passed: bool
