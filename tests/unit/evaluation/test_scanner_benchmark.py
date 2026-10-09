@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -229,6 +230,23 @@ def test_two_real_runs_render_identical_bytes_without_report_uuid_or_time(tmp_pa
     assert "scan_id" not in first.to_json()
     assert "created_at" not in first.to_json()
     assert first.corpus_sha256 == second.corpus_sha256
+
+
+def test_manifest_line_endings_do_not_change_corpus_digest_or_evidence(tmp_path: Path) -> None:
+    manifest = json.dumps({"schema_version": 1, "cases": [_case()]}, indent=2) + "\n"
+    lf_path = tmp_path / "lf.json"
+    crlf_path = tmp_path / "crlf.json"
+    lf_path.write_bytes(manifest.encode("utf-8"))
+    crlf_path.write_bytes(manifest.replace("\n", "\r\n").encode("utf-8"))
+    assert lf_path.read_bytes() != crlf_path.read_bytes()
+
+    lf_result = run_scanner_benchmark(lf_path)
+    crlf_result = run_scanner_benchmark(crlf_path)
+    expected_digest = sha256(lf_path.read_bytes()).hexdigest()
+
+    assert lf_result.corpus_sha256 == crlf_result.corpus_sha256 == expected_digest
+    assert lf_result.to_json().encode("utf-8") == crlf_result.to_json().encode("utf-8")
+    assert lf_result.to_markdown().encode("utf-8") == crlf_result.to_markdown().encode("utf-8")
 
 
 def test_default_command_writes_stable_final_corpus_evidence(tmp_path: Path) -> None:

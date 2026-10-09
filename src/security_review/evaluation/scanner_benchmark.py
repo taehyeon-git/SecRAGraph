@@ -343,7 +343,8 @@ def _current_revision() -> str:
 def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
     """Materialize each case alone and invoke the application's real scan path."""
 
-    corpus_sha256 = sha256(cases_path.read_bytes()).hexdigest()
+    # Hash UTF-8 text with checkout newlines normalized to LF, not raw file bytes.
+    corpus_sha256 = sha256(cases_path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
     cases = load_scanner_cases(cases_path)
     assessments: list[CaseAssessment] = []
     rule_set_versions: set[str] = set()
