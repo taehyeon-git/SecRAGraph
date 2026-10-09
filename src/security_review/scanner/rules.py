@@ -15,7 +15,7 @@ class Rule:
 
     rule_id: str
     category: str
-    pattern: Pattern[str]
+    pattern: Pattern[str] | None
     severity: Severity
     confidence: Confidence
     message: str
@@ -56,7 +56,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     Rule(
         rule_id="PY001",
         category="code_pattern",
-        pattern=re.compile(r"\beval\s*\("),
+        pattern=None,
         severity=Severity.HIGH,
         confidence=Confidence.HIGH,
         message="Dynamic evaluation can execute attacker-controlled code.",
@@ -67,9 +67,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     Rule(
         rule_id="PY002",
         category="code_pattern",
-        pattern=re.compile(
-            r"(?:\bsubprocess\.(?:run|call|Popen)\s*\([^#\r\n]*?\bshell\s*=\s*True|\bos\.system\s*\()"
-        ),
+        pattern=None,
         severity=Severity.CRITICAL,
         confidence=Confidence.HIGH,
         message="Shell execution can allow operating-system command injection.",
@@ -80,9 +78,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
     Rule(
         rule_id="PY003",
         category="code_pattern",
-        pattern=re.compile(
-            r"\brequests\.[A-Za-z_][A-Za-z0-9_]*\s*\([^#\r\n]*?\bverify\s*=\s*False"
-        ),
+        pattern=None,
         severity=Severity.HIGH,
         confidence=Confidence.HIGH,
         message="TLS certificate verification is disabled.",
