@@ -45,6 +45,7 @@
       "expected_retrieved_section": "Authentication and authorization",
       "expected_cited_section": null,
       "expected_outcome": "invalid_source_citation",
+      "adapter_fault": "forged_citation",
       "rewrite_query": null,
       "expected_failure_stage": "grounded_answer_validation"
     }

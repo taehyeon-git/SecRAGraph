@@ -32,6 +32,7 @@ class RagCase(BaseModel):
     expected_retrieved_section: str | None = Field(default=None, max_length=500)
     expected_cited_section: str | None = Field(default=None, max_length=500)
     expected_outcome: RagOutcome
+    adapter_fault: Literal["forged_citation"] | None = None
     rewrite_query: str | None = Field(default=None, max_length=MAX_QUESTION_CHARACTERS)
     expected_failure_stage: Literal["grounded_answer_validation"] | None = None
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from security_review.evaluation.offline_rag import (
     build_offline_retriever,
     load_rag_cases,
 )
+from security_review.intelligence.ingestion import MAX_DOCUMENT_BYTES, DocumentIngestionError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 GUIDE = REPOSITORY_ROOT / "data/knowledge/secragraph-security-guidelines.md"
@@ -117,6 +119,8 @@ def test_bundled_manifest_has_four_labeled_rag_paths() -> None:
         "invalid_source_citation",
     ]
     assert all(case.route == "rag" and case.max_rag_attempts == 2 for case in cases)
+    assert all(case.adapter_fault is None for case in cases[:3])
+    assert cases[-1].adapter_fault == "forged_citation"
     assert "generate_grounded_answer" not in cases[-1].expected_completed_nodes
     assert cases[-1].expected_failure_stage == "grounded_answer_validation"
 
@@ -324,6 +328,30 @@ def test_wrong_retrieval_citation_or_path_label_fails_evaluation(
     assert getattr(evaluation.cases[0].checks, check_name) is False
 
 
+def test_relabeling_a_normal_case_cannot_make_the_adapter_forge_a_citation(
+    tmp_path: Path,
+) -> None:
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    direct["expected_outcome"] = "invalid_source_citation"
+    direct["expected_cited_section"] = None
+    direct["expected_failure_stage"] = "grounded_answer_validation"
+    direct["expected_completed_nodes"] = [
+        "classify_intent",
+        "vector_search",
+        "evaluate_vector_results",
+    ]
+
+    evaluation = offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), GUIDE)
+    case = evaluation.cases[0]
+
+    assert case.actual_outcome == "answer"
+    assert case.completed_nodes[-1] == "generate_grounded_answer"
+    assert case.failure_stage is None
+    assert not case.checks.outcome_match
+    assert not case.checks.path_match
+    assert not evaluation.passed
+
+
 def test_retrieval_hit_does_not_credit_an_unrelated_cited_section(tmp_path: Path) -> None:
     direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
     direct["question"] = (
@@ -412,3 +440,66 @@ def test_abstention_stops_at_two_searches_without_retrying_further(tmp_path: Pat
     assert case.checks.abstention_success is True
     assert evaluation.metrics.retrieval_hit_at_k.denominator == 0
     assert evaluation.metrics.retrieval_hit_at_k.value is None
+
+
+def test_manifest_digest_uses_the_loaded_case_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = CASES.read_bytes()
+    manifest = tmp_path / "cases.json"
+    manifest.write_bytes(original)
+    revised = json.loads(original)
+    revised["cases"][0]["question"] = "Changed after loading"
+    real_builder = offline_rag.build_offline_retriever
+
+    def change_manifest_after_load(document_path: Path):
+        built = real_builder(document_path)
+        manifest.write_text(json.dumps(revised), encoding="utf-8")
+        return built
+
+    monkeypatch.setattr(offline_rag, "build_offline_retriever", change_manifest_after_load)
+
+    evaluation = offline_rag.run_rag_evaluation(manifest, GUIDE)
+
+    assert evaluation.passed
+    assert evaluation.cases[0].search_queries[0] == (
+        "How do parameterized queries bind application values safely?"
+    )
+    assert evaluation.manifest_sha256 == sha256(original).hexdigest()
+    assert evaluation.manifest_sha256 != sha256(manifest.read_bytes()).hexdigest()
+
+
+def test_corpus_edit_during_evaluation_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guide = tmp_path / "guide.md"
+    original = GUIDE.read_bytes()
+    guide.write_bytes(original)
+    real_builder = offline_rag.build_offline_retriever
+
+    def change_corpus_after_indexing(document_path: Path):
+        built = real_builder(document_path)
+        guide.write_bytes(original + b"\n\n## Changed after indexing\n")
+        return built
+
+    monkeypatch.setattr(offline_rag, "build_offline_retriever", change_corpus_after_indexing)
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+
+    with pytest.raises(ValueError, match="corpus changed during evaluation"):
+        offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), guide)
+
+
+def test_oversized_corpus_is_rejected_before_indexing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    oversized = tmp_path / "oversized.md"
+    oversized.write_bytes(b"x" * (MAX_DOCUMENT_BYTES + 1))
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    monkeypatch.setattr(
+        offline_rag,
+        "build_offline_retriever",
+        lambda path: pytest.fail("oversized corpus reached Qdrant indexing"),
+    )
+
+    with pytest.raises(DocumentIngestionError, match="document_too_large"):
+        offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), oversized)

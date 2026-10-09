@@ -28,7 +28,9 @@ from security_review.evaluation.rag_models import (
 )
 from security_review.intelligence.fakes import FakeKnowledgeRepository
 from security_review.intelligence.ingestion import (
+    MAX_DOCUMENT_BYTES,
     DocumentChunkInput,
+    DocumentIngestionError,
     chunk_documents,
     load_knowledge_documents,
 )
@@ -125,10 +127,18 @@ class TokenHashEmbeddingModel:
 def load_rag_cases(path: Path) -> tuple[RagCase, ...]:
     """Read and validate every fixed case before local retrieval is initialized."""
 
+    return _parse_rag_cases(_read_manifest_bytes(path))
+
+
+def _read_manifest_bytes(path: Path) -> bytes:
     with path.open("rb") as handle:
         raw = handle.read(_MAX_MANIFEST_BYTES + 1)
     if len(raw) > _MAX_MANIFEST_BYTES:
         raise ValueError("RAG case manifest exceeds the size limit")
+    return raw
+
+
+def _parse_rag_cases(raw: bytes) -> tuple[RagCase, ...]:
     try:
         payload = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -199,7 +209,7 @@ class _OfflineChatModel:
             top = evidence[0]
             if not isinstance(top, dict) or not isinstance(top.get("id"), str):
                 raise AssertionError("invalid grounded evidence")
-            if self._case.expected_outcome == "invalid_source_citation":
+            if self._case.adapter_fault == "forged_citation":
                 return "Unsupported citation [source:forged-offline-source]"
             text = top.get("text")
             if not isinstance(text, str) or not text.strip():
@@ -226,23 +236,27 @@ class _ObservedChatModel:
 def run_rag_evaluation(cases_path: Path, document_path: Path) -> RagEvaluation:
     """Replay fixed cases through a fresh graph and local Qdrant corpus."""
 
-    cases = load_rag_cases(cases_path)
+    manifest_bytes = _read_manifest_bytes(cases_path)
+    cases = _parse_rag_cases(manifest_bytes)
+    corpus_bytes = _snapshot_corpus_file(document_path)
     client, retriever, chunks = build_offline_retriever(document_path)
     try:
         results = tuple(_evaluate_case(case, retriever) for case in cases)
+        if corpus_bytes is not None and _snapshot_corpus_file(document_path) != corpus_bytes:
+            raise ValueError("RAG corpus changed during evaluation")
     finally:
         client.close()
     root = Path(__file__).resolve().parents[3]
     git_revision, git_dirty = _git_identity(root)
     corpus_sha256 = (
-        sha256(document_path.read_bytes(), usedforsecurity=False).hexdigest()
-        if document_path.is_file()
+        sha256(corpus_bytes, usedforsecurity=False).hexdigest()
+        if corpus_bytes is not None
         else _chunk_corpus_digest(chunks)
     )
     return RagEvaluation(
         cases=results,
         metrics=_summarize_metrics(results),
-        manifest_sha256=sha256(cases_path.read_bytes(), usedforsecurity=False).hexdigest(),
+        manifest_sha256=sha256(manifest_bytes, usedforsecurity=False).hexdigest(),
         corpus_sha256=corpus_sha256,
         embedding_algorithm_version=_EMBEDDING_ALGORITHM_VERSION,
         git_revision=git_revision,
@@ -250,6 +264,20 @@ def run_rag_evaluation(cases_path: Path, document_path: Path) -> RagEvaluation:
         source_fingerprint=_source_fingerprint(root),
         passed=all(result.passed for result in results),
     )
+
+
+def _snapshot_corpus_file(path: Path) -> bytes | None:
+    if not path.is_file():
+        return None
+    if path.is_symlink():
+        raise DocumentIngestionError("linked_path_not_allowed")
+    if path.stat().st_size > MAX_DOCUMENT_BYTES:
+        raise DocumentIngestionError("document_too_large", path.name)
+    with path.open("rb") as handle:
+        raw = handle.read(MAX_DOCUMENT_BYTES + 1)
+    if len(raw) > MAX_DOCUMENT_BYTES:
+        raise DocumentIngestionError("document_too_large", path.name)
+    return raw
 
 
 def _evaluate_case(case: RagCase, retriever: QdrantDocumentRetriever) -> RagCaseResult:
