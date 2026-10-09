@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "case_id": "direct_parameterized_queries",
+      "question": "How do parameterized queries bind application values safely?",
+      "route": "rag",
+      "max_rag_attempts": 2,
+      "expected_completed_nodes": ["classify_intent", "vector_search", "evaluate_vector_results", "generate_grounded_answer"],
+      "expected_retrieved_section": "Injection-resistant data access",
+      "expected_cited_section": "Injection-resistant data access",
+      "expected_outcome": "answer",
+      "rewrite_query": null,
+      "expected_failure_stage": null
+    },
+    {
+      "case_id": "rewrite_then_secret_rotation",
+      "question": "What response is required after a canary credential marker is published?",
+      "route": "rag",
+      "max_rag_attempts": 2,
+      "expected_completed_nodes": ["classify_intent", "vector_search", "evaluate_vector_results", "rewrite_query", "vector_search", "evaluate_vector_results", "generate_grounded_answer"],
+      "expected_retrieved_section": "Secrets and credential handling",
+      "expected_cited_section": "Secrets and credential handling",
+      "expected_outcome": "answer",
+      "rewrite_query": "exposed secret revoke rotate access logs credentials",
+      "expected_failure_stage": null
+    },
+    {
+      "case_id": "abstain_without_evidence",
+      "question": "How do we tune asteroid orbit telemetry for lunar mining?",
+      "route": "rag",
+      "max_rag_attempts": 2,
+      "expected_completed_nodes": ["classify_intent", "vector_search", "evaluate_vector_results", "rewrite_query", "vector_search", "evaluate_vector_results"],
+      "expected_retrieved_section": null,
+      "expected_cited_section": null,
+      "expected_outcome": "abstain",
+      "rewrite_query": "lunar mining asteroid orbital telemetry",
+      "expected_failure_stage": null
+    },
+    {
+      "case_id": "reject_forged_citation",
+      "question": "How should a service validate token signature issuer audience and expiry?",
+      "route": "rag",
+      "max_rag_attempts": 2,
+      "expected_completed_nodes": ["classify_intent", "vector_search", "evaluate_vector_results"],
+      "expected_retrieved_section": "Authentication and authorization",
+      "expected_cited_section": null,
+      "expected_outcome": "invalid_source_citation",
+      "adapter_fault": "forged_citation",
+      "rewrite_query": null,
+      "expected_failure_stage": "grounded_answer_validation"
+    }
+  ]
+}

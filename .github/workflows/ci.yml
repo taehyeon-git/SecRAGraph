@@ -26,6 +26,22 @@ jobs:
       - run: uv run ruff check .
       - run: uv run mypy src apps
       - run: uv run bandit -q -r src apps
+      - name: Run keyless RAG evidence
+        run: uv run python -m scripts.run_rag_evidence
+      - name: Validate RAG evidence files
+        run: |
+          test -s build/evidence/rag.json
+          test -s build/evidence/rag.md
+          uv run python -m json.tool build/evidence/rag.json > /dev/null
+
+      - name: Run strict offline scanner benchmark
+        run: uv run python -m scripts.run_scanner_benchmark
+      - name: Require scanner JSON evidence
+        run: test -s build/evidence/scanner.json
+      - name: Require scanner Markdown evidence
+        run: test -s build/evidence/scanner.md
+      - name: Parse scanner JSON evidence
+        run: uv run python -c "import json; from pathlib import Path; json.loads(Path('build/evidence/scanner.json').read_text(encoding='utf-8'))"
 
   tests:
     runs-on: ubuntu-latest

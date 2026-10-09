@@ -89,14 +89,14 @@ def test_scan_stops_with_stable_warning_after_deadline(
     (tmp_path / "a.py").write_text("eval(first)", encoding="utf-8")
     (tmp_path / "b.py").write_text("eval(second)", encoding="utf-8")
     now = [0.0]
-    original_scan_text = application_module.scan_text
+    original_scan_text_detailed = application_module.scan_text_detailed
 
     def advancing_scan(*args: object, **kwargs: object) -> object:
-        result = original_scan_text(*args, **kwargs)  # type: ignore[arg-type]
+        result = original_scan_text_detailed(*args, **kwargs)  # type: ignore[arg-type]
         now[0] = 2.0
         return result
 
-    monkeypatch.setattr(application_module, "scan_text", advancing_scan)  # type: ignore[attr-defined]
+    monkeypatch.setattr(application_module, "scan_text_detailed", advancing_scan)  # type: ignore[attr-defined]
 
     report = scan_path(
         tmp_path,

@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "py001-direct-positive", "file_path": "sample.py",
+      "source": "value = eval(user_input)\n",
+      "expected": [{"rule_id": "PY001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py001-direct-negative", "file_path": "sample.py",
+      "source": "# eval(user_input)\nvalue = 1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py001-multiline-positive", "file_path": "sample.py",
+      "source": "value = eval(\n    expression\n)\n",
+      "expected": [{"rule_id": "PY001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py001-multiline-negative", "file_path": "sample.py",
+      "source": "example = 'eval(user_input)'\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py001-function-positive", "file_path": "sample.py",
+      "source": "def parse(value):\n    return eval(value)\n",
+      "expected": [{"rule_id": "PY001", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py001-function-negative", "file_path": "sample.py",
+      "source": "import ast\nvalue = ast.literal_eval(user_input)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+
+    {
+      "case_id": "py002-run-positive", "file_path": "sample.py",
+      "source": "import subprocess\nsubprocess.run(command, shell=True)\n",
+      "expected": [{"rule_id": "PY002", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py002-run-negative", "file_path": "sample.py",
+      "source": "# subprocess.run(command, shell=True)\nvalue = 1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py002-multiline-positive", "file_path": "sample.py",
+      "source": "import subprocess\nsubprocess.run(\n    command,\n    shell=True,\n)\n",
+      "expected": [{"rule_id": "PY002", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py002-multiline-negative", "file_path": "sample.py",
+      "source": "example = 'os.system(command)'\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py002-system-positive", "file_path": "sample.py",
+      "source": "import os\nos.system(command)\n",
+      "expected": [{"rule_id": "PY002", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py002-system-negative", "file_path": "sample.py",
+      "source": "import subprocess\nsubprocess.run([binary, argument], shell=False)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+
+    {
+      "case_id": "py003-get-positive", "file_path": "sample.py",
+      "source": "import requests\nresponse = requests.get(url, verify=False)\n",
+      "expected": [{"rule_id": "PY003", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py003-get-negative", "file_path": "sample.py",
+      "source": "# requests.get(url, verify=False)\nvalue = 1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py003-multiline-positive", "file_path": "sample.py",
+      "source": "import requests\nresponse = requests.post(\n    url,\n    verify=False,\n)\n",
+      "expected": [{"rule_id": "PY003", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py003-multiline-negative", "file_path": "sample.py",
+      "source": "example = 'requests.get(url, verify=False)'\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py003-alias-positive", "file_path": "sample.py",
+      "source": "import requests as http\nresponse = http.get(url, verify=False)\n",
+      "expected": [{"rule_id": "PY003", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py003-alias-negative", "file_path": "sample.py",
+      "source": "import requests\nresponse = requests.get(url, verify=True)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+
+    {
+      "case_id": "sec001-python-positive", "file_path": "settings.py",
+      "source": "API_KEY = \"synthetic-key-1234567890\"\n",
+      "expected": [{"rule_id": "SEC001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sec001-python-negative", "file_path": "settings.py",
+      "source": "API_KEY = \"your_api_key_here\"\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sec001-env-positive", "file_path": ".env",
+      "source": "GITHUB_TOKEN=synthetic-token-1234567890\n",
+      "expected": [{"rule_id": "SEC001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sec001-env-negative", "file_path": ".env",
+      "source": "GITHUB_TOKEN=your_github_token_here\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sec001-json-positive", "file_path": "settings.json",
+      "source": "{\"PASSWORD\": \"synthetic-pass-1234567890\"}\n",
+      "expected": [{"rule_id": "SEC001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sec001-json-negative", "file_path": "settings.json",
+      "source": "{\"PASSWORD\": \"your_password_here\"}\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+
+    {
+      "case_id": "py004-unsafe-positive", "file_path": "sample.py",
+      "source": "import yaml\nvalue = yaml.unsafe_load(data)\n",
+      "expected": [{"rule_id": "PY004", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py004-unsafe-negative", "file_path": "sample.py",
+      "source": "# yaml.unsafe_load(data)\nvalue = 1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py004-loader-positive", "file_path": "sample.py",
+      "source": "import yaml\nvalue = yaml.load(data, Loader=yaml.UnsafeLoader)\n",
+      "expected": [{"rule_id": "PY004", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py004-loader-negative", "file_path": "sample.py",
+      "source": "example = 'yaml.unsafe_load(data)'\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py004-alias-positive", "file_path": "sample.py",
+      "source": "import yaml as parser\nvalue = parser.unsafe_load(data)\n",
+      "expected": [{"rule_id": "PY004", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "py004-alias-negative", "file_path": "sample.py",
+      "source": "import yaml\nvalue = yaml.safe_load(data)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+
+    {
+      "case_id": "js001-js-positive", "file_path": "settings.js",
+      "source": "process.env.NODE_TLS_REJECT_UNAUTHORIZED = \"0\";\n",
+      "expected": [{"rule_id": "JS001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-js-negative", "file_path": "settings.js",
+      "source": "// process.env.NODE_TLS_REJECT_UNAUTHORIZED = \"0\";\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-ts-positive", "file_path": "settings.ts",
+      "source": "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';\n",
+      "expected": [{"rule_id": "JS001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-ts-negative", "file_path": "settings.ts",
+      "source": "const documentation = 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = \\\"0\\\"';\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-env-positive", "file_path": ".env",
+      "source": "NODE_TLS_REJECT_UNAUTHORIZED=0\n",
+      "expected": [{"rule_id": "JS001", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-env-negative", "file_path": ".env",
+      "source": "NODE_TLS_REJECT_UNAUTHORIZED=1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-block-comment-negative", "file_path": "settings.js",
+      "source": "/* process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; */\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-regex-negative", "file_path": "settings.js",
+      "source": "const pattern = /process\\.env\\.NODE_TLS_REJECT_UNAUTHORIZED = '0'/;\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "js001-template-negative", "file_path": "settings.js",
+      "source": "const note = `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'`;\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    }
+  ]
+}

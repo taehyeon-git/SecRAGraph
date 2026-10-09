@@ -14,12 +14,14 @@ from security_review.intelligence.fakes import (
 )
 from security_review.intelligence.models import DocumentChunk, QueryResult
 from security_review.intelligence.text2sql import Text2SqlService
+from security_review.orchestrator import knowledge_graph
 from security_review.orchestrator.knowledge_graph import (
     KnowledgeService,
     KnowledgeServices,
     KnowledgeWorkflowError,
     build_knowledge_graph,
 )
+from security_review.orchestrator.state import KnowledgeState
 from security_review.ports import IntelligenceUnavailableError
 
 
@@ -202,12 +204,26 @@ def test_rag_with_evidence_does_not_rewrite() -> None:
     assert result["sources"] == (_chunk().to_source_reference(),)
 
 
-def test_sources_preserve_retrieval_order_and_deduplicate_valid_citations() -> None:
-    second = _chunk(identifier="guide:2", text="second evidence")
+def test_rag_sources_include_only_the_cited_chunk() -> None:
     first = _chunk(identifier="guide:1", text="first evidence")
-    retriever = FakeDocumentRetriever(results=(second, first, second))
+    second = _chunk(identifier="guide:2", text="second evidence")
+    retriever = FakeDocumentRetriever(results=(first, second))
     services, _, _ = _services(
         ("rag", "Supported citation [source:guide:2]"),
+        retriever=retriever,
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "second evidence"})
+
+    assert result["sources"] == (second.to_source_reference(),)
+
+
+def test_rag_sources_follow_first_citation_order_without_duplicates() -> None:
+    second = _chunk(identifier="guide:2", text="second evidence")
+    first = _chunk(identifier="guide:1", text="first evidence")
+    retriever = FakeDocumentRetriever(results=(first, second))
+    services, _, _ = _services(
+        ("rag", "Cite two [source:guide:2], one [source:guide:1], two again [source:guide:2]."),
         retriever=retriever,
     )
 
@@ -217,7 +233,38 @@ def test_sources_preserve_retrieval_order_and_deduplicate_valid_citations() -> N
         second.to_source_reference(),
         first.to_source_reference(),
     )
-    assert result["answer"] == "Supported citation [source:guide:2]"
+
+
+def test_identical_duplicate_retrieval_keeps_unique_chunks_and_citation_order() -> None:
+    second = _chunk(identifier="guide:2", text="second evidence")
+    first = _chunk(identifier="guide:1", text="first evidence")
+    retriever = FakeDocumentRetriever(results=(second, first, second))
+    services, _, _ = _services(
+        (
+            "rag",
+            "First [source:guide:1], second [source:guide:2], first again [source:guide:1]",
+        ),
+        retriever=retriever,
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "ordered evidence"})
+
+    assert result["chunks"] == (second, first)
+    assert result["sources"] == (
+        first.to_source_reference(),
+        second.to_source_reference(),
+    )
+
+
+def test_rag_repeated_citation_produces_one_source() -> None:
+    chunk = _chunk()
+    services, _, _ = _services(
+        ("rag", "One [source:guide:1] and again [source:guide:1]"),
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "repeat citation"})
+
+    assert result["sources"] == (chunk.to_source_reference(),)
 
 
 @pytest.mark.parametrize(
@@ -645,3 +692,57 @@ def test_knowledge_service_returns_an_immutable_public_answer() -> None:
     assert answer.attempts == 1
     assert answer.sources == ()
     assert answer.warnings == ()
+
+
+def test_knowledge_answer_from_state_converts_valid_final_state() -> None:
+    source = _chunk().to_source_reference()
+    state: KnowledgeState = {
+        "intent": "rag",
+        "answer": "Grounded answer [source:guide:1]",
+        "attempt": 2,
+        "sources": (source,),
+        "warnings": ("query_rewrite_failed",),
+    }
+
+    answer = knowledge_graph.knowledge_answer_from_state(state)
+
+    assert answer.intent == "rag"
+    assert answer.answer == "Grounded answer [source:guide:1]"
+    assert answer.attempts == 2
+    assert answer.sources == (source,)
+    assert answer.warnings == ("query_rewrite_failed",)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("intent", "unknown", "invalid_intent"),
+        ("answer", None, "missing_answer"),
+        ("answer", "   ", "missing_answer"),
+        ("attempt", 0, "invalid_attempt_count"),
+        ("attempt", True, "invalid_attempt_count"),
+        ("sources", [], "invalid_sources"),
+        ("warnings", ["invalid"], "invalid_warnings"),
+    ],
+)
+def test_knowledge_answer_from_state_rejects_invalid_fields(
+    field: str, value: object, reason: str
+) -> None:
+    state: dict[str, object] = {
+        "intent": "general",
+        "answer": "Valid answer",
+        "attempt": 1,
+        "sources": (),
+        "warnings": (),
+    }
+    state[field] = value
+
+    with pytest.raises(KnowledgeWorkflowError, match=reason):
+        knowledge_graph.knowledge_answer_from_state(cast(KnowledgeState, state))
+
+
+def test_knowledge_answer_from_state_rejects_missing_answer() -> None:
+    state: KnowledgeState = {"intent": "general"}
+
+    with pytest.raises(KnowledgeWorkflowError, match="missing_answer"):
+        knowledge_graph.knowledge_answer_from_state(state)

@@ -11,7 +11,7 @@ from security_review import __version__
 from security_review.domain.models import Finding, ReportSummary, ScanReport, ScanStatus
 from security_review.domain.risk import calculate_risk
 
-RULE_SET_VERSION = "2026.10.1"
+RULE_SET_VERSION = "2026.10.2"
 
 
 def _finding_key(finding: Finding) -> tuple[str, int, str, str]:

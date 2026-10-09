@@ -112,30 +112,36 @@ class KnowledgeService:
 
     def answer(self, question: str) -> KnowledgeAnswer:
         result = cast(KnowledgeState, self._graph.invoke({"question": question}))
-        intent = _required_intent(result)
-        answer = result.get("answer")
-        attempts = result.get("attempt", 1)
-        sources = result.get("sources", ())
-        warnings = result.get("warnings", ())
-        if not isinstance(answer, str) or not answer.strip():
-            raise KnowledgeWorkflowError("missing_answer")
-        if type(attempts) is not int or attempts < 1:
-            raise KnowledgeWorkflowError("invalid_attempt_count")
-        if not isinstance(sources, tuple) or not all(
-            isinstance(source, SourceReference) for source in sources
-        ):
-            raise KnowledgeWorkflowError("invalid_sources")
-        if not isinstance(warnings, tuple) or not all(
-            isinstance(warning, str) and warning for warning in warnings
-        ):
-            raise KnowledgeWorkflowError("invalid_warnings")
-        return KnowledgeAnswer(
-            intent=intent,
-            answer=answer,
-            attempts=attempts,
-            sources=sources,
-            warnings=warnings,
-        )
+        return knowledge_answer_from_state(result)
+
+
+def knowledge_answer_from_state(state: KnowledgeState) -> KnowledgeAnswer:
+    """Validate a completed graph state and return its public answer."""
+
+    intent = _required_intent(state)
+    answer = state.get("answer")
+    attempts = state.get("attempt", 1)
+    sources = state.get("sources", ())
+    warnings = state.get("warnings", ())
+    if not isinstance(answer, str) or not answer.strip():
+        raise KnowledgeWorkflowError("missing_answer")
+    if type(attempts) is not int or attempts < 1:
+        raise KnowledgeWorkflowError("invalid_attempt_count")
+    if not isinstance(sources, tuple) or not all(
+        isinstance(source, SourceReference) for source in sources
+    ):
+        raise KnowledgeWorkflowError("invalid_sources")
+    if not isinstance(warnings, tuple) or not all(
+        isinstance(warning, str) and warning for warning in warnings
+    ):
+        raise KnowledgeWorkflowError("invalid_warnings")
+    return KnowledgeAnswer(
+        intent=intent,
+        answer=answer,
+        attempts=attempts,
+        sources=sources,
+        warnings=warnings,
+    )
 
 
 def build_knowledge_graph(services: KnowledgeServices) -> KnowledgeGraph:
@@ -284,10 +290,13 @@ def build_knowledge_graph(services: KnowledgeServices) -> KnowledgeGraph:
         cited_ids = re.findall(r"\[source:([^\]\r\n]+)\]", answer)
         if not cited_ids:
             raise KnowledgeWorkflowError("missing_source_citation")
-        available_ids = {chunk.id for chunk in chunks}
+        available_ids = {chunk.id: chunk for chunk in chunks}
         if any(source_id not in available_ids for source_id in cited_ids):
             raise KnowledgeWorkflowError("invalid_source_citation")
-        return {"answer": answer}
+        sources = tuple(
+            available_ids[source_id].to_source_reference() for source_id in dict.fromkeys(cited_ids)
+        )
+        return {"answer": answer, "sources": sources}
 
     builder: StateGraph[KnowledgeState, None, KnowledgeState, KnowledgeState] = StateGraph(
         KnowledgeState

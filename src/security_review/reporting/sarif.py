@@ -71,6 +71,7 @@ def _result(
         ],
         "partialFingerprints": {"primaryLocationLineHash": fingerprint},
         "properties": {
+            "findingId": finding.id,
             "category": finding.category,
             "confidence": finding.confidence.value,
             "cweIds": list(finding.cwe_ids),

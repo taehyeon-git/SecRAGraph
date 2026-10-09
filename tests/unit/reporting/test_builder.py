@@ -1,7 +1,11 @@
+import json
+
 import pytest
 
 from security_review.domain.models import Confidence, Finding, ScanStatus, Severity
 from security_review.reporting.builder import build_report
+from security_review.reporting.sarif import render_sarif
+from security_review.scanner.engine import scan_text
 
 
 def make_finding(
@@ -51,6 +55,25 @@ def test_warnings_set_completed_with_warnings_status() -> None:
     assert report.warnings == ("file.py:binary_or_invalid_utf8",)
     assert report.risk.score == 0
     assert report.risk.level == Severity.LOW
+
+
+def test_report_version_and_new_rules_cwe_mappings_reach_outputs() -> None:
+    findings = (
+        *scan_text("sample.py", "import yaml\nvalue = yaml.unsafe_load(data)\n"),
+        *scan_text(".env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n"),
+    )
+    report = build_report("sample", findings)
+
+    assert report.rule_set_version == "2026.10.2"
+    run = json.loads(render_sarif(report))["runs"][0]
+    assert {result["ruleId"]: result["properties"]["cweIds"] for result in run["results"]} == {
+        "JS001": ["CWE-295"],
+        "PY004": ["CWE-502"],
+    }
+    assert {rule["id"]: rule["properties"]["tags"] for rule in run["tool"]["driver"]["rules"]} == {
+        "JS001": ["security", "CWE-295"],
+        "PY004": ["security", "CWE-502"],
+    }
 
 
 def test_target_name_never_retains_a_host_absolute_path() -> None:
