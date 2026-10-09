@@ -298,6 +298,7 @@ def test_real_graph_evaluation_reports_completed_paths_and_bounded_evidence() ->
         "value": 1.0,
     }
     assert evaluation.embedding_algorithm_version == "token-hash-v1"
+    assert evaluation.corpus_digest_kind == "indexed-chunks-v1"
     assert len(evaluation.manifest_sha256) == len(evaluation.corpus_sha256) == 64
     assert len(evaluation.git_revision) == 40
     assert len(evaluation.source_fingerprint) == 64
@@ -469,12 +470,15 @@ def test_manifest_digest_uses_the_loaded_case_snapshot(
     assert evaluation.manifest_sha256 != sha256(manifest.read_bytes()).hexdigest()
 
 
-def test_corpus_edit_during_evaluation_is_rejected(
+def test_corpus_digest_follows_indexed_chunks_after_source_file_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     guide = tmp_path / "guide.md"
     original = GUIDE.read_bytes()
     guide.write_bytes(original)
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    manifest = _write_cases(tmp_path, [direct])
+    indexed_digest = offline_rag.run_rag_evaluation(manifest, guide).corpus_sha256
     real_builder = offline_rag.build_offline_retriever
 
     def change_corpus_after_indexing(document_path: Path):
@@ -483,10 +487,47 @@ def test_corpus_edit_during_evaluation_is_rejected(
         return built
 
     monkeypatch.setattr(offline_rag, "build_offline_retriever", change_corpus_after_indexing)
-    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
 
-    with pytest.raises(ValueError, match="corpus changed during evaluation"):
-        offline_rag.run_rag_evaluation(_write_cases(tmp_path, [direct]), guide)
+    evaluation = offline_rag.run_rag_evaluation(manifest, guide)
+
+    assert evaluation.corpus_sha256 == indexed_digest
+    assert guide.read_bytes() != original
+
+
+def test_transient_corpus_edit_and_restore_cannot_change_indexed_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    guide = tmp_path / "guide.md"
+    original = GUIDE.read_bytes()
+    changed = original.replace(
+        b"## Injection-resistant data access",
+        b"## Injection-safe data access",
+    )
+    assert changed != original
+    direct = json.loads(CASES.read_text(encoding="utf-8"))["cases"][0]
+    manifest = _write_cases(tmp_path, [direct])
+
+    guide.write_bytes(original)
+    original_digest = offline_rag.run_rag_evaluation(manifest, guide).corpus_sha256
+    guide.write_bytes(changed)
+    indexed_digest = offline_rag.run_rag_evaluation(manifest, guide).corpus_sha256
+    assert indexed_digest != original_digest
+    guide.write_bytes(original)
+    real_builder = offline_rag.build_offline_retriever
+
+    def index_transient_edit(document_path: Path):
+        guide.write_bytes(changed)
+        built = real_builder(document_path)
+        guide.write_bytes(original)
+        return built
+
+    monkeypatch.setattr(offline_rag, "build_offline_retriever", index_transient_edit)
+
+    evaluation = offline_rag.run_rag_evaluation(manifest, guide)
+
+    assert guide.read_bytes() == original
+    assert evaluation.corpus_sha256 == indexed_digest
+    assert evaluation.corpus_sha256 != original_digest
 
 
 def test_oversized_corpus_is_rejected_before_indexing(

@@ -161,7 +161,11 @@ class RagEvaluation(BaseModel):
     cases: tuple[RagCaseResult, ...]
     metrics: RagMetrics
     manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    corpus_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 of canonical indexed chunk records, not raw source file bytes",
+    )
+    corpus_digest_kind: Literal["indexed-chunks-v1"] = "indexed-chunks-v1"
     embedding_algorithm_version: str
     git_revision: str
     git_dirty: bool

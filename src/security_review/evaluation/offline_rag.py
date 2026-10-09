@@ -238,26 +238,19 @@ def run_rag_evaluation(cases_path: Path, document_path: Path) -> RagEvaluation:
 
     manifest_bytes = _read_manifest_bytes(cases_path)
     cases = _parse_rag_cases(manifest_bytes)
-    corpus_bytes = _snapshot_corpus_file(document_path)
+    _precheck_corpus_file(document_path)
     client, retriever, chunks = build_offline_retriever(document_path)
     try:
         results = tuple(_evaluate_case(case, retriever) for case in cases)
-        if corpus_bytes is not None and _snapshot_corpus_file(document_path) != corpus_bytes:
-            raise ValueError("RAG corpus changed during evaluation")
     finally:
         client.close()
     root = Path(__file__).resolve().parents[3]
     git_revision, git_dirty = _git_identity(root)
-    corpus_sha256 = (
-        sha256(corpus_bytes, usedforsecurity=False).hexdigest()
-        if corpus_bytes is not None
-        else _chunk_corpus_digest(chunks)
-    )
     return RagEvaluation(
         cases=results,
         metrics=_summarize_metrics(results),
         manifest_sha256=sha256(manifest_bytes, usedforsecurity=False).hexdigest(),
-        corpus_sha256=corpus_sha256,
+        corpus_sha256=_chunk_corpus_digest(chunks),
         embedding_algorithm_version=_EMBEDDING_ALGORITHM_VERSION,
         git_revision=git_revision,
         git_dirty=git_dirty,
@@ -266,9 +259,9 @@ def run_rag_evaluation(cases_path: Path, document_path: Path) -> RagEvaluation:
     )
 
 
-def _snapshot_corpus_file(path: Path) -> bytes | None:
+def _precheck_corpus_file(path: Path) -> None:
     if not path.is_file():
-        return None
+        return
     if path.is_symlink():
         raise DocumentIngestionError("linked_path_not_allowed")
     if path.stat().st_size > MAX_DOCUMENT_BYTES:
@@ -277,7 +270,6 @@ def _snapshot_corpus_file(path: Path) -> bytes | None:
         raw = handle.read(MAX_DOCUMENT_BYTES + 1)
     if len(raw) > MAX_DOCUMENT_BYTES:
         raise DocumentIngestionError("document_too_large", path.name)
-    return raw
 
 
 def _evaluate_case(case: RagCase, retriever: QdrantDocumentRetriever) -> RagCaseResult:
@@ -453,11 +445,16 @@ def _summarize_metrics(results: tuple[RagCaseResult, ...]) -> RagMetrics:
 
 def _chunk_corpus_digest(chunks: tuple[DocumentChunkInput, ...]) -> str:
     digest = sha256(usedforsecurity=False)
+    digest.update(b"indexed-chunks-v1\n")
     for chunk in chunks:
-        digest.update(chunk.source_path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(chunk.content_sha256.encode("ascii"))
-        digest.update(b"\0")
+        record = json.dumps(
+            chunk.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        digest.update(record.encode("utf-8"))
+        digest.update(b"\n")
     return digest.hexdigest()
 
 
