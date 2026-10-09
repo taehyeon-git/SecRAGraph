@@ -62,6 +62,8 @@ flowchart LR
 - Text2SQL은 모델이 만든 SQL을 SQLGlot AST로 검증한 뒤 `intel.cwe`와 `intel.cve`의 제한된 `SELECT`만 읽기 전용 역할로 실행합니다. 행 수·시간·재시도가 제한됩니다. [세부 통제](docs/text2sql-security.md)를 참고하세요.
 - [동봉된 CVE/CWE CSV](data/samples/README.md)는 합성 데모 데이터입니다. 실제 취약점 피드나 운영 환경의 지식 범위를 대변하지 않습니다. 외부 자료는 권리를 확인한 사용자가 직접 확보하고 수집해야 합니다.
 
+모델 키 없이도 실제 지식 LangGraph·메모리 내 Qdrant의 RAG 경로를 재현할 수 있습니다. `uv run python -m scripts.run_rag_evidence`는 동봉한 지침과 고정 사례 4건을 평가해 `build/evidence/rag.json`, `build/evidence/rag.md`를 만들고 라벨 불일치 시 실패합니다. 2026-10-09 로컬 실행 결과는 4/4 사례 통과였으며, 직접 검색·재작성 후 검색·근거 부족 보류·가짜 인용 거부를 포함합니다. 이는 결정적 테스트 더블의 워크플로·인용 계약 결과이며 실제 LLM 품질 점수가 아닙니다. 질문, 출처 발췌, 지표 분모와 재현 절차는 [데모](docs/demo.md#2-키-없는-오프라인-rag-근거)에 있습니다.
+
 ## 빠른 시작
 
 저장소 루트에서 Docker Desktop의 Linux 엔진(또는 Linux Docker 엔진)을 사용합니다. 아래는 Windows PowerShell 5.1/7 명령이며 두 비밀번호는 현재 셸에만 둡니다. 기존 `postgres_data` 볼륨이 있다면 새 `POSTGRES_PASSWORD` 대신 초기화 당시 비밀번호를 사용하세요. 역할 회전 절차는 [운영 문서](docs/operations.md)에 있습니다.
@@ -105,7 +107,7 @@ ZIP은 `POST /v1/scans/archive`에서 검증 후 처리합니다. `POST /v1/know
 
 ## 테스트와 CI
 
-별도 테스트 서비스를 시작하지 않고 아래 코드 품질 검사와 문서·CLI 테스트를 실행할 수 있습니다. [CI 정의](.github/workflows/ci.yml)는 Ruff, mypy, pytest, Bandit, 의존성 감사, 컨테이너 빌드를 구성합니다. [셀프 스캔 정의](.github/workflows/security-scan.yml)는 `src`를 SARIF로 스캔하고 [검증 스크립트](scripts/validate_sarif.py)를 실행합니다. GitHub Code Scanning 업로드는 권한이 허용되는 이벤트에서만 시도하도록 구성되어 있습니다. `v0.1.0` 태그가 가리키는 커밋의 [CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)과 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 모두 통과했고, SARIF는 [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 게시되었습니다.
+별도 테스트 서비스를 시작하지 않고 아래 코드 품질 검사와 문서·CLI 테스트를 실행할 수 있습니다. [CI 정의](.github/workflows/ci.yml)는 Ruff, mypy, pytest, Bandit, 키 없는 RAG 증거 생성·파일 검증, 의존성 감사, 컨테이너 빌드를 구성합니다. [셀프 스캔 정의](.github/workflows/security-scan.yml)는 `src`를 SARIF로 스캔하고 [검증 스크립트](scripts/validate_sarif.py)를 실행합니다. GitHub Code Scanning 업로드는 권한이 허용되는 이벤트에서만 시도하도록 구성되어 있습니다. `v0.1.0` 태그가 가리키는 커밋의 [CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)과 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 모두 통과했고, SARIF는 [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 게시되었습니다.
 
 ```powershell
 uv run ruff format --check .
