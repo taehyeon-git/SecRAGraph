@@ -346,6 +346,31 @@ def test_node_tls_public_scan_respects_else_regex_and_dollar_identifier() -> Non
     assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
 
 
+@pytest.mark.parametrize("private_name", ["else", "return", "in"])
+def test_node_tls_public_scan_detects_assignment_after_private_keyword_division(
+    private_name: str,
+) -> None:
+    source = (
+        f"class X {{ #{private_name} = 2; m() {{ const x = this.#{private_name} / 2; "
+        "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0; } }"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 1)]
+
+
+def test_node_tls_public_scan_detects_assignment_after_private_if_call_division() -> None:
+    source = (
+        "class X { #if(ok) { return ok; } m() { const x = this.#if(true) / 2; "
+        "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0; } }"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 1)]
+
+
 def test_node_tls_env_finding_is_part_of_scan_path(tmp_path: Path) -> None:
     target = tmp_path / ".env"
     target.write_text("NODE_TLS_REJECT_UNAUTHORIZED=0\n", encoding="utf-8")

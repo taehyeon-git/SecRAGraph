@@ -46,7 +46,7 @@ class _CodeContext:
     regex_allowed: bool = True
     control_before_paren: bool = False
     after_else: bool = False
-    after_dot: bool = False
+    after_property_prefix: bool = False
     control_parens: list[bool] = field(default_factory=list)
 
 
@@ -142,7 +142,7 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             and not text.startswith(("//", "/*"), index)
         ):
             context.after_else = False
-            context.after_dot = char == "."
+            context.after_property_prefix = char in ".#"
         if context is None:
             # Skip all template content, including ${...} code and nested templates.
             if char == "\\":
@@ -213,12 +213,16 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             while end < len(text) and (text[end].isalnum() or text[end] in "_$"):
                 end += 1
             word = text[index:end]
-            context.control_before_paren = word in _CONTROL_PAREN_WORDS and (
-                context.regex_allowed or context.after_else
+            context.control_before_paren = (
+                not context.after_property_prefix
+                and word in _CONTROL_PAREN_WORDS
+                and (context.regex_allowed or context.after_else)
             )
-            context.after_else = word == "else" and not context.after_dot
-            context.after_dot = False
-            context.regex_allowed = word in _REGEX_PREFIX_WORDS or context.after_else
+            context.after_else = word == "else" and not context.after_property_prefix
+            context.regex_allowed = not context.after_property_prefix and (
+                word in _REGEX_PREFIX_WORDS or context.after_else
+            )
+            context.after_property_prefix = False
         elif char.isdigit():
             end = index + 1
             while end < len(text) and (text[end].isalnum() or text[end] in "._"):
