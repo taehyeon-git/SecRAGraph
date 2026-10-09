@@ -321,6 +321,28 @@ def test_node_tls_findings_keep_crlf_line_numbers_and_deduplicate_same_line() ->
     assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
 
 
+def test_node_tls_public_scan_detects_after_cr_only_line_comment() -> None:
+    source = '// note\rprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\r'
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
+def test_node_tls_public_scan_counts_cr_only_line_breaks() -> None:
+    source = 'let x=1;\rprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\r'
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
+def test_node_tls_public_scan_excludes_cr_only_continued_rhs_after_comment() -> None:
+    source = 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" // note\r+ "1";'
+
+    assert scan_text("settings.js", source) == ()
+
+
 def test_node_tls_public_scan_detects_literal_brackets_outside_non_code_text() -> None:
     source = (
         '// process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";\n'

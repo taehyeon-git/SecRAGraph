@@ -268,5 +268,5 @@ def detect_node_tls_assignments(text: str, extension: str) -> tuple[int, ...]:
             if _ENV_ASSIGNMENT.fullmatch(line) is not None
         )
     if extension in {".js", ".ts"}:
-        return _detect_js_assignments(text)
+        return _detect_js_assignments(text.replace("\r\n", "\n").replace("\r", "\n"))
     return ()
