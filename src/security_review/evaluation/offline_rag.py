@@ -6,7 +6,7 @@ import json
 import math
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import unicodedata
 from collections.abc import Sequence
 from hashlib import sha256
@@ -473,22 +473,33 @@ def _git_identity(root: Path) -> tuple[str, bool]:
     if git_executable is None:
         return "unavailable", True
     try:
-        # Only the resolved executable and fixed arguments reach these calls; shell is disabled.
-        revision = subprocess.run(  # noqa: S603
+        # The executable is resolved once, and only fixed arguments reach Git.
+        revision_output = subprocess.run(  # noqa: S603
             [git_executable, "rev-parse", "--verify", "HEAD"],
             cwd=root,
             check=True,
             capture_output=True,
             text=True,
             timeout=5,
-        ).stdout.strip()
+            shell=False,  # nosec B603
+        ).stdout
+        revision = revision_output.strip()
+        # Ignore repository fsmonitor configuration, which could invoke an external helper.
         status = subprocess.run(  # noqa: S603
-            [git_executable, "status", "--porcelain", "--untracked-files=normal"],
+            [
+                git_executable,
+                "-c",
+                "core.fsmonitor=false",
+                "status",
+                "--porcelain",
+                "--untracked-files=normal",
+            ],
             cwd=root,
             check=True,
             capture_output=True,
             text=True,
             timeout=5,
+            shell=False,  # nosec B603
         ).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return "unavailable", True

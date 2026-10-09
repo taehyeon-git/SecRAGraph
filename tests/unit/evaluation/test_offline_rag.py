@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -21,6 +23,76 @@ from security_review.intelligence.ingestion import MAX_DOCUMENT_BYTES, DocumentI
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 GUIDE = REPOSITORY_ROOT / "data/knowledge/secragraph-security-guidelines.md"
 CASES = REPOSITORY_ROOT / "data/evaluation/rag_cases.json"
+
+
+def _git_test_repository(path: Path, git_executable: str) -> str:
+    subprocess.run([git_executable, "init", "-q", str(path)], check=True)  # noqa: S603
+    (path / "tracked.txt").write_text("original\n", encoding="utf-8")
+    subprocess.run(  # noqa: S603
+        [git_executable, "-C", str(path), "add", "--", "tracked.txt"], check=True
+    )
+    subprocess.run(  # noqa: S603
+        [
+            git_executable,
+            "-C",
+            str(path),
+            "-c",
+            "user.name=Offline RAG Test",
+            "-c",
+            "user.email=offline-rag@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "fixture",
+        ],
+        check=True,
+    )
+    return subprocess.run(  # noqa: S603
+        [git_executable, "-C", str(path), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_git_identity_reports_revision_and_tracked_edits(tmp_path: Path) -> None:
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        pytest.skip("Git is unavailable")
+    revision = _git_test_repository(tmp_path, git_executable)
+
+    assert offline_rag._git_identity(tmp_path) == (revision, False)
+
+    (tmp_path / "tracked.txt").write_text("edited\n", encoding="utf-8")
+    assert offline_rag._git_identity(tmp_path) == (revision, True)
+
+
+def test_git_identity_disables_fsmonitor_when_running_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        pytest.skip("Git is unavailable")
+    revision = _git_test_repository(tmp_path, git_executable)
+    real_run = subprocess.run
+
+    def guarded_run(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        assert options.get("shell") is False
+        if "status" in command:
+            assert command[1:4] == ["-c", "core.fsmonitor=false", "status"]
+        return real_run(command, **options)
+
+    monkeypatch.setattr(offline_rag.subprocess, "run", guarded_run)
+
+    assert offline_rag._git_identity(tmp_path) == (revision, False)
+
+
+def test_git_identity_falls_back_without_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(offline_rag.shutil, "which", lambda executable: None)
+
+    assert offline_rag._git_identity(tmp_path) == ("unavailable", True)
 
 
 def _case_payload() -> dict[str, object]:
