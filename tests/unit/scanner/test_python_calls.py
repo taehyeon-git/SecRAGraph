@@ -200,3 +200,30 @@ def test_returning_if_branch_does_not_weaken_reachable_import() -> None:
     assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
         ("PY002", 6)
     ]
+
+
+def test_caught_raise_path_keeps_reassigned_alias_uncertain() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "try:\n"
+        "    if flag:\n        sp = object()\n        raise ValueError()\n"
+        "    else:\n        import subprocess as sp\n"
+        "except ValueError:\n    pass\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_generator_passed_to_call_may_reassign_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "list((sp := object()) for _ in [1])\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()

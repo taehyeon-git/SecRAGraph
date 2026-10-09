@@ -317,6 +317,12 @@ class _CallVisitor(ast.NodeVisitor):
         if rule_id is not None:
             self.matches.append(PythonCallMatch(rule_id, node.lineno))
         self.generic_visit(node)
+        for expression in (*node.args, *(keyword.value for keyword in node.keywords)):
+            if isinstance(expression, ast.GeneratorExp):
+                collector = _ComprehensionWalrusBindings()
+                collector.visit(expression)
+                for name in collector.names:
+                    self._bind(name)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -395,6 +401,32 @@ class _CallVisitor(ast.NodeVisitor):
         if not self._definitely_terminates(node.orelse):
             reachable.append(else_state)
         self._merge(scopes, reachable or (initial,))
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_try(node)
+
+    def visit_TryStar(self, node: ast.TryStar) -> None:
+        self._visit_try(node)
+
+    def _visit_try(self, node: ast.Try | ast.TryStar) -> None:
+        scopes = self._active_scopes()
+        initial = self._snapshot(scopes)
+        body_bindings = _LocalBindings()
+        for statement in node.body:
+            body_bindings.visit(statement)
+            self.visit(statement)
+        for statement in node.orelse:
+            self.visit(statement)
+        states = [self._snapshot(scopes)]
+        for handler in node.handlers:
+            self._restore(scopes, initial)
+            for name in body_bindings.names:
+                self._bind(name)
+            self.visit(handler)
+            states.append(self._snapshot(scopes))
+        self._merge(scopes, states)
+        for statement in node.finalbody:
+            self.visit(statement)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
