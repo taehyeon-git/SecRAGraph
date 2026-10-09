@@ -121,8 +121,8 @@
       "expected_diagnostics": [], "unassessed_rules": []
     },
     {
-      "case_id": "sec001-env-negative", "file_path": "settings.py",
-      "source": "# API_KEY = \"synthetic-key-1234567890\"\nvalue = 1\n",
+      "case_id": "sec001-env-negative", "file_path": ".env",
+      "source": "GITHUB_TOKEN=your_github_token_here\n",
       "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
     },
     {
@@ -132,8 +132,8 @@
       "expected_diagnostics": [], "unassessed_rules": []
     },
     {
-      "case_id": "sec001-json-negative", "file_path": "settings.py",
-      "source": "import os\nAPI_KEY = os.environ[\"API_KEY\"]\n",
+      "case_id": "sec001-json-negative", "file_path": "settings.json",
+      "source": "{\"PASSWORD\": \"your_password_here\"}\n",
       "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
     },
 

@@ -132,6 +132,27 @@ def test_manifest_accepts_future_rule_label_without_current_registry(tmp_path: P
     assert cases[0].expected == frozenset({("PY004", 1)})
 
 
+def test_fixed_corpus_has_three_same_format_pairs_for_every_planned_rule() -> None:
+    corpus_path = Path(__file__).resolve().parents[3] / "data/evaluation/scanner_cases.json"
+    cases = load_scanner_cases(corpus_path)
+    by_id = {case.case_id: case for case in cases}
+    planned_rules = {"PY001", "PY002", "PY003", "PY004", "SEC001", "JS001"}
+
+    assert len(cases) >= 36
+    for rule_id in planned_rules:
+        positives = [case for case in cases if any(label[0] == rule_id for label in case.expected)]
+        assert len(positives) >= 3, rule_id
+        for positive in positives:
+            assert positive.case_id.endswith("-positive")
+            assert len(positive.expected) == 1
+            negative_id = positive.case_id.removesuffix("-positive") + "-negative"
+            negative = by_id[negative_id]
+            assert negative.file_path == positive.file_path, positive.case_id
+            assert negative.source != positive.source
+            assert negative.is_benign and not negative.expected
+            assert not negative.unassessed_rules
+
+
 def test_expected_parse_diagnostic_keeps_secret_label_and_excludes_benign_case() -> None:
     positive = ScannerCase(
         case_id="syntax-secret",
