@@ -42,10 +42,11 @@ _DIRECT_IMPORTS = frozenset({"builtins", "os", "requests", "subprocess"})
 
 
 class _ComprehensionWalrusBindings(ast.NodeVisitor):
-    """Find targets bound in the scope that encloses a comprehension."""
+    """Find enclosing walrus targets, optionally excluding deferred generator bodies."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, eager_only: bool = False) -> None:
         self.names: set[str] = set()
+        self._eager_only = eager_only
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         if isinstance(node.target, ast.Name):
@@ -55,14 +56,77 @@ class _ComprehensionWalrusBindings(ast.NodeVisitor):
     def visit_Lambda(self, node: ast.Lambda) -> None:
         return
 
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        if not self._eager_only:
+            self.generic_visit(node)
+        elif node.generators:
+            # Only the outer iterable runs when the generator is created.
+            self.visit(node.generators[0].iter)
+
+    def _consume_iterable(self, node: ast.expr) -> None:
+        self.visit(node)
+        if isinstance(node, ast.GeneratorExp):
+            self.consume_generator(node)
+
+    def consume_generator(self, node: ast.GeneratorExp) -> None:
+        """Collect walruses that may run while a generator is iterated."""
+        for index, generator in enumerate(node.generators):
+            if index:
+                self._consume_iterable(generator.iter)
+            elif isinstance(generator.iter, ast.GeneratorExp):
+                # Its creation was visited already; iteration runs its body.
+                self.consume_generator(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        self.visit(node.elt)
+
+    def _visit_eager_comprehension(
+        self, generators: Sequence[ast.comprehension], values: Sequence[ast.expr]
+    ) -> None:
+        for generator in generators:
+            self._consume_iterable(generator.iter)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for value in values:
+            self.visit(value)
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        if self._eager_only:
+            self._visit_eager_comprehension(node.generators, (node.elt,))
+        else:
+            self.generic_visit(node)
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        if self._eager_only:
+            self._visit_eager_comprehension(node.generators, (node.elt,))
+        else:
+            self.generic_visit(node)
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        if self._eager_only:
+            self._visit_eager_comprehension(node.generators, (node.key, node.value))
+        else:
+            self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if not self._eager_only:
+            self.generic_visit(node)
+            return
+        self.visit(node.func)
+        for expression in (*node.args, *(keyword.value for keyword in node.keywords)):
+            self.visit(expression)
+            if isinstance(expression, ast.GeneratorExp):
+                self.consume_generator(expression)
+
 
 class _LocalBindings(ast.NodeVisitor):
-    """Collect Python's lexical local names without entering child scopes."""
+    """Collect local names without entering child scopes or deferred bodies when requested."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, eager_only: bool = False) -> None:
         self.names: set[str] = set()
         self.globals: set[str] = set()
         self.nonlocals: set[str] = set()
+        self._eager_only = eager_only
 
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -87,9 +151,15 @@ class _LocalBindings(ast.NodeVisitor):
         return
 
     def _collect_comprehension_walrus(self, node: ast.AST) -> None:
-        collector = _ComprehensionWalrusBindings()
+        collector = _ComprehensionWalrusBindings(eager_only=self._eager_only)
         collector.visit(node)
         self.names.update(collector.names)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if self._eager_only:
+            self._collect_comprehension_walrus(node)
+        else:
+            self.generic_visit(node)
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._collect_comprehension_walrus(node)
@@ -319,8 +389,8 @@ class _CallVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         for expression in (*node.args, *(keyword.value for keyword in node.keywords)):
             if isinstance(expression, ast.GeneratorExp):
-                collector = _ComprehensionWalrusBindings()
-                collector.visit(expression)
+                collector = _ComprehensionWalrusBindings(eager_only=True)
+                collector.consume_generator(expression)
                 for name in collector.names:
                     self._bind(name)
 
@@ -411,7 +481,7 @@ class _CallVisitor(ast.NodeVisitor):
     def _visit_try(self, node: ast.Try | ast.TryStar) -> None:
         scopes = self._active_scopes()
         initial = self._snapshot(scopes)
-        body_bindings = _LocalBindings()
+        body_bindings = _LocalBindings(eager_only=True)
         for statement in node.body:
             body_bindings.visit(statement)
             self.visit(statement)
@@ -564,15 +634,26 @@ class _CallVisitor(ast.NodeVisitor):
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
         self._visit_comprehension(node.generators, (node.elt,))
+        self._bind_eager_comprehension_walrus(node)
 
     def visit_SetComp(self, node: ast.SetComp) -> None:
         self._visit_comprehension(node.generators, (node.elt,))
+        self._bind_eager_comprehension_walrus(node)
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         self._visit_comprehension(node.generators, (node.elt,), lazy=True)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
         self._visit_comprehension(node.generators, (node.key, node.value))
+        self._bind_eager_comprehension_walrus(node)
+
+    def _bind_eager_comprehension_walrus(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp
+    ) -> None:
+        collector = _ComprehensionWalrusBindings(eager_only=True)
+        collector.visit(node)
+        for name in collector.names:
+            self._bind(name)
 
 
 def detect_python_calls(

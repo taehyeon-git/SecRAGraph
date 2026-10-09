@@ -227,3 +227,58 @@ def test_generator_passed_to_call_may_reassign_alias() -> None:
     )
 
     assert detect_python_calls(source) == ()
+
+
+def test_caught_raise_after_uniterated_generator_keeps_import_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "try:\n"
+        "    gen = ((sp := object()) for _ in [1])\n"
+        "    raise ValueError()\n"
+        "except ValueError:\n"
+        "    sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 6)
+    ]
+
+
+def test_consuming_outer_generator_leaves_nested_generators_uniterated() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "list(((sp := object()) for _ in [1]) for x in [1])\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 3)
+    ]
+
+
+def test_consuming_generator_also_iterates_its_generator_iterable() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "list(value for value in ((sp := object()) for _ in [1]))\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_eager_comprehension_iterates_its_generator_iterable() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "[value for value in ((sp := object()) for _ in [1])]\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
