@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,21 @@ _DEFAULT_BINDINGS: dict[str, str] = {
 _DIRECT_IMPORTS = frozenset({"builtins", "os", "requests", "subprocess"})
 
 
+class _ComprehensionWalrusBindings(ast.NodeVisitor):
+    """Find targets bound in the scope that encloses a comprehension."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        if isinstance(node.target, ast.Name):
+            self.names.add(node.target.id)
+        self.visit(node.value)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+
 class _LocalBindings(ast.NodeVisitor):
     """Collect Python's lexical local names without entering child scopes."""
 
@@ -70,17 +86,22 @@ class _LocalBindings(ast.NodeVisitor):
     def visit_Lambda(self, node: ast.Lambda) -> None:
         return
 
+    def _collect_comprehension_walrus(self, node: ast.AST) -> None:
+        collector = _ComprehensionWalrusBindings()
+        collector.visit(node)
+        self.names.update(collector.names)
+
     def visit_ListComp(self, node: ast.ListComp) -> None:
-        return
+        self._collect_comprehension_walrus(node)
 
     def visit_SetComp(self, node: ast.SetComp) -> None:
-        return
+        self._collect_comprehension_walrus(node)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        return
+        self._collect_comprehension_walrus(node)
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
-        return
+        self._collect_comprehension_walrus(node)
 
     def visit_Global(self, node: ast.Global) -> None:
         self.globals.update(node.names)
@@ -91,6 +112,20 @@ class _LocalBindings(ast.NodeVisitor):
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.name is not None:
             self.names.add(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        if node.name is not None:
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name is not None:
+            self.names.add(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        if node.rest is not None:
+            self.names.add(node.rest)
         self.generic_visit(node)
 
 
@@ -135,6 +170,73 @@ class _CallVisitor(ast.NodeVisitor):
     def _check_stop(self) -> None:
         if self._should_stop is not None and self._should_stop():
             raise PythonCallScanStopped
+
+    @staticmethod
+    def _fork_scope(scope: _Scope) -> tuple[_Scope, _Scope]:
+        chain: list[_Scope] = []
+        current: _Scope | None = scope
+        while current is not None:
+            chain.append(current)
+            current = current.parent
+        parent: _Scope | None = None
+        module: _Scope | None = None
+        for original in reversed(chain):
+            parent = _Scope(
+                parent=parent,
+                kind=original.kind,
+                bindings=dict(original.bindings),
+                local_names=original.local_names,
+                global_names=original.global_names,
+                nonlocal_names=original.nonlocal_names,
+            )
+            if original.kind == "module":
+                module = parent
+        if parent is None or module is None:
+            raise RuntimeError("invalid scanner scope")
+        return parent, module
+
+    def _active_scopes(self) -> tuple[_Scope, ...]:
+        scopes: list[_Scope] = []
+        current: _Scope | None = self._scope
+        while current is not None:
+            scopes.append(current)
+            current = current.parent
+        return tuple(scopes)
+
+    @staticmethod
+    def _snapshot(scopes: Sequence[_Scope]) -> tuple[dict[str, str | None], ...]:
+        return tuple(dict(scope.bindings) for scope in scopes)
+
+    @staticmethod
+    def _restore(scopes: Sequence[_Scope], state: Sequence[dict[str, str | None]]) -> None:
+        for scope, bindings in zip(scopes, state, strict=True):
+            scope.bindings = dict(bindings)
+
+    @staticmethod
+    def _merge(scopes: Sequence[_Scope], states: Sequence[Sequence[dict[str, str | None]]]) -> None:
+        missing = object()
+        for index, scope in enumerate(scopes):
+            merged: dict[str, str | None] = {}
+            keys = set().union(*(state[index] for state in states))
+            for name in keys:
+                values = [state[index].get(name, missing) for state in states]
+                if all(value == values[0] for value in values):
+                    if values[0] is not missing:
+                        merged[name] = cast("str | None", values[0])
+                else:
+                    merged[name] = None
+            scope.bindings = merged
+
+    def _visit_branch(
+        self,
+        statements: Sequence[ast.stmt],
+        scopes: Sequence[_Scope],
+        initial: Sequence[dict[str, str | None]],
+    ) -> tuple[dict[str, str | None], ...]:
+        self._restore(scopes, initial)
+        for statement in statements:
+            self.visit(statement)
+        return self._snapshot(scopes)
 
     def _binding_scope(self, name: str) -> _Scope:
         if name in self._scope.global_names:
@@ -226,6 +328,44 @@ class _CallVisitor(ast.NodeVisitor):
         for statement in node.body:
             self.visit(statement)
 
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        if node.pattern is not None:
+            self.visit(node.pattern)
+        if node.name is not None:
+            self._bind(node.name)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name is not None:
+            self._bind(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        self.generic_visit(node)
+        if node.rest is not None:
+            self._bind(node.rest)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        self.visit(node.subject)
+        scopes = self._active_scopes()
+        initial = self._snapshot(scopes)
+        states = [initial]
+        for case in node.cases:
+            self._restore(scopes, initial)
+            self.visit(case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+            states.append(self._snapshot(scopes))
+        self._merge(scopes, states)
+
+    def visit_If(self, node: ast.If) -> None:
+        self.visit(node.test)
+        scopes = self._active_scopes()
+        initial = self._snapshot(scopes)
+        body_state = self._visit_branch(node.body, scopes, initial)
+        else_state = self._visit_branch(node.orelse, scopes, initial)
+        self._merge(scopes, (body_state, else_state))
+
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
         for target in node.targets:
@@ -243,7 +383,18 @@ class _CallVisitor(ast.NodeVisitor):
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         self.visit(node.value)
-        self.visit(node.target)
+        if isinstance(node.target, ast.Name) and self._scope.kind == "comprehension":
+            current = self._scope
+            while current.kind == "comprehension" and current.parent is not None:
+                current = current.parent
+            inner = self._scope
+            self._scope = current
+            try:
+                self._bind(node.target.id)
+            finally:
+                self._scope = inner
+        else:
+            self.visit(node.target)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._visit_function(node, node.args, node.body, node.decorator_list, node.returns)
@@ -269,22 +420,27 @@ class _CallVisitor(ast.NodeVisitor):
             self.visit(returns)
         self._bind(node.name)
         parent = self._scope
-        self._scope = _function_scope(body, args, parent)
+        module = self._module
+        isolated_parent, self._module = self._fork_scope(parent)
+        self._scope = _function_scope(body, args, isolated_parent)
         try:
             for statement in body:
                 self.visit(statement)
         finally:
             self._scope = parent
+            self._module = module
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         for expression in (*node.args.defaults, *node.args.kw_defaults):
             if expression is not None:
                 self.visit(expression)
         parent = self._scope
+        module = self._module
+        isolated_parent, self._module = self._fork_scope(parent)
         collector = _LocalBindings()
         collector.visit(node.body)
         self._scope = _Scope(
-            parent=parent,
+            parent=isolated_parent,
             kind="function",
             local_names=frozenset(collector.names | _parameter_names(node.args)),
         )
@@ -292,6 +448,7 @@ class _CallVisitor(ast.NodeVisitor):
             self.visit(node.body)
         finally:
             self._scope = parent
+            self._module = module
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         for expression in (*node.decorator_list, *node.bases):
@@ -317,7 +474,11 @@ class _CallVisitor(ast.NodeVisitor):
         for generator in generators:
             collector.visit(generator.target)
         parent = self._scope
-        self._scope = _Scope(parent=parent, kind="function", local_names=frozenset(collector.names))
+        self._scope = _Scope(
+            parent=parent,
+            kind="comprehension",
+            local_names=frozenset(collector.names),
+        )
         try:
             for index, generator in enumerate(generators):
                 if index:

@@ -74,3 +74,85 @@ def test_reimport_restores_an_explicit_alias() -> None:
     assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
         ("PY002", 3)
     ]
+
+
+def test_uncalled_global_assignment_does_not_invalidate_module_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "def change():\n    global sp\n    sp = object()\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 5)
+    ]
+
+
+def test_uncalled_global_import_does_not_establish_module_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "sp = object()\n"
+        "def change():\n    global sp\n    import subprocess as sp\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_match_capture_shadows_import_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = "\n".join(
+        (
+            "import subprocess as sp",
+            "match item:",
+            "    case sp:",
+            "        sp.run(command, shell=True)",
+            "",
+        )
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_comprehension_walrus_invalidates_enclosing_alias() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = "\n".join(
+        (
+            "import subprocess as sp",
+            "[(sp := object()) for _ in [1]]",
+            "sp.run(command, shell=True)",
+            "",
+        )
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_comprehension_walrus_is_a_function_local_before_assignment() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "def work():\n    sp.run(command, shell=True)\n"
+        "    [(sp := object()) for _ in [1]]\n"
+    )
+
+    assert detect_python_calls(source) == ()
+
+
+def test_conditional_branches_merge_alias_certainty() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        "import subprocess as sp\n"
+        "if condition:\n    sp = object()\n"
+        "else:\n    import subprocess as sp\n"
+        "sp.run(command, shell=True)\n"
+    )
+
+    assert detect_python_calls(source) == ()
