@@ -1,1 +1,1 @@
-"""Keyless, local evaluation helpers for SecRAGraph demos."""
+"""Offline, reproducible evaluation helpers for SecRAGraph."""

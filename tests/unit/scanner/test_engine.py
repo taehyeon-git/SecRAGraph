@@ -1,10 +1,17 @@
+import re
+from dataclasses import replace
+from pathlib import Path
+
 import pytest
 
+from security_review.application import scan_path
 from security_review.reporting.builder import build_report
 from security_review.reporting.json_report import render_json
 from security_review.reporting.markdown import render_markdown
 from security_review.reporting.sarif import render_sarif
-from security_review.scanner.engine import scan_text
+from security_review.scanner.engine import finding_id, scan_text
+from security_review.scanner.files import ScanLimits
+from security_review.scanner.rules import DEFAULT_RULES
 
 
 def test_secret_is_absent_from_finding_dump() -> None:
@@ -181,3 +188,193 @@ def test_finding_ids_and_order_are_stable() -> None:
     assert first == second
     assert [item.line_start for item in first] == [1, 2, 3]
     assert len({item.id for item in first}) == 3
+
+
+def test_python_call_findings_use_call_start_line_and_redacted_evidence() -> None:
+    from security_review.scanner.engine import scan_text_detailed
+
+    source = (
+        'API_KEY = "synthetic-key-1234567890"\n'
+        "import subprocess\nsubprocess.run(\n    command,\n    shell=True,\n)\n"
+    )
+
+    result = scan_text_detailed("app.py", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in result.findings] == [
+        ("SEC001", 1),
+        ("PY002", 3),
+    ]
+    assert result.warnings == ()
+    assert "synthetic-key-1234567890" not in repr(result.findings)
+
+
+def test_custom_python_regex_rule_still_runs() -> None:
+    from security_review.scanner.engine import scan_text_detailed
+
+    custom = replace(DEFAULT_RULES[0], rule_id="CUSTOM", pattern=re.compile(r"\bdangerous\s*\("))
+
+    result = scan_text_detailed("app.py", "dangerous(input_value)\n", rules=(custom,))
+
+    assert [(finding.rule_id, finding.line_start) for finding in result.findings] == [("CUSTOM", 1)]
+    assert result.warnings == ()
+
+
+def test_scan_path_keeps_secret_and_reports_python_parse_gap(tmp_path: Path) -> None:
+    secret = "synthetic-key-1234567890"
+    target = tmp_path / "broken.py"
+    target.write_text(f'API_KEY = "{secret}"\nvalue = eval(\n', encoding="utf-8")
+
+    report = scan_path(target, ScanLimits())
+
+    assert [(finding.rule_id, finding.line_start) for finding in report.findings] == [("SEC001", 1)]
+    assert "broken.py:python_syntax_error" in report.warnings
+    assert secret not in report.model_dump_json()
+    assert secret not in repr(report.warnings)
+
+
+def test_detailed_scan_reports_early_deadline() -> None:
+    from security_review.scanner.engine import scan_text_detailed
+
+    result = scan_text_detailed("app.py", "eval(value)\n", should_stop=lambda: True)
+
+    assert result.findings == ()
+    assert result.warnings == ("processing_time_limit_exceeded",)
+
+
+def test_detailed_scan_reports_deadline_reached_during_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import security_review.scanner.python_calls as python_calls
+    from security_review.scanner.engine import scan_text_detailed
+
+    actual_parse = python_calls.ast.parse
+    elapsed = [False]
+
+    def finishing_parse(source: str) -> object:
+        tree = actual_parse(source)
+        elapsed[0] = True
+        return tree
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(python_calls.ast, "parse", finishing_parse)
+        result = scan_text_detailed("app.py", "eval(value)\n", should_stop=lambda: elapsed[0])
+
+    assert result.findings == ()
+    assert result.warnings == ("processing_time_limit_exceeded",)
+
+
+def test_detailed_scan_reports_timeout_when_parse_fails_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import security_review.scanner.python_calls as python_calls
+    from security_review.scanner.engine import scan_text_detailed
+
+    actual_parse = python_calls.ast.parse
+    elapsed = [False]
+
+    def failing_parse(source: str, *args: object, **kwargs: object) -> object:
+        if source == "eval(\n":
+            elapsed[0] = True
+        return actual_parse(source, *args, **kwargs)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(python_calls.ast, "parse", failing_parse)
+        result = scan_text_detailed("app.py", "eval(\n", should_stop=lambda: elapsed[0])
+
+    assert result.findings == ()
+    assert result.warnings == ("processing_time_limit_exceeded",)
+
+
+def test_node_tls_finding_uses_rule_metadata_redacted_evidence_and_stable_id() -> None:
+    source = (
+        'const API_KEY = "synthetic-key-1234567890"; '
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+    )
+
+    findings = scan_text("settings.js", source)
+    tls = next(finding for finding in findings if finding.rule_id == "JS001")
+    rule = next(rule for rule in DEFAULT_RULES if rule.rule_id == "JS001")
+
+    assert rule.pattern is None
+    assert rule.extensions == frozenset({".js", ".ts", ".env"})
+    assert (tls.category, tls.severity.value, tls.confidence.value, tls.cwe_ids) == (
+        "configuration",
+        "high",
+        "high",
+        ("CWE-295",),
+    )
+    assert "synthetic-key-1234567890" not in tls.model_dump_json()
+    assert "***REDACTED***" in tls.redacted_evidence
+    assert tls.id == finding_id("JS001", "settings.js", 1, tls.redacted_evidence)
+
+
+def test_node_tls_findings_keep_crlf_line_numbers_and_deduplicate_same_line() -> None:
+    source = (
+        "const enabled = true;\r\n"
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; '
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\r\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "1";\r\n'
+    )
+
+    findings = scan_text("settings.ts", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
+def test_node_tls_public_scan_excludes_regex_and_continued_rhs() -> None:
+    source = (
+        "if (first) done(); "
+        'else if (ok) /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\nin obj;\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\n'
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 4)]
+
+
+def test_node_tls_public_scan_respects_else_regex_and_dollar_identifier() -> None:
+    source = (
+        'if (ok) work(); else /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\n'
+        "in$foo;\n"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
+@pytest.mark.parametrize("private_name", ["else", "return", "in"])
+def test_node_tls_public_scan_detects_assignment_after_private_keyword_division(
+    private_name: str,
+) -> None:
+    source = (
+        f"class X {{ #{private_name} = 2; m() {{ const x = this.#{private_name} / 2; "
+        "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0; } }"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 1)]
+
+
+def test_node_tls_public_scan_detects_assignment_after_private_if_call_division() -> None:
+    source = (
+        "class X { #if(ok) { return ok; } m() { const x = this.#if(true) / 2; "
+        "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0; } }"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 1)]
+
+
+def test_node_tls_env_finding_is_part_of_scan_path(tmp_path: Path) -> None:
+    target = tmp_path / ".env"
+    target.write_text("NODE_TLS_REJECT_UNAUTHORIZED=0\n", encoding="utf-8")
+
+    report = scan_path(target, ScanLimits())
+
+    assert [(finding.rule_id, finding.line_start) for finding in report.findings] == [("JS001", 1)]

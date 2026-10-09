@@ -3,11 +3,14 @@ from pathlib import Path
 
 import pytest
 
+from security_review.application import scan_path
 from security_review.domain.models import Confidence, Finding, ScanReport, Severity
 from security_review.reporting.builder import build_report
+from security_review.reporting.json_report import render_json
 from security_review.reporting.sarif import render_sarif
 from security_review.reporting.types import ReportFormat, render_report
 from security_review.scanner.engine import scan_text
+from security_review.scanner.files import ScanLimits
 
 
 @pytest.fixture
@@ -44,6 +47,26 @@ def test_sarif_contains_consistent_results(report: ScanReport) -> None:
     assert location["artifactLocation"]["uri"] == "src/config%20file%231%25.py"
     assert location["region"] == {"startLine": 7, "endLine": 7}
     assert "uriBaseId" not in location["artifactLocation"]
+
+
+def test_unsafe_yaml_finding_has_same_identity_in_json_and_sarif(tmp_path: Path) -> None:
+    target = tmp_path / "config.py"
+    target.write_text("import yaml\nvalue = yaml.unsafe_load(data)\n", encoding="utf-8")
+
+    report = scan_path(target, ScanLimits())
+    assert len(report.findings) == 1
+    json_finding = json.loads(render_json(report))["findings"][0]
+    run = json.loads(render_sarif(report))["runs"][0]
+    sarif_result = run["results"][0]
+
+    assert json_finding["rule_id"] == sarif_result["ruleId"] == "PY004"
+    assert json_finding["id"] == sarif_result["properties"]["findingId"]
+    assert json_finding["cwe_ids"] == sarif_result["properties"]["cweIds"] == ["CWE-502"]
+    assert run["tool"]["driver"]["rules"][0]["properties"]["tags"] == ["security", "CWE-502"]
+    assert json_finding["severity"] == "high"
+    assert json_finding["confidence"] == "medium"
+    assert json_finding["category"] == "code_pattern"
+    assert json_finding["line_start"] == 2
 
 
 def test_sarif_path_prefix_does_not_change_finding_identity(report: ScanReport) -> None:

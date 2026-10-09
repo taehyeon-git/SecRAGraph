@@ -20,7 +20,7 @@ from security_review.orchestrator.scan_graph import (
     build_scan_graph,
 )
 from security_review.ports import ReportRepository
-from security_review.scanner.engine import scan_text
+from security_review.scanner.engine import scan_text_detailed
 from security_review.scanner.files import ScanLimits, discover_files, read_scannable_text
 
 PROCESSING_TIME_LIMIT_EXCEEDED = "processing_time_limit_exceeded"
@@ -65,13 +65,20 @@ def _deterministic_scan(request: ScanRequest) -> DeterministicScanResult:
             if request.clock() >= deadline:
                 warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
                 break
-            findings.extend(
-                scan_text(
-                    file.relative_path,
-                    text,
-                    should_stop=lambda: request.clock() >= deadline,
-                )
+            scan_result = scan_text_detailed(
+                file.relative_path,
+                text,
+                should_stop=lambda: request.clock() >= deadline,
             )
+            findings.extend(scan_result.findings)
+            warnings.extend(
+                warning
+                if warning == PROCESSING_TIME_LIMIT_EXCEEDED
+                else f"{file.relative_path}:{warning}"
+                for warning in scan_result.warnings
+            )
+            if PROCESSING_TIME_LIMIT_EXCEEDED in scan_result.warnings:
+                break
             if request.clock() >= deadline:
                 warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
                 break
