@@ -67,6 +67,32 @@ def test_regex_literal_after_if_condition_is_not_code() -> None:
     assert _detect(source, ".js") == ()
 
 
+def test_regex_literal_after_else_if_condition_is_not_code() -> None:
+    source = (
+        'if (first) done(); else if (ok) /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);'
+    )
+
+    assert _detect(source, ".js") == ()
+
+
+def test_assignment_after_else_if_condition_is_code() -> None:
+    source = 'if (first) done(); else if (ok) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+
+    assert _detect(source, ".js") == (1,)
+
+
+def test_regex_literal_after_else_if_block_condition_is_not_code() -> None:
+    source = 'if (first) {} else if (ok) /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);'
+
+    assert _detect(source, ".js") == ()
+
+
+def test_property_named_else_does_not_turn_division_into_regex() -> None:
+    source = 'const x = obj.else / 2; process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+
+    assert _detect(source, ".js") == (1,)
+
+
 def test_postfix_division_does_not_hide_next_line_assignment() -> None:
     source = 'n++ / 2;\nprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
 
@@ -106,6 +132,9 @@ def test_detects_literal_zero_before_safe_trailing_syntax(source: str) -> None:
         '\n/* comment */ + "1";',
         "\n[0];",
         '\n!= "1";',
+        "\nin obj;",
+        "\ninstanceof Zero;",
+        " /* comment */\nin obj;",
         "\n+ +counter;",
         "\n- -counter;",
     ],
@@ -122,6 +151,7 @@ def test_line_continuation_is_not_a_literal_zero_assignment(continuation: str) -
         " /* comment\n continued */;",
         "\nconst done = true;",
         " // comment\nconst done = true;",
+        "\nindex;",
     ],
 )
 def test_new_statement_after_literal_zero_keeps_finding(ending: str) -> None:

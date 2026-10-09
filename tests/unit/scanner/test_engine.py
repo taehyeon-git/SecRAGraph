@@ -321,6 +321,19 @@ def test_node_tls_findings_keep_crlf_line_numbers_and_deduplicate_same_line() ->
     assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
 
 
+def test_node_tls_public_scan_excludes_regex_and_continued_rhs() -> None:
+    source = (
+        "if (first) done(); "
+        'else if (ok) /process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";/.test(s);\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\nin obj;\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\n'
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 4)]
+
+
 def test_node_tls_env_finding_is_part_of_scan_path(tmp_path: Path) -> None:
     target = tmp_path / ".env"
     target.write_text("NODE_TLS_REJECT_UNAUTHORIZED=0\n", encoding="utf-8")

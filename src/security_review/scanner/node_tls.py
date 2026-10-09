@@ -17,6 +17,7 @@ _ENV_ASSIGNMENT = re.compile(
     r"[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*(?:0|\"0\"|'0')"
     r"[ \t]*(?:\#.*)?"
 )
+_WORD_CONTINUATION = re.compile(r"(?:in|instanceof)\b")
 _REGEX_PREFIX_WORDS = frozenset(
     {
         "return",
@@ -44,6 +45,7 @@ class _CodeContext:
     interpolation_depth: int = 0
     regex_allowed: bool = True
     control_before_paren: bool = False
+    after_else: bool = False
     control_parens: list[bool] = field(default_factory=list)
 
 
@@ -117,7 +119,10 @@ def _ends_literal_assignment(text: str, start: int) -> bool:
             text[index] == "!" and not text.startswith("!=", index)
         ):
             return True
-        return text[index] not in _LINE_CONTINUATION_START
+        return (
+            text[index] not in _LINE_CONTINUATION_START
+            and _WORD_CONTINUATION.match(text, index) is None
+        )
     return text[index] in ";,)]}"
 
 
@@ -130,6 +135,12 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
     while index < len(text):
         char = text[index]
         context = frames[-1]
+        if (
+            context is not None
+            and not (char.isalpha() or char in "_$" or char.isspace())
+            and not text.startswith(("//", "/*"), index)
+        ):
+            context.after_else = False
         if context is None:
             # Skip all template content, including ${...} code and nested templates.
             if char == "\\":
@@ -200,7 +211,10 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
             while end < len(text) and (text[end].isalnum() or text[end] in "_$"):
                 end += 1
             word = text[index:end]
-            context.control_before_paren = word in _CONTROL_PAREN_WORDS and context.regex_allowed
+            context.control_before_paren = word in _CONTROL_PAREN_WORDS and (
+                context.regex_allowed or context.after_else
+            )
+            context.after_else = word == "else"
             context.regex_allowed = word in _REGEX_PREFIX_WORDS
         elif char.isdigit():
             end = index + 1
