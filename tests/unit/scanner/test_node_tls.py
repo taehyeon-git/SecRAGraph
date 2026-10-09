@@ -96,6 +96,37 @@ def test_detects_literal_zero_before_safe_trailing_syntax(source: str) -> None:
     assert _detect(source, ".ts") == (1,)
 
 
+@pytest.mark.parametrize(
+    "continuation",
+    [
+        ' /* comment */\n+ "1";',
+        '\n+ "1";',
+        ' // comment\n+ "1";',
+        ' /* first line\n second line */\n+ "1";',
+        '\n/* comment */ + "1";',
+        "\n[0];",
+    ],
+)
+def test_line_continuation_is_not_a_literal_zero_assignment(continuation: str) -> None:
+    source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"{continuation}'
+
+    assert _detect(source, ".js") == ()
+
+
+@pytest.mark.parametrize(
+    "ending",
+    [
+        " /* comment\n continued */;",
+        "\nconst done = true;",
+        " // comment\nconst done = true;",
+    ],
+)
+def test_new_statement_after_literal_zero_keeps_finding(ending: str) -> None:
+    source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"{ending}'
+
+    assert _detect(source, ".js") == (1,)
+
+
 def test_template_interpolation_is_unassessed() -> None:
     # This is a known coverage gap, not evidence that the interpolation is safe.
     source = 'const setup = `${process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"}`;'

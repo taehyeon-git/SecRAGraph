@@ -34,6 +34,7 @@ _REGEX_PREFIX_WORDS = frozenset(
 )
 _CONTROL_PAREN_WORDS = frozenset({"if", "while", "for", "switch", "catch", "with"})
 _PRECEDING_NON_BOUNDARY = frozenset("._$'\"`])")
+_LINE_CONTINUATION_START = frozenset("+-*/%&|^?=.([`<>!")
 
 
 @dataclass(slots=True)
@@ -83,20 +84,35 @@ def _skip_regex(text: str, start: int) -> int:
 
 
 def _ends_literal_assignment(text: str, start: int) -> bool:
-    """Check the token after literal zero, allowing only trivia and expression ends."""
+    """Check past comments and line breaks for a continued RHS expression."""
 
     index = start
+    saw_line_break = False
     while index < len(text):
         if text[index] in " \t":
+            index += 1
+        elif text[index] in "\r\n":
+            saw_line_break = True
             index += 1
         elif text.startswith("/*", index):
             close = text.find("*/", index + 2)
             if close < 0:
                 return False
+            saw_line_break |= "\n" in text[index : close + 2]
             index = close + 2
+        elif text.startswith("//", index):
+            newline = text.find("\n", index + 2)
+            if newline < 0:
+                return True
+            saw_line_break = True
+            index = newline + 1
         else:
             break
-    return index == len(text) or text[index] in ";,)]}\r\n" or text.startswith("//", index)
+    if index == len(text):
+        return True
+    if saw_line_break:
+        return text[index] not in _LINE_CONTINUATION_START
+    return text[index] in ";,)]}"
 
 
 def _detect_js_assignments(text: str) -> tuple[int, ...]:
