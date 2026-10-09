@@ -169,6 +169,7 @@ def assess_scanner_case(
         code for code in actual_diagnostics if code not in case.expected_diagnostics
     )
     skipped = any(code in _SKIP_REASONS for code in actual_diagnostics)
+    parse_warning = "python_syntax_error" in actual_diagnostics
     return CaseAssessment(
         case_id=case.case_id,
         file_path=case.file_path,
@@ -186,12 +187,13 @@ def assess_scanner_case(
             case.is_benign
             and not case.unassessed_rules
             and not skipped
+            and not parse_warning
             and not missing_diagnostics
             and not unexpected_diagnostics
         ),
         scanned=not skipped,
         skipped=skipped,
-        parse_warning="python_syntax_error" in actual_diagnostics,
+        parse_warning=parse_warning,
     )
 
 
@@ -232,6 +234,7 @@ class ScannerBenchmark:
     corpus_sha256: str
     scanner_base_revision: str
     current_revision: str
+    rule_set_version: str
 
     @property
     def expected_diagnostics(self) -> tuple[tuple[str, str], ...]:
@@ -263,6 +266,7 @@ class ScannerBenchmark:
             "corpus_sha256": self.corpus_sha256,
             "scanner_base_revision": self.scanner_base_revision,
             "current_revision": self.current_revision,
+            "rule_set_version": self.rule_set_version,
             "coverage": self.coverage.to_dict(),
             "metrics": self.metrics.to_dict(),
             "by_rule": {rule_id: metrics.to_dict() for rule_id, metrics in self.by_rule},
@@ -284,6 +288,7 @@ class ScannerBenchmark:
             f"- Corpus SHA-256: `{self.corpus_sha256}`",
             f"- Scanner baseline revision: `{self.scanner_base_revision}`",
             f"- Current revision: `{self.current_revision}`",
+            f"- Rule set version: `{self.rule_set_version}`",
             f"- Coverage: {self.coverage.scanned}/{self.coverage.total} scanned; "
             f"{self.coverage.skipped} skipped; {self.coverage.parse_warnings} parse warnings; "
             f"{self.coverage.expected_diagnostics} expected diagnostics; "
@@ -341,16 +346,20 @@ def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
     corpus_sha256 = sha256(cases_path.read_bytes()).hexdigest()
     cases = load_scanner_cases(cases_path)
     assessments: list[CaseAssessment] = []
+    rule_set_versions: set[str] = set()
     for case in cases:
         with tempfile.TemporaryDirectory(prefix="scanner-case-") as directory:
             materialized = Path(directory, case.file_path)
             materialized.parent.mkdir(parents=True, exist_ok=True)
             materialized.write_text(case.source, encoding="utf-8", newline="")
             report = scan_path(materialized, ScanLimits(), target_name=case.case_id)
+        rule_set_versions.add(report.rule_set_version)
         actual_labels = frozenset((item.rule_id, item.line_start) for item in report.findings)
         assessments.append(assess_scanner_case(case, actual_labels, report.warnings))
 
-    assessed = tuple(assessments)
+    if len(rule_set_versions) != 1:
+        raise ValueError("inconsistent rule-set versions across scanner cases")
+    assessed = tuple(sorted(assessments, key=lambda case: case.case_id))
     expected = frozenset(key for case in assessed for key in case.expected_findings)
     actual_keys = frozenset(key for case in assessed for key in case.actual_findings)
     eligible = frozenset(case.case_id for case in assessed if case.eligible_benign)
@@ -387,4 +396,5 @@ def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
         corpus_sha256=corpus_sha256,
         scanner_base_revision=SCANNER_BASE_REVISION,
         current_revision=_current_revision(),
+        rule_set_version=rule_set_versions.pop(),
     )

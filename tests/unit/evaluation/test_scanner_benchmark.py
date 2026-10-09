@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -138,7 +140,7 @@ def test_fixed_corpus_has_three_same_format_pairs_for_every_planned_rule() -> No
     by_id = {case.case_id: case for case in cases}
     planned_rules = {"PY001", "PY002", "PY003", "PY004", "SEC001", "JS001"}
 
-    assert len(cases) >= 36
+    assert len(cases) == 39
     for rule_id in planned_rules:
         positives = [case for case in cases if any(label[0] == rule_id for label in case.expected)]
         assert len(positives) >= 3, rule_id
@@ -229,15 +231,106 @@ def test_two_real_runs_render_identical_bytes_without_report_uuid_or_time(tmp_pa
     assert first.corpus_sha256 == second.corpus_sha256
 
 
-def test_cli_enforce_fails_mismatch_and_baseline_records_it(tmp_path: Path) -> None:
-    path = _manifest(tmp_path, [_case(source="eval(user_input)\n")])
+def test_default_command_writes_stable_final_corpus_evidence(tmp_path: Path) -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    outputs = (tmp_path / "first", tmp_path / "second")
+    for output in outputs:
+        command = subprocess.run(  # noqa: S603 - fixed local Python module and output path
+            [sys.executable, "-m", "scripts.run_scanner_benchmark", "--output-dir", str(output)],
+            cwd=repository_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert command.returncode == 0, command.stderr + command.stdout
+
+    first_json = (outputs[0] / "scanner.json").read_bytes()
+    first_markdown = (outputs[0] / "scanner.md").read_bytes()
+    assert first_json == (outputs[1] / "scanner.json").read_bytes()
+    assert first_markdown == (outputs[1] / "scanner.md").read_bytes()
+    payload = json.loads(first_json)
+    assert (
+        first_json.decode("utf-8")
+        == json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    )
+    assert payload["rule_set_version"] == "2026.10.2"
+    assert "Rule set version: `2026.10.2`" in first_markdown.decode("utf-8")
+    assert "scan_id" not in payload and "created_at" not in payload
+    assert payload["corpus_sha256"] == (
+        "6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d"
+    )
+    assert payload["scanner_base_revision"] == "ac88e9f"
+    assert payload["coverage"] == {
+        "total": 39,
+        "scanned": 39,
+        "skipped": 0,
+        "parse_warnings": 0,
+        "expected_diagnostics": 0,
+        "unexpected_diagnostics": 0,
+        "missing_diagnostics": 0,
+    }
+    assert len(payload["cases"]) == 39
+    assert [case["case_id"] for case in payload["cases"]] == sorted(
+        case["case_id"] for case in payload["cases"]
+    )
+    assert (payload["metrics"]["tp"], payload["metrics"]["fp"], payload["metrics"]["fn"]) == (
+        18,
+        0,
+        0,
+    )
+    assert payload["metrics"]["precision_denominator"] == 18
+    assert payload["metrics"]["recall_denominator"] == 18
+    assert payload["metrics"]["eligible_benign_cases"] == 21
+    assert payload["metrics"]["benign_false_alarm_cases"] == 0
+    assert list(payload["by_rule"]) == ["JS001", "PY001", "PY002", "PY003", "PY004", "SEC001"]
+    for metrics in payload["by_rule"].values():
+        assert (metrics["tp"], metrics["fp"], metrics["fn"]) == (3, 0, 0)
+        assert metrics["precision_denominator"] == 3
+        assert metrics["recall_denominator"] == 3
+
+
+def test_expected_python_syntax_diagnostic_is_not_eligible_benign(tmp_path: Path) -> None:
+    path = _manifest(
+        tmp_path,
+        [
+            _case(
+                source="if (\n",
+                expected_diagnostics=["python_syntax_error"],
+            )
+        ],
+    )
+
+    result = run_scanner_benchmark(path)
+
+    assert result.coverage.scanned == 1
+    assert result.coverage.parse_warnings == 1
+    assert result.coverage.expected_diagnostics == 1
+    assert result.coverage.unexpected_diagnostics == 0
+    assert result.metrics.eligible_benign_cases == 0
+    assert result.metrics.benign_false_alarm_rate is None
+    assert result.cases[0].eligible_benign is False
+
+
+def test_cli_enforce_fails_altered_label_and_baseline_records_it(tmp_path: Path) -> None:
+    path = _manifest(
+        tmp_path,
+        [
+            _case(
+                source="value = 1\neval(user_input)\n",
+                expected=[{"rule_id": "PY001", "line_start": 1}],
+                is_benign=False,
+            )
+        ],
+    )
     output = tmp_path / "output"
 
     assert main(["--cases", str(path), "--output-dir", str(output)]) == 1
     assert main(["--cases", str(path), "--output-dir", str(output), "--baseline"]) == 0
     payload = json.loads((output / "scanner.json").read_text(encoding="utf-8"))
     assert payload["metrics"]["fp"] == 1
-    assert payload["cases"][0]["unexpected_findings"] == [["sample", "PY001", 1]]
+    assert payload["metrics"]["fn"] == 1
+    assert payload["cases"][0]["unexpected_findings"] == [["sample", "PY001", 2]]
+    assert payload["cases"][0]["missing_findings"] == [["sample", "PY001", 1]]
     assert (output / "scanner.md").is_file()
 
 
@@ -257,4 +350,5 @@ def test_baseline_still_rejects_unexpected_warning_or_skip(
     result = run_scanner_benchmark(path)
     assert result.coverage.skipped == int("file_too_large" in warning)
     assert result.unexpected_diagnostics
+    assert main(["--cases", str(path), "--output-dir", str(tmp_path / "strict")]) == 1
     assert main(["--cases", str(path), "--output-dir", str(tmp_path / "out"), "--baseline"]) == 1

@@ -24,8 +24,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     result = run_scanner_benchmark(args.cases)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "scanner.json").write_text(result.to_json(), encoding="utf-8")
-    (args.output_dir / "scanner.md").write_text(result.to_markdown(), encoding="utf-8")
+    (args.output_dir / "scanner.json").write_text(result.to_json(), encoding="utf-8", newline="")
+    (args.output_dir / "scanner.md").write_text(result.to_markdown(), encoding="utf-8", newline="")
     print(result.to_markdown(), end="")
     return int(
         result.has_coverage_failures or (result.has_finding_mismatches and not args.baseline)
