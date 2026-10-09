@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from hashlib import sha256
@@ -11,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from scripts.run_scanner_benchmark import main
+from security_review.evaluation import scanner_benchmark as benchmark_module
 from security_review.evaluation.scanner_benchmark import (
     assess_scanner_case,
     run_scanner_benchmark,
@@ -247,6 +249,60 @@ def test_manifest_line_endings_do_not_change_corpus_digest_or_evidence(tmp_path:
     assert lf_result.corpus_sha256 == crlf_result.corpus_sha256 == expected_digest
     assert lf_result.to_json().encode("utf-8") == crlf_result.to_json().encode("utf-8")
     assert lf_result.to_markdown().encode("utf-8") == crlf_result.to_markdown().encode("utf-8")
+
+
+def test_current_revision_uses_absolute_git_and_bounded_read_only_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: str(Path("tools/git")))
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert benchmark_module._current_revision() == "a" * 40
+    assert len(calls) == 1
+    args, options = calls[0]
+    assert args == [str(Path("tools/git").resolve()), "rev-parse", "--verify", "HEAD"]
+    assert options["cwd"] == benchmark_module._REPOSITORY_ROOT
+    assert options["check"] is True
+    assert options["capture_output"] is True
+    assert options["text"] is True
+    assert options["shell"] is False
+    assert isinstance(options["timeout"], (int, float))
+    assert 0 < options["timeout"] <= 5
+
+
+def test_current_revision_reports_unavailable_without_git(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    assert benchmark_module._current_revision() == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("git cannot start"),
+        subprocess.CalledProcessError(128, ["git", "rev-parse", "--verify", "HEAD"]),
+        subprocess.TimeoutExpired(["git", "rev-parse", "--verify", "HEAD"], 5),
+    ],
+)
+def test_current_revision_reports_unavailable_when_git_fails(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: str(Path("tools/git").resolve()))
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", fail)
+
+    assert benchmark_module._current_revision() == "unavailable"
 
 
 def test_default_command_writes_stable_final_corpus_evidence(tmp_path: Path) -> None:

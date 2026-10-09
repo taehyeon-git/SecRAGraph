@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import shutil
+import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
@@ -330,13 +331,22 @@ class ScannerBenchmark:
 
 
 def _current_revision() -> str:
-    result = subprocess.run(  # noqa: S603 - fixed read-only git command, no shell
-        ["git", "rev-parse", "HEAD"],  # noqa: S607
-        cwd=_REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        return "unavailable"
+    try:
+        # Only the resolved executable and fixed arguments reach the subprocess.
+        result = subprocess.run(  # noqa: S603 - fixed read-only Git metadata command
+            [str(Path(git_executable).resolve()), "rev-parse", "--verify", "HEAD"],
+            cwd=_REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            shell=False,  # nosec B603
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unavailable"
     return result.stdout.strip()
 
 
