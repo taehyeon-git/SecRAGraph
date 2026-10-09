@@ -137,6 +137,26 @@ def test_nul_output_path_has_safe_error(capsys: pytest.CaptureFixture[str]) -> N
     assert "Traceback" not in output.err
 
 
+def test_intelligence_failure_has_safe_command_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts import run_rag_evidence
+    from security_review.ports import IntelligenceUnavailableError
+
+    def unavailable(*_args: object) -> RagEvaluation:
+        raise IntelligenceUnavailableError("qdrant", f"internal path: {tmp_path}")
+
+    monkeypatch.setattr(run_rag_evidence, "run_rag_evaluation", unavailable)
+
+    assert run_rag_evidence.main(["--output-dir", str(tmp_path)]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Unable to evaluate offline RAG cases.\n"
+    assert not list(tmp_path.iterdir())
+
+
 def test_failed_label_exits_nonzero_and_preserves_evidence(tmp_path: Path) -> None:
     manifest = json.loads(CASES.read_text(encoding="utf-8"))
     manifest["cases"][0]["expected_retrieved_section"] = "A deliberately absent section"

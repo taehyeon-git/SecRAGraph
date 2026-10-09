@@ -11,6 +11,7 @@ from pathlib import Path
 
 from security_review.evaluation.offline_rag import run_rag_evaluation
 from security_review.evaluation.rag_render import render_rag_json, render_rag_markdown
+from security_review.ports import IntelligenceError
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_CASES = _ROOT / "data/evaluation/rag_cases.json"
@@ -47,7 +48,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         evaluation = run_rag_evaluation(arguments.cases, _DEFAULT_DOCUMENT)
-    except (OSError, ValueError):
+    except (IntelligenceError, OSError, ValueError):
         print("Unable to evaluate offline RAG cases.", file=sys.stderr)
         return 2
 

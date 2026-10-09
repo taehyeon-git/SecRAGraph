@@ -235,6 +235,27 @@ def test_rag_sources_follow_first_citation_order_without_duplicates() -> None:
     )
 
 
+def test_identical_duplicate_retrieval_keeps_unique_chunks_and_citation_order() -> None:
+    second = _chunk(identifier="guide:2", text="second evidence")
+    first = _chunk(identifier="guide:1", text="first evidence")
+    retriever = FakeDocumentRetriever(results=(second, first, second))
+    services, _, _ = _services(
+        (
+            "rag",
+            "First [source:guide:1], second [source:guide:2], first again [source:guide:1]",
+        ),
+        retriever=retriever,
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "ordered evidence"})
+
+    assert result["chunks"] == (second, first)
+    assert result["sources"] == (
+        first.to_source_reference(),
+        second.to_source_reference(),
+    )
+
+
 def test_rag_repeated_citation_produces_one_source() -> None:
     chunk = _chunk()
     services, _, _ = _services(
