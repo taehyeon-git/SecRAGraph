@@ -2,9 +2,9 @@
 
 This is the measured result of the unchanged scanner at revision `ac88e9f` on a small, author-created synthetic corpus. It is evidence about these 39 cases, not an estimate of accuracy on arbitrary repositories. The runner invoked the public `scan_path` path for every case and did not execute any fixture source.
 
-- Runnable harness commit: `8bdccec2728668f662b869222e24472548066e5e`
+- Runnable harness commit: `915182f52b35d9f14714fd1c65f081b071f6b033`
 - Scanner revision: `ac88e9f`
-- Corpus SHA-256: `795ca84cc6c6590d74efffbfff598e9905286ce84d4e53b935248bb3d41f3589`
+- Corpus SHA-256: `6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d`
 - Coverage: 39/39 scanned, 0 skipped, 0 parse warnings, 0 expected diagnostics, 0 unexpected diagnostics, 0 missing diagnostics
 - Exact-match findings: 9 TP, 6 FP, 9 FN
 - Fully assessed benign cases with at least one false alarm: 6/21
@@ -16,7 +16,7 @@ The runnable harness commit has no changes relative to `ac88e9f` under `src/secu
 In a Git checkout with the project's development dependencies installed, run:
 
 ```sh
-git checkout 8bdccec2728668f662b869222e24472548066e5e
+git checkout 915182f52b35d9f14714fd1c65f081b071f6b033
 uv run python -m scripts.run_scanner_benchmark --baseline
 ```
 
@@ -27,9 +27,9 @@ The command writes stable `build/evidence/scanner.json` and `build/evidence/scan
 
 Small, author-created synthetic corpus; these rates do not estimate performance on arbitrary repositories.
 
-- Corpus SHA-256: `795ca84cc6c6590d74efffbfff598e9905286ce84d4e53b935248bb3d41f3589`
+- Corpus SHA-256: `6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d`
 - Scanner baseline revision: `ac88e9f`
-- Current revision: `8bdccec2728668f662b869222e24472548066e5e`
+- Current revision: `915182f52b35d9f14714fd1c65f081b071f6b033`
 - Coverage: 39/39 scanned; 0 skipped; 0 parse warnings; 0 expected diagnostics; 0 unexpected diagnostics; 0 missing diagnostics
 
 | Rule | TP | FP | FN | Precision (TP+FP) | Recall (TP+FN) | F1 | Benign alarms / eligible cases |
