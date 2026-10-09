@@ -31,6 +31,7 @@ _SOURCE_EXTENSIONS = frozenset(
     {".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".env", ".ini"}
 )
 _PYTHON_EXTENSIONS = frozenset({".py"})
+_NODE_TLS_EXTENSIONS = frozenset({".js", ".ts", ".env"})
 _PLACEHOLDER_PATTERN = re.compile(
     r"(?:change[-_]?me|example(?:[-_].*)?|your[-_].*|replace[-_]?me|dummy|placeholder|x{4,}|<.*>)",
     re.IGNORECASE,
@@ -98,6 +99,17 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         remediation="Use yaml.safe_load for untrusted YAML instead of an unsafe loader.",
         cwe_ids=("CWE-502",),
         extensions=_PYTHON_EXTENSIONS,
+    ),
+    Rule(
+        rule_id="JS001",
+        category="configuration",
+        pattern=None,
+        severity=Severity.HIGH,
+        confidence=Confidence.HIGH,
+        message="Node TLS certificate verification is explicitly disabled.",
+        remediation="Set NODE_TLS_REJECT_UNAUTHORIZED to 1 and use a trusted CA bundle.",
+        cwe_ids=("CWE-295",),
+        extensions=_NODE_TLS_EXTENSIONS,
     ),
     Rule(
         rule_id="SEC001",

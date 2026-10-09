@@ -9,7 +9,7 @@ from security_review.reporting.builder import build_report
 from security_review.reporting.json_report import render_json
 from security_review.reporting.markdown import render_markdown
 from security_review.reporting.sarif import render_sarif
-from security_review.scanner.engine import scan_text
+from security_review.scanner.engine import finding_id, scan_text
 from security_review.scanner.files import ScanLimits
 from security_review.scanner.rules import DEFAULT_RULES
 
@@ -283,3 +283,48 @@ def test_detailed_scan_reports_timeout_when_parse_fails_after_deadline(
 
     assert result.findings == ()
     assert result.warnings == ("processing_time_limit_exceeded",)
+
+
+def test_node_tls_finding_uses_rule_metadata_redacted_evidence_and_stable_id() -> None:
+    source = (
+        'const API_KEY = "synthetic-key-1234567890"; '
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+    )
+
+    findings = scan_text("settings.js", source)
+    tls = next(finding for finding in findings if finding.rule_id == "JS001")
+    rule = next(rule for rule in DEFAULT_RULES if rule.rule_id == "JS001")
+
+    assert rule.pattern is None
+    assert rule.extensions == frozenset({".js", ".ts", ".env"})
+    assert (tls.category, tls.severity.value, tls.confidence.value, tls.cwe_ids) == (
+        "configuration",
+        "high",
+        "high",
+        ("CWE-295",),
+    )
+    assert "synthetic-key-1234567890" not in tls.model_dump_json()
+    assert "***REDACTED***" in tls.redacted_evidence
+    assert tls.id == finding_id("JS001", "settings.js", 1, tls.redacted_evidence)
+
+
+def test_node_tls_findings_keep_crlf_line_numbers_and_deduplicate_same_line() -> None:
+    source = (
+        "const enabled = true;\r\n"
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; '
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\r\n'
+        'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "1";\r\n'
+    )
+
+    findings = scan_text("settings.ts", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
+def test_node_tls_env_finding_is_part_of_scan_path(tmp_path: Path) -> None:
+    target = tmp_path / ".env"
+    target.write_text("NODE_TLS_REJECT_UNAUTHORIZED=0\n", encoding="utf-8")
+
+    report = scan_path(target, ScanLimits())
+
+    assert [(finding.rule_id, finding.line_start) for finding in report.findings] == [("JS001", 1)]

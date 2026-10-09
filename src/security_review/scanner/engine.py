@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 from re import Match
 
 from security_review.domain.models import Finding
+from security_review.scanner.node_tls import detect_node_tls_assignments
 from security_review.scanner.python_calls import PythonCallScanStopped, detect_python_calls
 from security_review.scanner.redaction import redact_match
 from security_review.scanner.rules import DEFAULT_RULES, Rule
@@ -132,6 +133,10 @@ def scan_text_detailed(
         for rule in applicable_rules
         if extension == ".py" and rule.pattern is None and rule.rule_id in _PYTHON_CALL_RULES
     }
+    node_tls_rule = next(
+        (rule for rule in applicable_rules if rule.rule_id == "JS001" and rule.pattern is None),
+        None,
+    )
     findings: dict[str, Finding] = {}
     warnings: list[str] = []
     lines = text.splitlines()
@@ -184,6 +189,18 @@ def scan_text_detailed(
             warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
         except (SyntaxError, RecursionError):
             warnings.append(PYTHON_SYNTAX_ERROR)
+
+    if node_tls_rule is not None and not warnings:
+        if should_stop is not None and should_stop():
+            warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
+        else:
+            node_lines = detect_node_tls_assignments(text, extension)
+            if should_stop is not None and should_stop():
+                warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
+            else:
+                for line_number in node_lines:
+                    redacted_evidence = _redact_line(lines[line_number - 1], applicable_rules)
+                    add_finding(node_tls_rule, line_number, redacted_evidence)
 
     return ScanTextResult(
         findings=tuple(
