@@ -111,6 +111,12 @@ def _ends_literal_assignment(text: str, start: int) -> bool:
     if index == len(text):
         return True
     if saw_line_break:
+        # A line break forces ++/-- to start a new statement; bare ! is unary,
+        # while != and !== remain comparisons continuing the expression.
+        if text.startswith(("++", "--"), index) or (
+            text[index] == "!" and not text.startswith("!=", index)
+        ):
+            return True
         return text[index] not in _LINE_CONTINUATION_START
     return text[index] in ";,)]}"
 

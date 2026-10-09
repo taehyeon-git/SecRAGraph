@@ -105,6 +105,9 @@ def test_detects_literal_zero_before_safe_trailing_syntax(source: str) -> None:
         ' /* first line\n second line */\n+ "1";',
         '\n/* comment */ + "1";',
         "\n[0];",
+        '\n!= "1";',
+        "\n+ +counter;",
+        "\n- -counter;",
     ],
 )
 def test_line_continuation_is_not_a_literal_zero_assignment(continuation: str) -> None:
@@ -123,6 +126,21 @@ def test_line_continuation_is_not_a_literal_zero_assignment(continuation: str) -
 )
 def test_new_statement_after_literal_zero_keeps_finding(ending: str) -> None:
     source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"{ending}'
+
+    assert _detect(source, ".js") == (1,)
+
+
+@pytest.mark.parametrize(
+    "next_statement",
+    [
+        "++counter;",
+        "--counter;",
+        "!flag;",
+        "/* comment */\n++counter;",
+    ],
+)
+def test_prefix_new_statement_after_literal_zero_keeps_finding(next_statement: str) -> None:
+    source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\n{next_statement}'
 
     assert _detect(source, ".js") == (1,)
 
