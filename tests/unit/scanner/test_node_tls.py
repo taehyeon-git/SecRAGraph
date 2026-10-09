@@ -27,6 +27,37 @@ def test_detects_literal_zero_assignment(extension: str, source: str) -> None:
 @pytest.mark.parametrize(
     ("extension", "source"),
     [
+        (".js", 'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";'),
+        (".ts", "process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';"),
+        (".js", 'process["env"].NODE_TLS_REJECT_UNAUTHORIZED = 0;'),
+        (".ts", "process['env']['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';"),
+    ],
+)
+def test_detects_literal_bracket_property_assignment(extension: str, source: str) -> None:
+    assert _detect(source, extension) == (1,)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'process.env[key] = "0";',
+        'process[env].NODE_TLS_REJECT_UNAUTHORIZED = "0";',
+        'other.process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";',
+        'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0" + suffix;',
+        '// process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";',
+        '/* process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"; */',
+        'const pattern = /process.env\\["NODE_TLS_REJECT_UNAUTHORIZED"\\] = "0"/;',
+        'const note = \'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"\';',
+        'const note = `process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"`;',
+    ],
+)
+def test_ignores_dynamic_or_non_code_bracket_properties(source: str) -> None:
+    assert _detect(source, ".js") == ()
+
+
+@pytest.mark.parametrize(
+    ("extension", "source"),
+    [
         (".js", 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "1";'),
         (".js", 'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0" + suffix;'),
         (".js", "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0 || fallback;"),
@@ -186,6 +217,20 @@ def test_new_statement_after_literal_zero_keeps_finding(ending: str) -> None:
 )
 def test_identifier_after_line_break_does_not_continue_literal_rhs(next_statement: str) -> None:
     source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\n{next_statement}'
+
+    assert _detect(source, ".js") == (1,)
+
+
+@pytest.mark.parametrize("joiner", ["\u200c", "\u200d"])
+def test_js_identifier_joiner_before_process_is_not_a_boundary(joiner: str) -> None:
+    source = f'other{joiner}process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";'
+
+    assert _detect(source, ".js") == ()
+
+
+@pytest.mark.parametrize("joiner", ["\u200c", "\u200d"])
+def test_js_identifier_joiner_after_in_is_not_an_operator_boundary(joiner: str) -> None:
+    source = f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\nin{joiner}value;'
 
     assert _detect(source, ".js") == (1,)
 

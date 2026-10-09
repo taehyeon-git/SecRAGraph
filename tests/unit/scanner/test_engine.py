@@ -321,6 +321,35 @@ def test_node_tls_findings_keep_crlf_line_numbers_and_deduplicate_same_line() ->
     assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
 
 
+def test_node_tls_public_scan_detects_literal_brackets_outside_non_code_text() -> None:
+    source = (
+        '// process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";\n'
+        'const note = \'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"\';\n'
+        'const pattern = /process.env\\["NODE_TLS_REJECT_UNAUTHORIZED"\\] = "0"/;\n'
+        'process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";\n'
+        "process['env']['NODE_TLS_REJECT_UNAUTHORIZED'] = 0;\n"
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [
+        ("JS001", 4),
+        ("JS001", 5),
+    ]
+
+
+@pytest.mark.parametrize("joiner", ["\u200c", "\u200d"])
+def test_node_tls_public_scan_treats_joiner_as_identifier_continuation(joiner: str) -> None:
+    source = (
+        f'other{joiner}process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";\n'
+        f'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"\nin{joiner}value;\n'
+    )
+
+    findings = scan_text("settings.js", source)
+
+    assert [(finding.rule_id, finding.line_start) for finding in findings] == [("JS001", 2)]
+
+
 def test_node_tls_public_scan_excludes_regex_and_continued_rhs() -> None:
     source = (
         "if (first) done(); "

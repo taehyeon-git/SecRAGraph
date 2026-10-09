@@ -10,14 +10,21 @@ import re
 from dataclasses import dataclass, field
 
 _JS_ASSIGNMENT = re.compile(
-    r"process[ \t]*\.[ \t]*env[ \t]*\.[ \t]*NODE_TLS_REJECT_UNAUTHORIZED"
-    r"[ \t]*=[ \t]*(?:\"0\"|'0'|0)"
+    r"""
+    process[ \t]*
+    (?:\.[ \t]*env|\[[ \t]*(?:"env"|'env')[ \t]*\])
+    [ \t]*
+    (?:\.[ \t]*NODE_TLS_REJECT_UNAUTHORIZED
+       |\[[ \t]*(?:"NODE_TLS_REJECT_UNAUTHORIZED"|'NODE_TLS_REJECT_UNAUTHORIZED')[ \t]*\])
+    [ \t]*=[ \t]*(?:"0"|'0'|0)
+    """,
+    re.VERBOSE,
 )
 _ENV_ASSIGNMENT = re.compile(
     r"[ \t]*NODE_TLS_REJECT_UNAUTHORIZED[ \t]*=[ \t]*(?:0|\"0\"|'0')"
     r"[ \t]*(?:\#.*)?"
 )
-_WORD_CONTINUATION = re.compile(r"(?:in|instanceof)(?![\w$])")
+_WORD_CONTINUATION = re.compile(r"(?:in|instanceof)(?![\w$\u200c\u200d])")
 _REGEX_PREFIX_WORDS = frozenset(
     {
         "return",
@@ -34,7 +41,8 @@ _REGEX_PREFIX_WORDS = frozenset(
     }
 )
 _CONTROL_PAREN_WORDS = frozenset({"if", "while", "for", "switch", "catch", "with"})
-_PRECEDING_NON_BOUNDARY = frozenset("._$'\"`])")
+_JS_IDENTIFIER_CONTINUATION = frozenset("_$\u200c\u200d")
+_PRECEDING_NON_BOUNDARY = frozenset(".'\"`])") | _JS_IDENTIFIER_CONTINUATION
 _LINE_CONTINUATION_START = frozenset("+-*/%&|^?=.([`<>!")
 
 
@@ -210,7 +218,9 @@ def _detect_js_assignments(text: str) -> tuple[int, ...]:
                 ):
                     matches.add(line)
             end = index + 1
-            while end < len(text) and (text[end].isalnum() or text[end] in "_$"):
+            while end < len(text) and (
+                text[end].isalnum() or text[end] in _JS_IDENTIFIER_CONTINUATION
+            ):
                 end += 1
             word = text[index:end]
             context.control_before_paren = (
