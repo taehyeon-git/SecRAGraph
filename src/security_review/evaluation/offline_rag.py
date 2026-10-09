@@ -94,9 +94,11 @@ _RAG_NODES = frozenset(
 _SOURCE_FILES = (
     "src/security_review/evaluation/offline_rag.py",
     "src/security_review/evaluation/rag_models.py",
+    "src/security_review/evaluation/rag_render.py",
     "src/security_review/orchestrator/knowledge_graph.py",
     "src/security_review/intelligence/ingestion.py",
     "src/security_review/intelligence/qdrant_retriever.py",
+    "scripts/run_rag_evidence.py",
 )
 _CITATION = re.compile(r"\[source:([^\]\r\n]+)\]")
 

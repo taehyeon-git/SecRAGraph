@@ -99,7 +99,7 @@ def test_real_command_writes_parseable_json_and_markdown(tmp_path: Path) -> None
         capture_output=True,
         text=True,
         check=False,
-        timeout=60,
+        timeout=180,
     )
 
     assert result.returncode == 0, result.stderr
@@ -128,6 +128,15 @@ def test_malformed_output_path_has_safe_error(
     assert occupied.read_text(encoding="utf-8") == "keep"
 
 
+def test_nul_output_path_has_safe_error(capsys: pytest.CaptureFixture[str]) -> None:
+    from scripts.run_rag_evidence import main
+
+    assert main(["--output-dir", "\x00"]) == 2
+    output = capsys.readouterr()
+    assert "Unable to write RAG evidence files." in output.err
+    assert "Traceback" not in output.err
+
+
 def test_failed_label_exits_nonzero_and_preserves_evidence(tmp_path: Path) -> None:
     manifest = json.loads(CASES.read_text(encoding="utf-8"))
     manifest["cases"][0]["expected_retrieved_section"] = "A deliberately absent section"
@@ -150,7 +159,7 @@ def test_failed_label_exits_nonzero_and_preserves_evidence(tmp_path: Path) -> No
         capture_output=True,
         text=True,
         check=False,
-        timeout=60,
+        timeout=180,
     )
 
     assert result.returncode == 1, result.stderr

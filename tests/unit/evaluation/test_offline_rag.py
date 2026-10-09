@@ -25,6 +25,36 @@ GUIDE = REPOSITORY_ROOT / "data/knowledge/secragraph-security-guidelines.md"
 CASES = REPOSITORY_ROOT / "data/evaluation/rag_cases.json"
 
 
+@pytest.mark.parametrize(
+    "changed_source",
+    (
+        "src/security_review/evaluation/rag_render.py",
+        "scripts/run_rag_evidence.py",
+    ),
+)
+def test_source_fingerprint_includes_render_and_command_code(
+    tmp_path: Path, changed_source: str
+) -> None:
+    source_names = (
+        "src/security_review/evaluation/offline_rag.py",
+        "src/security_review/evaluation/rag_models.py",
+        "src/security_review/evaluation/rag_render.py",
+        "src/security_review/orchestrator/knowledge_graph.py",
+        "src/security_review/intelligence/ingestion.py",
+        "src/security_review/intelligence/qdrant_retriever.py",
+        "scripts/run_rag_evidence.py",
+    )
+    for name in source_names:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"original fixture bytes")
+
+    original_fingerprint = offline_rag._source_fingerprint(tmp_path)
+    (tmp_path / changed_source).write_bytes(b"changed fixture bytes")
+
+    assert offline_rag._source_fingerprint(tmp_path) != original_fingerprint
+
+
 def _git_test_repository(path: Path, git_executable: str) -> str:
     subprocess.run([git_executable, "init", "-q", str(path)], check=True)  # noqa: S603
     (path / "tracked.txt").write_text("original\n", encoding="utf-8")

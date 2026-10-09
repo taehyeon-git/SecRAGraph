@@ -59,7 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         markdown_path = arguments.output_dir / "rag.md"
         _atomic_write(json_path, json_content)
         _atomic_write(markdown_path, markdown_content)
-    except OSError:
+    except (OSError, ValueError):
         print("Unable to write RAG evidence files.", file=sys.stderr)
         return 2
 
