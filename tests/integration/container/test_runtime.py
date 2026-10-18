@@ -26,6 +26,8 @@ def _compose(*args: str, project: str | None = None) -> subprocess.CompletedProc
         env["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
     if not env.get("SECRAGRAPH_READER_PASSWORD"):
         env["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
+    if not env.get("SECRAGRAPH_API_TOKEN"):
+        env["SECRAGRAPH_API_TOKEN"] = secrets.token_urlsafe(32)
     command = [docker, "compose"]
     if project is not None:
         command.extend(("-p", project))
@@ -76,6 +78,12 @@ def _url(service: str, path: str) -> str:
     return f"http://127.0.0.1:{port}{path}"
 
 
+def _api_headers() -> dict[str, str]:
+    token = os.environ.get("SECRAGRAPH_API_TOKEN")
+    assert token, "SECRAGRAPH_API_TOKEN must match the isolated runtime stack"
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_api_and_web_compose_runtime_restrictions() -> None:
     services = json.loads(_compose("config", "--format", "json").stdout)["services"]
     for name in ("postgres", "qdrant", "api", "web"):
@@ -96,6 +104,23 @@ def test_web_compose_limits_streamlit_upload_and_message_sizes() -> None:
     web = json.loads(_compose("config", "--format", "json").stdout)["services"]["web"]
     assert "--server.maxUploadSize=5" in web["command"]
     assert "--server.maxMessageSize=8" in web["command"]
+
+
+def test_runtime_compose_api_and_web_have_shared_token() -> None:
+    services = json.loads(_compose("config", "--format", "json").stdout)["services"]
+    assert services["api"]["environment"]["SECRAGRAPH_API_TOKEN"]
+    assert (
+        services["api"]["environment"]["SECRAGRAPH_API_TOKEN"]
+        == services["web"]["environment"]["SECRAGRAPH_API_TOKEN"]
+    )
+
+
+def test_runtime_request_headers_use_the_configured_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SECRAGRAPH_API_TOKEN", "synthetic-test-token")
+
+    assert _api_headers() == {"Authorization": "Bearer synthetic-test-token"}
 
 
 @pytest.mark.parametrize("service", ["api", "web"])
@@ -131,13 +156,18 @@ def test_file_and_spooled_multipart_uploads_persist_reports() -> None:
     for source in (b"eval(user_input)\n", b"eval(user_input)\n" + b"# pad\n" * 220_000):
         response = httpx.post(
             base,
+            headers=_api_headers(),
             files={"file": ("app.py", source, "text/x-python")},
             timeout=60,
         )
         assert response.status_code == 200, response.text
         report = response.json()
         assert report["target_name"] == "app.py"
-        loaded = httpx.get(_url("api", f"/v1/scans/{report['scan_id']}"), timeout=10)
+        loaded = httpx.get(
+            _url("api", f"/v1/scans/{report['scan_id']}"),
+            headers=_api_headers(),
+            timeout=10,
+        )
         assert loaded.status_code == 200
         assert loaded.json()["scan_id"] == report["scan_id"]
 
@@ -149,12 +179,17 @@ def test_zip_upload_extracts_and_persists_report() -> None:
         handle.writestr("src/app.py", "eval(user_input)\n")
     response = httpx.post(
         _url("api", "/v1/scans/archive"),
+        headers=_api_headers(),
         files={"file": ("sample.zip", archive.getvalue(), "application/zip")},
         timeout=30,
     )
     assert response.status_code == 200, response.text
     report = response.json()
     assert report["target_name"] == "sample.zip"
-    rendered = httpx.get(_url("api", f"/v1/scans/{report['scan_id']}/report"), timeout=10)
+    rendered = httpx.get(
+        _url("api", f"/v1/scans/{report['scan_id']}/report"),
+        headers=_api_headers(),
+        timeout=10,
+    )
     assert rendered.status_code == 200
     assert "sample.zip" in rendered.text
