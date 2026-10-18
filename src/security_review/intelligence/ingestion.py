@@ -54,6 +54,7 @@ class KnowledgeDocument(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     text: str = Field(min_length=1, repr=False)
     source_url: str | None = Field(default=None, max_length=2_048)
+    corpus_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
     page: int | None = Field(default=None, ge=1, le=1_000_000)
     section: str | None = Field(default=None, max_length=500)
 
@@ -100,6 +101,7 @@ class DocumentChunkInput(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     source_path: str = Field(min_length=1, max_length=1_024)
     source_url: str | None = Field(default=None, max_length=2_048)
+    corpus_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
     page: int | None = Field(default=None, ge=1, le=1_000_000)
     section: str | None = Field(default=None, max_length=500)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -185,6 +187,7 @@ def chunk_document(
                     title=document.title,
                     source_path=document.source_path,
                     source_url=document.source_url,
+                    corpus_id=document.corpus_id,
                     page=document.page,
                     section=section,
                     content_sha256=digest,
@@ -341,17 +344,16 @@ def _validate_chunk_limits(chunk_size: int, overlap: int) -> None:
 
 
 def _document_id(document: KnowledgeDocument) -> UUID:
-    identity = json.dumps(
-        [
-            "document-v1",
-            document.source_path,
-            document.source_url or "",
-            document.page or 0,
-            document.section or "",
-        ],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
+    identity_parts = [
+        "document-v1",
+        document.source_path,
+        document.source_url or "",
+        document.page or 0,
+        document.section or "",
+    ]
+    if document.corpus_id is not None:
+        identity_parts.insert(1, document.corpus_id)
+    identity = json.dumps(identity_parts, ensure_ascii=False, separators=(",", ":"))
     return uuid5(_DOCUMENT_NAMESPACE, identity)
 
 

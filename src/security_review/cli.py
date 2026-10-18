@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated
@@ -15,6 +17,8 @@ from security_review.intelligence.ingestion import (
     chunk_documents,
     load_knowledge_documents,
 )
+from security_review.intelligence.manifest import ManifestError, load_verified_corpus
+from security_review.intelligence.qdrant_retriever import CorpusSyncResult
 from security_review.ports import IntelligenceConfigurationError, IntelligenceUnavailableError
 from security_review.reporting.sarif import render_sarif
 from security_review.reporting.types import ReportFormat, render_report
@@ -228,6 +232,148 @@ def _run_document_ingestion(
     finally:
         client.close()
     return len(documents), chunk_count
+
+
+class _PreviewEmbeddings:
+    """Dimension-only adapter; preview and empty deletion never call a provider."""
+
+    def __init__(self, dimension: int) -> None:
+        self.dimension = dimension
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        del texts
+        raise IntelligenceConfigurationError("embedding is unavailable in preview mode")
+
+
+@app.command("sync-corpus")
+def sync_corpus_command(
+    root: Annotated[
+        Path,
+        typer.Argument(exists=True, readable=True, file_okay=False, resolve_path=True),
+    ],
+    manifest: Annotated[
+        Path | None,
+        typer.Option("--manifest", exists=True, readable=True, dir_okay=False, resolve_path=True),
+    ] = None,
+    chunk_size: Annotated[int, typer.Option("--chunk-size", min=1, max=2_000)] = 350,
+    overlap: Annotated[int, typer.Option("--overlap", min=0, max=500)] = 50,
+    apply: Annotated[bool, typer.Option("--apply")] = False,
+    allow_empty: Annotated[bool, typer.Option("--allow-empty")] = False,
+    receipt: Annotated[Path, typer.Option("--receipt")] = Path(
+        "build/evidence/ingest-receipt.json"
+    ),
+) -> None:
+    """Preview or apply a manifest-verified managed Qdrant corpus refresh."""
+
+    if allow_empty and not apply:
+        typer.echo("--allow-empty requires --apply", err=True)
+        raise typer.Exit(code=2)
+    manifest_path = manifest if manifest is not None else root / "manifest.json"
+    try:
+        result = _run_corpus_sync(
+            root, manifest_path, Settings(), chunk_size, overlap, apply, allow_empty, receipt
+        )
+    except (ManifestError, DocumentIngestionError) as error:
+        typer.echo(f"Corpus sync failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    except (IntelligenceConfigurationError, IntelligenceUnavailableError, ValueError):
+        typer.echo("Corpus sync failed: invalid configuration or provider operation", err=True)
+        raise typer.Exit(code=1) from None
+    except OSError:
+        typer.echo(
+            "Corpus sync may have applied, but its local receipt could not be written", err=True
+        )
+        raise typer.Exit(code=1) from None
+    action = "Applied" if result.applied else "Previewed"
+    typer.echo(
+        f"{action} corpus {result.corpus_id}: "
+        f"{len(result.desired_document_ids)} desired documents, "
+        f"{len(result.stale_document_ids)} stale documents."
+    )
+
+
+def _run_corpus_sync(
+    root: Path,
+    manifest_path: Path,
+    settings: Settings,
+    chunk_size: int,
+    overlap: int,
+    apply: bool,
+    allow_empty: bool,
+    receipt_path: Path = Path("build/evidence/ingest-receipt.json"),
+) -> CorpusSyncResult:
+    """Validate the immutable corpus before constructing any write-capable provider."""
+
+    from qdrant_client import QdrantClient
+
+    from security_review.intelligence.openai_adapters import OpenAIEmbeddingAdapter
+    from security_review.intelligence.qdrant_retriever import QdrantDocumentRetriever
+
+    corpus = load_verified_corpus(root, manifest_path)
+    chunks = chunk_documents(corpus.documents, chunk_size, overlap)
+    if (
+        apply
+        and chunks
+        and (
+            settings.openai_api_key is None
+            or not settings.openai_api_key.get_secret_value().strip()
+        )
+    ):
+        raise IntelligenceConfigurationError("openai_api_key is required for corpus apply")
+    embeddings = (
+        OpenAIEmbeddingAdapter.from_openai(
+            api_key=settings.openai_api_key,
+            model=settings.openai_embedding_model,
+            dimension=settings.qdrant_vector_dimension,
+        )
+        if apply and chunks and settings.openai_api_key is not None
+        else _PreviewEmbeddings(settings.qdrant_vector_dimension)
+    )
+    client = QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
+        prefer_grpc=False,
+        timeout=10,
+    )
+    try:
+        retriever = QdrantDocumentRetriever(
+            client,
+            embeddings,
+            settings.qdrant_collection,
+            min_score=settings.qdrant_min_score,
+            max_search_limit=settings.qdrant_search_limit,
+        )
+        if apply:
+            retriever.ensure_collection()
+        else:
+            retriever.check_ready()
+        result = retriever.sync_corpus(
+            corpus.corpus_id, chunks, apply=apply, allow_empty=allow_empty
+        )
+    finally:
+        client.close()
+    if result.applied:
+        receipt = {
+            "corpus_id": corpus.corpus_id,
+            "manifest_sha256": corpus.manifest_sha256,
+            "documents": [
+                {
+                    "path": entry.path,
+                    "source_url": entry.source_url,
+                    "publisher": entry.publisher,
+                    "license": entry.license,
+                    "source_revision": entry.source_revision,
+                    "source_date": entry.source_date,
+                    "sha256": entry.sha256,
+                }
+                for entry in corpus.entries
+            ],
+            "desired_document_count": len(result.desired_document_ids),
+            "stale_document_count": len(result.stale_document_ids),
+            "chunk_count": len(chunks),
+        }
+        _write_atomically(receipt_path, json.dumps(receipt, indent=2))
+    return result
 
 
 if __name__ == "__main__":

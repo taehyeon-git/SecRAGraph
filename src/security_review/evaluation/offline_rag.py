@@ -274,8 +274,10 @@ def _precheck_corpus_file(path: Path) -> None:
         raise DocumentIngestionError("document_too_large", path.name)
 
 
-def _evaluate_case(case: RagCase, retriever: QdrantDocumentRetriever) -> RagCaseResult:
-    model = _ObservedChatModel(_OfflineChatModel(case))
+def _evaluate_case(
+    case: RagCase, retriever: QdrantDocumentRetriever, chat_model: ChatModel | None = None
+) -> RagCaseResult:
+    model = _ObservedChatModel(chat_model if chat_model is not None else _OfflineChatModel(case))
     text2sql = Text2SqlService(
         sql_model=model,
         answer_model=model,

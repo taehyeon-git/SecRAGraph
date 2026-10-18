@@ -1,16 +1,12 @@
-import pytest
-
-from security_review.scanner.redaction import redact_match
+from security_review.scanner.redaction import safe_evidence
 
 
-def test_redact_match_replaces_only_the_sensitive_span() -> None:
-    line = 'OPENAI_API_KEY = "sk-test-1234567890"'
-    start = line.index('"')
+def test_safe_evidence_never_contains_scanned_source() -> None:
+    secret = "sk-test-1234567890"
+    for rule_id in ("SEC001", "PY001", "PY002", "PY003", "PY004", "JS001"):
+        assert secret not in safe_evidence(rule_id)
+    assert "***REDACTED***" in safe_evidence("SEC001")
 
-    assert redact_match(line, (start, len(line))) == "OPENAI_API_KEY = ***REDACTED***"
 
-
-@pytest.mark.parametrize("span", [(-1, 2), (3, 2), (0, 100)])
-def test_redact_match_rejects_invalid_spans(span: tuple[int, int]) -> None:
-    with pytest.raises(ValueError, match="span"):
-        redact_match("secret", span)
+def test_unknown_rule_uses_source_free_fallback() -> None:
+    assert safe_evidence("third-party-rule") == "Pattern detected; source omitted for privacy."

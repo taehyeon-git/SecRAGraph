@@ -2,11 +2,17 @@
 
 REDACTION_MARKER = "***REDACTED***"
 
+_RULE_EVIDENCE = {
+    "PY001": "Dynamic evaluation pattern detected; source omitted for privacy.",
+    "PY002": "Shell execution pattern detected; source omitted for privacy.",
+    "PY003": "Disabled TLS verification pattern detected; source omitted for privacy.",
+    "PY004": "Unsafe YAML loader pattern detected; source omitted for privacy.",
+    "JS001": "Disabled Node TLS verification pattern detected; source omitted for privacy.",
+    "SEC001": f"Secret-like assignment detected: {REDACTION_MARKER}; source omitted for privacy.",
+}
 
-def redact_match(line: str, span: tuple[int, int]) -> str:
-    """Replace exactly one validated character span with a fixed marker."""
 
-    start, end = span
-    if start < 0 or end < start or end > len(line):
-        raise ValueError("redaction span is outside the source line")
-    return f"{line[:start]}{REDACTION_MARKER}{line[end:]}"
+def safe_evidence(rule_id: str) -> str:
+    """Return rule-owned evidence, never a substring of the scanned source."""
+
+    return _RULE_EVIDENCE.get(rule_id, "Pattern detected; source omitted for privacy.")

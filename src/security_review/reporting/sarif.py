@@ -43,10 +43,10 @@ def _region(finding: Finding) -> dict[str, int]:
     return region
 
 
-def _fingerprint(finding: Finding, occurrence: int) -> str:
-    payload = (
-        f"{finding.rule_id}\0{finding.file_path}\0{finding.redacted_evidence}\0{occurrence}"
-    ).encode()
+def _fingerprint(finding: Finding) -> str:
+    # A source-free location identity avoids both evidence-derived hashes and
+    # occurrence shifts when another finding is added earlier in the file.
+    payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}".encode()
     return sha256(payload).hexdigest()
 
 
@@ -93,18 +93,14 @@ def render_sarif(report: ScanReport, *, path_prefix: str = "") -> str:
         by_rule.setdefault(finding.rule_id, finding)
     rule_ids = sorted(by_rule)
     rule_indexes = {rule_id: index for index, rule_id in enumerate(rule_ids)}
-    occurrences: dict[tuple[str, str, str], int] = {}
     results: list[dict[str, Any]] = []
     for finding in report.findings:
-        key = (finding.rule_id, finding.file_path, finding.redacted_evidence)
-        occurrence = occurrences.get(key, 0)
-        occurrences[key] = occurrence + 1
         results.append(
             _result(
                 finding,
                 rule_indexes[finding.rule_id],
                 prefix.as_posix(),
-                _fingerprint(finding, occurrence),
+                _fingerprint(finding),
             )
         )
     notifications = [

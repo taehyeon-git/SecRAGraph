@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     testing: bool = False
+    api_token: SecretStr | None = None
     database_url: str = "postgresql+psycopg://secragraph@postgres:5432/secragraph"
     intelligence_database_url: str | None = Field(default=None, min_length=1)
     qdrant_url: str = "http://qdrant:6333"

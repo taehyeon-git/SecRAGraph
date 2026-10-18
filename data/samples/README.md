@@ -13,3 +13,7 @@ security-review import-intelligence --cwe data/samples/cwe.csv --cve data/sample
 
 For real data, obtain it directly from its publisher, transform it into these headers, preserve
 the publisher URL in `source_url`, and review that source's current license before redistribution.
+Record the upstream publication date, exact release/revision, download URL, license, raw-file
+SHA-256, and your import timestamp in a separate local receipt. The import timestamp means only
+"loaded into this database then"; it does not prove that the upstream feed was current or
+complete. These sample CSVs have no live-update mechanism or authoritative publication date.

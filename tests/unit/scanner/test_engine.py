@@ -25,6 +25,46 @@ def test_secret_is_absent_from_finding_dump() -> None:
     assert "***REDACTED***" in serialized
 
 
+@pytest.mark.parametrize(
+    ("path", "source", "rule_id"),
+    [
+        ("app.py", "eval(user_input) # opaque-canary-12345", "PY001"),
+        (
+            "settings.py",
+            'API_KEY = "synthetic-key-1234567890" # opaque-canary-12345',
+            "SEC001",
+        ),
+        (
+            "settings.js",
+            'process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // opaque-canary-12345',
+            "JS001",
+        ),
+    ],
+)
+def test_unrecognized_adjacent_source_is_absent_from_all_reports(
+    path: str, source: str, rule_id: str
+) -> None:
+    findings = scan_text(path, source)
+    assert [finding.rule_id for finding in findings] == [rule_id]
+    report = build_report("sample", findings)
+
+    for rendered in (
+        findings[0].model_dump_json(),
+        render_json(report),
+        render_markdown(report),
+        render_sarif(report),
+    ):
+        assert "opaque-canary-12345" not in rendered
+
+
+def test_source_only_changes_do_not_change_finding_identity() -> None:
+    first = scan_text("app.py", "eval(first) # opaque-canary-12345")
+    second = scan_text("app.py", "eval(second) # another-canary-67890")
+
+    assert first[0].id == second[0].id
+    assert first[0].redacted_evidence == second[0].redacted_evidence
+
+
 def test_every_secret_on_the_evidence_line_is_redacted() -> None:
     first = "first-secret-value"
     second = "second-secret-value"
@@ -36,7 +76,8 @@ def test_every_secret_on_the_evidence_line_is_redacted() -> None:
     serialized = findings[0].model_dump_json()
     assert first not in serialized
     assert second not in serialized
-    assert serialized.count("***REDACTED***") == 2
+    assert serialized.count("***REDACTED***") == 1
+    assert "API_KEY" not in findings[0].redacted_evidence
 
 
 @pytest.mark.parametrize(
@@ -72,7 +113,7 @@ def test_secret_evidence_redacts_skipped_same_line_matches_in_every_report(
         assert "demo-one-not-real-12345" not in rendered
         assert "demo-two-not-real-67890" not in rendered
 
-    assert findings[0].redacted_evidence.count("***REDACTED***") == 2
+    assert findings[0].redacted_evidence.count("***REDACTED***") == 1
 
 
 @pytest.mark.parametrize(
@@ -304,7 +345,7 @@ def test_node_tls_finding_uses_rule_metadata_redacted_evidence_and_stable_id() -
         ("CWE-295",),
     )
     assert "synthetic-key-1234567890" not in tls.model_dump_json()
-    assert "***REDACTED***" in tls.redacted_evidence
+    assert "source omitted for privacy" in tls.redacted_evidence
     assert tls.id == finding_id("JS001", "settings.js", 1, tls.redacted_evidence)
 
 

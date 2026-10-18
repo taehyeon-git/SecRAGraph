@@ -190,3 +190,57 @@ def test_cli_maps_document_ingestion_failure_without_content_leak(
     assert result.exit_code == 1
     assert "invalid_utf8" in result.output
     assert "private document contents" not in result.output
+
+
+def test_cli_corpus_sync_is_preview_only_unless_apply_is_explicit(
+    tmp_path: Path,
+    monkeypatch: object,
+) -> None:
+    from security_review.intelligence.qdrant_retriever import CorpusSyncResult
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    calls: list[tuple[Path, Path, int, int, bool, bool, Path]] = []
+
+    def fake_sync(
+        root: Path,
+        manifest_path: Path,
+        _settings: object,
+        chunk_size: int,
+        overlap: int,
+        apply: bool,
+        allow_empty: bool,
+        receipt_path: Path,
+    ) -> CorpusSyncResult:
+        calls.append((root, manifest_path, chunk_size, overlap, apply, allow_empty, receipt_path))
+        return CorpusSyncResult("test-corpus", (), (), 0, applied=apply)
+
+    monkeypatch.setattr(cli_module, "_run_corpus_sync", fake_sync)  # type: ignore[attr-defined]
+    preview = runner.invoke(app, ["sync-corpus", str(tmp_path), "--manifest", str(manifest)])
+    applied = runner.invoke(
+        app,
+        [
+            "sync-corpus",
+            str(tmp_path),
+            "--manifest",
+            str(manifest),
+            "--apply",
+            "--allow-empty",
+            "--receipt",
+            str(tmp_path / "receipt.json"),
+        ],
+    )
+
+    assert preview.exit_code == applied.exit_code == 0
+    assert calls == [
+        (
+            tmp_path.resolve(),
+            manifest.resolve(),
+            350,
+            50,
+            False,
+            False,
+            Path("build/evidence/ingest-receipt.json"),
+        ),
+        (tmp_path.resolve(), manifest.resolve(), 350, 50, True, True, tmp_path / "receipt.json"),
+    ]

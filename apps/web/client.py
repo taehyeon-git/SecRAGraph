@@ -7,8 +7,9 @@ import math
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import httpx
 
@@ -87,19 +88,27 @@ def safe_source_url(value: object) -> str | None:
 class SecRAGraphApiClient:
     """Call only the documented SecRAGraph HTTP endpoints."""
 
-    def __init__(self, base_url: str, *, http_client: httpx.Client) -> None:
+    def __init__(
+        self, base_url: str, *, http_client: httpx.Client, token: str | None = None
+    ) -> None:
         self._base_url = validate_api_base_url(base_url)
         self._http = http_client
+        if token is not None and (
+            not token.strip() or token != token.strip() or _contains_control(token)
+        ):
+            raise ValueError("API token is invalid")
+        self._headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
 
     def query_knowledge(self, question: str) -> dict[str, Any]:
         """Send one normalized question to the knowledge endpoint."""
 
         normalized = _validated_question(question)
-        status_code, content = self._send(
+        status_code, content, _content_type = self._send(
             lambda: self._http.stream(
                 "POST",
                 f"{self._base_url}/v1/knowledge/query",
                 json={"question": normalized},
+                headers=self._headers,
             )
         )
         payload = _decode_response(status_code, content)
@@ -118,22 +127,52 @@ class SecRAGraphApiClient:
         if not isinstance(content, bytes) or len(content) > MAX_UPLOAD_BYTES:
             raise ValueError("file content exceeds the client upload limit")
         safe_content_type = _validated_content_type(content_type)
-        status_code, response_content = self._send(
+        status_code, response_content, _content_type = self._send(
             lambda: self._http.stream(
                 "POST",
                 f"{self._base_url}/v1/scans/file",
                 files={"file": (safe_name, content, safe_content_type)},
+                headers=self._headers,
             )
         )
         return _decode_response(status_code, response_content)
 
+    def get_report_format(self, scan_id: str, report_format: Literal["markdown", "sarif"]) -> bytes:
+        """Fetch one persisted report as bounded Markdown or SARIF bytes."""
+
+        try:
+            normalized_id = str(UUID(scan_id))
+        except (TypeError, ValueError) as error:
+            raise ValueError("scan ID is invalid") from error
+        if report_format not in {"markdown", "sarif"}:
+            raise ValueError("report format is invalid")
+        status_code, content, content_type = self._send(
+            lambda: self._http.stream(
+                "GET",
+                f"{self._base_url}/v1/scans/{normalized_id}/report?format={report_format}",
+                headers=self._headers,
+            )
+        )
+        if not 200 <= status_code < 300:
+            _decode_response(status_code, content)
+        expected_type = "text/markdown" if report_format == "markdown" else "application/sarif+json"
+        if not content_type.lower().startswith(expected_type):
+            raise ApiClientError(
+                status_code, "invalid_api_response", "The API response was invalid."
+            )
+        return content
+
     def _send(
         self,
         request: Callable[[], AbstractContextManager[httpx.Response]],
-    ) -> tuple[int, bytes]:
+    ) -> tuple[int, bytes, str]:
         try:
             with request() as response:
-                return response.status_code, _read_bounded_body(response)
+                return (
+                    response.status_code,
+                    _read_bounded_body(response),
+                    response.headers.get("content-type", ""),
+                )
         except httpx.TimeoutException as error:
             raise ApiClientError(None, "api_timeout", "The API request timed out.") from error
         except httpx.RequestError as error:

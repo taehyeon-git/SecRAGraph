@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import cast
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -31,6 +33,7 @@ _MAX_SNAPSHOT_PAGES = 80
 _SEARCH_PAYLOAD_FIELDS = ["id", "text", "title", "source_url", "page", "section"]
 _PAYLOAD_INDEXES = (
     ("document_id", models.PayloadSchemaType.KEYWORD),
+    ("corpus_id", models.PayloadSchemaType.KEYWORD),
     ("source_path", models.PayloadSchemaType.KEYWORD),
     ("source_url", models.PayloadSchemaType.KEYWORD),
     ("page", models.PayloadSchemaType.INTEGER),
@@ -39,11 +42,25 @@ _PAYLOAD_INDEXES = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class CorpusSyncResult:
+    corpus_id: str
+    desired_document_ids: tuple[UUID, ...]
+    stale_document_ids: tuple[UUID, ...]
+    managed_point_count: int
+    applied: bool
+
+
 class CollectionConfigurationError(IntelligenceConfigurationError):
     """A Qdrant collection exists with an incompatible vector contract."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason, capability="qdrant")
+
+
+def _validate_corpus_id(value: str) -> None:
+    if not isinstance(value, str) or re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", value) is None:
+        raise ValueError("corpus ID is invalid")
 
 
 def bootstrap_collection(client: QdrantClient, collection: str, dimension: int) -> None:
@@ -224,17 +241,23 @@ class QdrantDocumentRetriever:
             return 0
         _validate_batch_size(batch_size)
         grouped: dict[UUID, list[DocumentChunkInput]] = {}
+        document_corpus: dict[UUID, str | None] = {}
         seen_ids: set[UUID] = set()
         for chunk in chunks:
             if chunk.id in seen_ids:
                 raise ValueError("replacement chunks must have unique identifiers")
             seen_ids.add(chunk.id)
             grouped.setdefault(chunk.document_id, []).append(chunk)
+            previous_corpus = document_corpus.setdefault(chunk.document_id, chunk.corpus_id)
+            if previous_corpus != chunk.corpus_id:
+                raise ValueError("replacement document has mixed corpus IDs")
 
         previous_points: dict[UUID, dict[str, str | None]] = {}
         snapshot_point_count = 0
         for document_id in grouped:
-            document_points = self._snapshot_document_points(document_id)
+            document_points = self._snapshot_document_points(
+                document_id, corpus_id=document_corpus[document_id]
+            )
             snapshot_point_count += len(document_points)
             if snapshot_point_count > _MAX_SNAPSHOT_POINTS_TOTAL:
                 raise IntelligenceUnavailableError("qdrant", "replacement_snapshot_too_large")
@@ -261,6 +284,14 @@ class QdrantDocumentRetriever:
                     conditions: list[models.Condition] = [
                         models.HasIdCondition(has_id=[UUID(value) for value in point_ids])
                     ]
+                    selected_corpus = document_corpus[document_id]
+                    if selected_corpus is not None:
+                        conditions.append(
+                            models.FieldCondition(
+                                key="corpus_id",
+                                match=models.MatchValue(value=selected_corpus),
+                            )
+                        )
                     if old_generation is None:
                         conditions.append(
                             models.IsEmptyCondition(
@@ -290,17 +321,22 @@ class QdrantDocumentRetriever:
             raise IntelligenceUnavailableError("qdrant", "replacement_cleanup_failed") from error
         _require_completed(result, "replacement_cleanup_not_completed")
 
-    def _snapshot_document_points(self, document_id: UUID) -> dict[str, str | None]:
+    def _snapshot_document_points(
+        self, document_id: UUID, *, corpus_id: str | None = None
+    ) -> dict[str, str | None]:
         """Snapshot IDs and generations used to guard replacement cleanup."""
 
-        scroll_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="document_id",
-                    match=models.MatchValue(value=str(document_id)),
-                )
-            ]
-        )
+        conditions: list[models.Condition] = [
+            models.FieldCondition(
+                key="document_id",
+                match=models.MatchValue(value=str(document_id)),
+            )
+        ]
+        if corpus_id is not None:
+            conditions.append(
+                models.FieldCondition(key="corpus_id", match=models.MatchValue(value=corpus_id))
+            )
+        scroll_filter = models.Filter(must=conditions)
         points: dict[str, str | None] = {}
         offset: int | str | UUID | None = None
         seen_offsets: set[str] = set()
@@ -360,6 +396,155 @@ class QdrantDocumentRetriever:
                 raise IntelligenceUnavailableError("qdrant", "malformed_replacement_snapshot")
             seen_offsets.add(offset_key)
             offset = next_offset
+
+    def preview_corpus_sync(
+        self, corpus_id: str, desired_document_ids: set[UUID]
+    ) -> CorpusSyncResult:
+        """Preview absent managed documents without modifying Qdrant."""
+
+        _validate_corpus_id(corpus_id)
+        if len(desired_document_ids) > 500 or any(
+            not isinstance(identifier, UUID) for identifier in desired_document_ids
+        ):
+            raise ValueError("desired document IDs are invalid")
+        snapshot = self._snapshot_corpus_points(corpus_id)
+        existing_ids = {document_id for document_id, _ in snapshot.values()}
+        return CorpusSyncResult(
+            corpus_id=corpus_id,
+            desired_document_ids=tuple(sorted(desired_document_ids)),
+            stale_document_ids=tuple(sorted(existing_ids - desired_document_ids)),
+            managed_point_count=len(snapshot),
+            applied=False,
+        )
+
+    def sync_corpus(
+        self,
+        corpus_id: str,
+        chunks: Sequence[DocumentChunkInput],
+        *,
+        apply: bool,
+        allow_empty: bool = False,
+    ) -> CorpusSyncResult:
+        """Reconcile only tagged points in a selected corpus; preview by default."""
+
+        _validate_corpus_id(corpus_id)
+        if any(chunk.corpus_id != corpus_id for chunk in chunks):
+            raise ValueError("all managed chunks must have the selected corpus ID")
+        desired_ids = {chunk.document_id for chunk in chunks}
+        if len(desired_ids) > 500:
+            raise ValueError("too many desired documents")
+        snapshot = self._snapshot_corpus_points(corpus_id)
+        existing_ids = {document_id for document_id, _ in snapshot.values()}
+        preview = CorpusSyncResult(
+            corpus_id=corpus_id,
+            desired_document_ids=tuple(sorted(desired_ids)),
+            stale_document_ids=tuple(sorted(existing_ids - desired_ids)),
+            managed_point_count=len(snapshot),
+            applied=False,
+        )
+        if not apply:
+            return preview
+        if not chunks and not allow_empty:
+            raise ValueError("allow_empty=True is required to remove the final managed document")
+        # A failure here surfaces immediately. Absent-document deletion never runs
+        # after an incomplete replacement. Repeating the sync is the repair path.
+        self.replace_documents(chunks)
+        for document_id in preview.stale_document_ids:
+            by_generation: dict[str | None, list[UUID]] = {}
+            for point_id, (point_document_id, generation) in snapshot.items():
+                if point_document_id == document_id:
+                    by_generation.setdefault(generation, []).append(UUID(point_id))
+            for generation, identifiers in by_generation.items():
+                for start in range(0, len(identifiers), _REPLACEMENT_PAGE_SIZE):
+                    conditions: list[models.Condition] = [
+                        models.HasIdCondition(
+                            has_id=cast(
+                                list[int | str | UUID],
+                                identifiers[start : start + _REPLACEMENT_PAGE_SIZE],
+                            )
+                        ),
+                        models.FieldCondition(
+                            key="corpus_id", match=models.MatchValue(value=corpus_id)
+                        ),
+                        models.FieldCondition(
+                            key="document_id", match=models.MatchValue(value=str(document_id))
+                        ),
+                    ]
+                    if generation is None:
+                        conditions.append(
+                            models.IsEmptyCondition(
+                                is_empty=models.PayloadField(key="generation_id")
+                            )
+                        )
+                    else:
+                        conditions.append(
+                            models.FieldCondition(
+                                key="generation_id", match=models.MatchValue(value=generation)
+                            )
+                        )
+                    self._delete_replaced_points(models.Filter(must=conditions))
+        return CorpusSyncResult(
+            corpus_id=corpus_id,
+            desired_document_ids=preview.desired_document_ids,
+            stale_document_ids=preview.stale_document_ids,
+            managed_point_count=preview.managed_point_count,
+            applied=True,
+        )
+
+    def _snapshot_corpus_points(self, corpus_id: str) -> dict[str, tuple[UUID, str | None]]:
+        """Read only selected tagged points with strict bounds and payload checks."""
+
+        scroll_filter = models.Filter(
+            must=[models.FieldCondition(key="corpus_id", match=models.MatchValue(value=corpus_id))]
+        )
+        points: dict[str, tuple[UUID, str | None]] = {}
+        offset: int | str | UUID | None = None
+        seen_offsets: set[str] = set()
+        for _page in range(_MAX_SNAPSHOT_PAGES):
+            try:
+                response = self._client.scroll(
+                    collection_name=self._collection,
+                    scroll_filter=scroll_filter,
+                    limit=_REPLACEMENT_PAGE_SIZE,
+                    offset=offset,
+                    with_payload=models.PayloadSelectorInclude(
+                        include=["corpus_id", "document_id", "generation_id"]
+                    ),
+                    with_vectors=False,
+                )
+            except _PROVIDER_ERRORS as error:
+                raise IntelligenceUnavailableError("qdrant", "corpus_snapshot_failed") from error
+            if not isinstance(response, tuple) or len(response) != 2:
+                raise IntelligenceUnavailableError("qdrant", "malformed_corpus_snapshot")
+            records, next_offset = response
+            if not isinstance(records, list) or (not records and next_offset is not None):
+                raise IntelligenceUnavailableError("qdrant", "malformed_corpus_snapshot")
+            try:
+                for record in records:
+                    payload = record.payload
+                    if not isinstance(payload, dict) or payload.get("corpus_id") != corpus_id:
+                        raise ValueError("invalid corpus payload")
+                    point_id = _validated_uuid(record.id)
+                    document_id = UUID(_validated_uuid(payload.get("document_id")))
+                    raw_generation = payload.get("generation_id")
+                    generation = (
+                        _validated_uuid(raw_generation) if raw_generation is not None else None
+                    )
+                    points[point_id] = (document_id, generation)
+            except (AttributeError, ValueError, TypeError) as error:
+                raise IntelligenceUnavailableError("qdrant", "malformed_corpus_snapshot") from error
+            if len(points) > _MAX_SNAPSHOT_POINTS_TOTAL:
+                raise IntelligenceUnavailableError("qdrant", "corpus_snapshot_too_large")
+            if next_offset is None:
+                return points
+            if isinstance(next_offset, bool) or not isinstance(next_offset, (int, str, UUID)):
+                raise IntelligenceUnavailableError("qdrant", "malformed_corpus_snapshot")
+            offset_key = repr(next_offset)
+            if offset_key in seen_offsets:
+                raise IntelligenceUnavailableError("qdrant", "malformed_corpus_snapshot")
+            seen_offsets.add(offset_key)
+            offset = next_offset
+        raise IntelligenceUnavailableError("qdrant", "corpus_snapshot_too_large")
 
     def search(self, query: str, limit: int = 5) -> tuple[DocumentChunk, ...]:
         """Return scored payload text as data without constructing any model prompt."""
@@ -457,6 +642,8 @@ def _chunk_payload(
     }
     if chunk.source_url is not None:
         payload["source_url"] = chunk.source_url
+    if chunk.corpus_id is not None:
+        payload["corpus_id"] = chunk.corpus_id
     if chunk.page is not None:
         payload["page"] = chunk.page
     if chunk.section is not None:

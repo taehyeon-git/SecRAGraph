@@ -11,7 +11,7 @@ uv run security-review scan examples/insecure/sample.py --format markdown --outp
 uv run security-review scan examples/insecure/sample.py --format sarif --output build/demo.sarif
 ```
 
-이 예제의 현재 규칙 결과는 비밀 유사 값(`SEC001`), `shell=True`(`PY002`), `eval`(`PY001`) 세 건입니다. 예제 파일은 검사 중 실행되지 않습니다. `build/demo.json`의 `redacted_evidence`에는 가려진 값만 남고, `references`가 비어 있어도 결정적 finding·수정 권고는 유효합니다. 실행마다 UUID/시각은 달라질 수 있으므로 고정 값 비교보다 규칙 ID·위치·마스킹을 확인하세요.
+이 예제의 현재 규칙 결과는 비밀 유사 값(`SEC001`), `shell=True`(`PY002`), `eval`(`PY001`) 세 건입니다. 예제 파일은 검사 중 실행되지 않습니다. `redacted_evidence`는 소스 줄에서 일부를 가린 문자열이 아니라 규칙별 고정 문구입니다. 비밀의 원문·주변 텍스트를 보고서에 복사하지 않습니다. `references`가 비어 있어도 결정적 finding·수정 권고는 유효합니다. 실행마다 UUID/시각은 달라질 수 있으므로 규칙 ID·위치·고정 증거 문구를 확인하세요.
 
 CI와 같은 SARIF 경로를 검증할 때는 실제 `src` 스캔을 사용합니다. [검증 스크립트](../scripts/validate_sarif.py)는 저장소의 `src/` 안에 있는 추적 파일 경로만 허용합니다. 위 예제의 `build/demo.sarif`는 이 스크립트의 입력 대상이 아닙니다.
 
@@ -58,18 +58,42 @@ uv run python -m scripts.run_rag_evidence
 
 이 어댑터는 검색 결과에서 첫 문장을 골라 인용하는 결정적 테스트 더블이며 실제 모델 호출이나 의미 임베딩 성능을 측정하지 않습니다. 실제 제공자 경로와 자료 전송의 신뢰 경계는 [위협 모델](threat-model.md)에 있습니다.
 
-## 3. 루프백 API와 웹
+### 2.1 선택적 실제 제공자 관찰
 
-[README 빠른 시작](../README.md#빠른-시작)의 PowerShell 비밀번호 설정·Compose 명령을 먼저 실행하고 `/health/ready`가 200인지 확인합니다. 기존 PostgreSQL 볼륨의 비밀번호가 다르면 [운영 문서](operations.md)의 회전 절차를 따르며 볼륨을 지우지 않습니다. API는 `http://127.0.0.1:8000`, Streamlit은 `http://127.0.0.1:8501`입니다.
+실제 모델·임베딩 동작을 보고 싶다면 본인이 제공자 키를 설정한 뒤에만 다음 명령을 실행합니다. CI나 기본 데모는 이를 실행하지 않습니다. 지침 문서와 평가 질문이 외부 제공자로 전송되고 비용이 발생할 수 있습니다. 출력은 `build/evidence/rag-live.json`이며 원문 답변 대신 해시, 모델 ID, 경로·검색·인용·보류 판정의 분자/분모, 지연 시간, 실패 건수를 기록합니다. 사실성은 자동 채점하지 않고 사람의 원문 대조가 필요하다고 명시합니다. 키가 없으면 제공자를 만들기 전에 중단합니다.
 
 ```powershell
-$scan = curl.exe -sS -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
-$scan.scan_id
-Invoke-RestMethod "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)"
-curl.exe -sS "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)/report?format=markdown"
+# First set SECRAGRAPH_OPENAI_API_KEY in this session using your own secret manager.
+uv run python -m scripts.run_live_rag_evidence
+Remove-Item Env:SECRAGRAPH_OPENAI_API_KEY
 ```
 
-ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크·크기 제한을 검사합니다. 보고서는 `GET /v1/scans/{scan_id}`에서 JSON, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`에서 렌더링된 표현으로 조회합니다. `GET /health/live`는 프로세스 생존, `GET /health/ready`는 PostgreSQL과 Qdrant 준비 상태를 확인합니다. 요청·응답 스키마는 `/docs`의 OpenAPI에서 볼 수 있습니다.
+### 2.2 외부 스캐너 코퍼스 도전
+
+[OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython)은 이 저장소에 포함하지 않았습니다. 사용자가 별도 체크아웃을 확보하고 해당 라이선스를 확인한 뒤, 정확한 커밋 SHA와 `expectedresults-0.1.csv`의 SHA-256을 고정해 실행합니다. 예를 들어 로컬 체크아웃을 `C:\benchmarks\BenchmarkPython`에 두었다면 다음과 같습니다. 자리 표시자는 직접 확인한 실제 값으로 바꿔야 합니다.
+
+```powershell
+$benchmarkRoot = 'C:\benchmarks\BenchmarkPython'
+$revision = (git -C $benchmarkRoot rev-parse HEAD).Trim()
+$expectedHash = (Get-FileHash -Algorithm SHA256 (Join-Path $benchmarkRoot 'expectedresults-0.1.csv')).Hash.ToLowerInvariant()
+uv run python -m scripts.run_external_scanner_benchmark --root $benchmarkRoot --revision $revision --expected-sha256 $expectedHash
+```
+
+이 도구는 대상 Python 코드를 실행/import하지 않고 읽기만 합니다. CWE-78→`PY002`, CWE-502→`PY004`의 **넓은 CWE 단위 사례 평가**이며 해당 CWE의 모든 sink를 탐지한다는 뜻이 아닙니다. TP/FP/FN/TN과 전체 라벨·지원 범위·누락/중복/파싱 실패 분모를 분리합니다. 누락·불완전 사례가 있으면 0이 아닌 종료 코드를 반환합니다. 현재 저장소는 이 외부 코퍼스를 실제 실행한 점수를 주장하지 않습니다.
+
+## 3. 루프백 API와 웹
+
+[README 빠른 시작](../README.md#빠른-시작)의 PowerShell 비밀번호·API 토큰 설정과 Compose 명령을 먼저 실행하고 `/health/ready`가 200인지 확인합니다. 기존 PostgreSQL 볼륨의 비밀번호가 다르면 [운영 문서](operations.md)의 회전 절차를 따르며 볼륨을 지우지 않습니다. API는 `http://127.0.0.1:8000`, Streamlit은 `http://127.0.0.1:8501`입니다. 아래 `/v1/*` 호출에는 모두 같은 Bearer 토큰을 보냅니다.
+
+```powershell
+$headers = @{Authorization = "Bearer $env:SECRAGRAPH_API_TOKEN"}
+$scan = curl.exe -sS -H "Authorization: Bearer $env:SECRAGRAPH_API_TOKEN" -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
+$scan.scan_id
+Invoke-RestMethod "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)" -Headers $headers
+curl.exe -sS -H "Authorization: Bearer $env:SECRAGRAPH_API_TOKEN" "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)/report?format=markdown"
+```
+
+ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크·크기 제한을 검사합니다. 보고서는 `GET /v1/scans/{scan_id}`에서 JSON, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`에서 렌더링된 표현으로 조회합니다. 토큰 없이 `/v1/*`를 호출하면 401입니다. `GET /health/live`는 프로세스 생존, `GET /health/ready`는 PostgreSQL과 Qdrant 준비 상태를 확인합니다. 요청·응답 스키마는 `/docs`의 OpenAPI에서 볼 수 있습니다. Streamlit은 API 토큰을 전달하지만 자체 사용자 로그인을 제공하지 않습니다.
 
 ## 4. 선택적 지식 질의
 
@@ -79,19 +103,26 @@ ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크�
 docker compose run --rm migrate /app/.venv/bin/security-review import-intelligence --cwe /app/data/samples/cwe.csv --cve /app/data/samples/cve.csv
 ```
 
-RAG와 Text2SQL 답변에는 유효한 모델/임베딩 제공자 키가 필요합니다. `SECRAGRAPH_OPENAI_API_KEY`를 현재 셸의 런타임 환경 변수로 안전하게 설정하고 API를 그 설정으로 다시 시작하세요. 다음 명령은 사용자가 권리를 확인한 UTF-8 `.md`/`.markdown` 문서만 Qdrant에 수집합니다. 동봉한 `data/knowledge`는 프로젝트 고유의 예시이며 PDF 인덱싱은 지원하지 않습니다.
+RAG와 Text2SQL 답변에는 유효한 모델/임베딩 제공자 키가 필요합니다. `SECRAGRAPH_OPENAI_API_KEY`를 현재 셸의 런타임 환경 변수로 안전하게 설정하고 API를 그 설정으로 다시 시작하세요. 다음 명령은 버전·출처·라이선스·원본 SHA-256을 적은 [매니페스트](../data/knowledge/manifest.json)를 먼저 검증하고 해당 코퍼스의 변경을 미리 보여 줍니다. 수집 대상은 사용자가 권리를 확인한 UTF-8 `.md`/`.markdown` 문서뿐입니다. 동봉한 `data/knowledge`는 프로젝트 고유의 예시이며 PDF 인덱싱은 지원하지 않습니다.
 
 ```powershell
 docker compose up -d --force-recreate api
-docker compose run --rm -e SECRAGRAPH_OPENAI_API_KEY qdrant-bootstrap /app/.venv/bin/security-review ingest-documents /app/data/knowledge
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/knowledge/query -ContentType application/json -Body '{"question":"CWE 데이터는 몇 건인가요?"}'
+docker compose run --rm qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge
+New-Item -ItemType Directory -Force -Path build/evidence | Out-Null
+$evidenceMount = "$(Join-Path (Get-Location) 'build/evidence'):/evidence"
+docker compose run --rm --volume $evidenceMount -e SECRAGRAPH_OPENAI_API_KEY qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge --apply --receipt /evidence/ingest-receipt.json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/knowledge/query -Headers @{Authorization = "Bearer $env:SECRAGRAPH_API_TOKEN"} -ContentType application/json -Body '{"question":"CWE 데이터는 몇 건인가요?"}'
 ```
 
 분류 결과는 모델에 따라 달라질 수 있습니다. 응답의 `intent`, `sources`, `warnings`를 확인하고, RAG 인용은 해당 문서 원문과 대조하세요. 수집 데이터가 없거나 근거가 부족하면 충분한 답변이 나오지 않는 것이 정상입니다. 모델 호출은 외부 제공자 비용과 데이터 처리 정책의 영향을 받습니다.
 
+`sync-corpus`는 관리 코퍼스의 과거 버전 chunk만 정리하며, 빈 매니페스트를 적용하려면 별도의 `--allow-empty`가 필요합니다. 다른 코퍼스와 기존 비관리 chunk는 지우지 않습니다. 위 명령은 `--receipt` 경로를 호스트의 무시된 `build/evidence/ingest-receipt.json`에 연결합니다. 이 파일에는 문서 출처 메타데이터가 있으므로 공개 전 검토하세요. 이전의 `ingest-documents` 명령은 호환성을 위해 남아 있으나 출처 매니페스트 검증을 하지 않습니다.
+
 ## 5. 검증과 증거 보관
 
 [CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)은 `v0.1.0` 태그 대상 커밋에서 테스트·품질·의존성 감사·컨테이너 빌드가 모두 통과했습니다. 같은 커밋의 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 SARIF 생성·검증·업로드에 성공했고, [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 결과가 반영되었습니다. 2026-10-09 확인 당시 열린 경고는 0건이지만, 이는 취약점이 없다는 보증이 아닙니다. [v0.1.0 릴리스](https://github.com/taehyeon-git/SecRAGraph/releases/tag/v0.1.0)도 공개했습니다.
+
+위 링크는 **과거 v0.1.0 커밋**의 증거입니다. 현재 `main`에 추가한 토큰·코퍼스 동기화·선택 평가·Compose 스모크는 [최신 CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml)에서 별도로 확인해야 합니다. `quality` 작업의 `rag`/`scanner` JSON·Markdown 아티팩트는 신뢰된 `main` push에서만 보관하고 PR에서는 실행·검증만 합니다. 이 아티팩트는 합성/결정적 평가 결과이지 실제 LLM 성능이나 외부 벤치마크 점수가 아닙니다.
 
 2026-10-09 로컬 검증에서는 기존 볼륨을 건드리지 않고 별도 Compose 프로젝트와 포트로 PostgreSQL/Qdrant 통합 테스트 스택 및 API/웹 데모 스택을 실행했습니다. API `/health/ready`는 PostgreSQL과 Qdrant가 모두 준비됐다고 응답했고, Streamlit 헬스 엔드포인트도 HTTP 200을 반환했습니다. 합성 예제를 다시 스캔한 결과는 `PY001`, `PY002`, `SEC001` 세 건이었으며 `SEC001` 증거는 가려져 있었습니다. 전체 pytest는 602건 통과, Windows에서 심볼릭 링크 생성이 불가능해 4건 건너뜀, `security_review` 커버리지 90%였고, 통합·E2E만 별도로 실행한 47건도 통과했습니다. CI용 API 시작·준비 확인·종료 코드를 별도 로컬 포트에서 실행했을 때 실제 API 통합 테스트 2건이 통과했고 종료 뒤 포트가 해제됐습니다. `src` 셀프 스캔 SARIF는 `scripts/validate_sarif.py` 검증을 통과했습니다. 이 결과는 로컬 실행에만 해당합니다.
 

@@ -11,6 +11,7 @@ from sqlalchemy import Engine
 from starlette.middleware.base import RequestResponseEndpoint
 
 from security_review import __version__
+from security_review.api.auth import ApiTokenMiddleware
 from security_review.api.dependencies import KnowledgeAnswerer
 from security_review.api.errors import register_error_handlers
 from security_review.api.middleware import RequestBodyLimitMiddleware, correlation_id
@@ -73,6 +74,15 @@ def create_app(
     """Create an isolated API instance for production or tests."""
 
     configured = settings or Settings()
+    configured_token = (
+        configured.api_token.get_secret_value() if configured.api_token is not None else None
+    )
+    if configured_token is not None and (
+        not configured_token.strip() or configured_token != configured_token.strip()
+    ):
+        raise ValueError("API token must be nonblank without surrounding whitespace")
+    if configured.environment == "production" and configured_token is None:
+        raise ValueError("API token is required when serving the production API")
     configure_logging(configured.environment)
     app = FastAPI(title="SecRAGraph", version=__version__, lifespan=_lifespan)
     app.state.settings = configured
@@ -183,6 +193,7 @@ def create_app(
         return response
 
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=configured.max_request_bytes)
+    app.add_middleware(ApiTokenMiddleware, token=configured_token)
 
     register_error_handlers(app)
     app.include_router(health_router)

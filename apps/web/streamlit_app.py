@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Any
+from typing import Any, Literal
+from uuid import UUID
 
 import httpx
 import streamlit as st
@@ -16,6 +18,7 @@ from apps.web.client import (
 )
 
 API_BASE_URL = os.environ.get("SECRAGRAPH_API_BASE_URL", "http://api:8000")
+API_TOKEN = os.environ.get("SECRAGRAPH_API_TOKEN")
 
 
 def _show_client_error(error: ApiClientError) -> None:
@@ -37,6 +40,42 @@ def _show_scan_result(result: dict[str, Any]) -> None:
         display_total: int | str = total if type(total) is int and total >= 0 else "Unavailable"
         st.metric("Findings", display_total)
     st.json(result)
+
+
+def _show_report_downloads(api: SecRAGraphApiClient, result: dict[str, Any]) -> None:
+    """Download the canonical scan and both server-rendered report formats."""
+
+    raw_scan_id = result.get("scan_id")
+    try:
+        scan_id = str(UUID(raw_scan_id))
+    except (TypeError, ValueError):
+        st.warning("Report downloads are unavailable for this response.")
+        return
+    json_bytes = json.dumps(result, indent=2, ensure_ascii=False).encode("utf-8")
+    st.download_button(
+        "Download JSON",
+        data=json_bytes,
+        file_name=f"secragraph-{scan_id}.json",
+        mime="application/json",
+        on_click="ignore",
+    )
+    formats: tuple[tuple[Literal["markdown", "sarif"], str, str, str], ...] = (
+        ("markdown", "Download Markdown", "md", "text/markdown"),
+        ("sarif", "Download SARIF", "sarif", "application/sarif+json"),
+    )
+    for report_format, label, extension, mime in formats:
+        try:
+            body = api.get_report_format(scan_id, report_format)
+        except ApiClientError as error:
+            _show_client_error(error)
+            continue
+        st.download_button(
+            label,
+            data=body,
+            file_name=f"secragraph-{scan_id}.{extension}",
+            mime=mime,
+            on_click="ignore",
+        )
 
 
 def _safe_text(value: object, fallback: str, *, maximum: int) -> str:
@@ -86,17 +125,18 @@ def main() -> None:
 
     st.set_page_config(page_title="SecRAGraph", page_icon="🛡️", layout="wide")
     st.title("SecRAGraph")
-    st.caption("RAG- and LangGraph-powered security review platform")
+    st.caption("RAG- and LangGraph-powered security review platform; local demo only")
     timeout = httpx.Timeout(45.0, connect=5.0, write=5.0, pool=5.0)
     with httpx.Client(timeout=timeout, follow_redirects=False) as http:
         try:
-            api = SecRAGraphApiClient(API_BASE_URL, http_client=http)
+            api = SecRAGraphApiClient(API_BASE_URL, http_client=http, token=API_TOKEN)
         except ValueError:
             st.error("The configured API base URL is invalid.")
             return
 
         scan_tab, knowledge_tab = st.tabs(["File scan", "Security Q&A"])
         with scan_tab:
+            st.caption("Deterministic, keyless source scan. Uploaded code is never executed.")
             uploaded = st.file_uploader(
                 "Choose a supported source file",
                 type=["py", "js", "ts", "json", "yaml", "yml", "toml", "env", "ini"],
@@ -121,7 +161,12 @@ def main() -> None:
                                 st.error("The selected file is invalid.")
                         else:
                             _show_scan_result(result)
+                            _show_report_downloads(api, result)
         with knowledge_tab:
+            st.caption(
+                "Provider-backed Q&A requires a configured API key in the backend. "
+                "Offline RAG evidence is a separate keyless evaluation, not a live answer."
+            )
             question = st.text_area(
                 "Ask a security question",
                 max_chars=2_000,

@@ -81,16 +81,38 @@ def test_sarif_path_prefix_does_not_change_finding_identity(report: ScanReport) 
     assert report.findings[0].file_path == "src/config file#1%.py"
 
 
-def test_sarif_fingerprint_survives_unrelated_line_insertion() -> None:
+def test_sarif_fingerprint_survives_another_finding_on_earlier_line() -> None:
+    source = 'answer = 42\nAPI_KEY = "sk-test-example-value"\n'
+    before = build_report("sample", scan_text("settings.py", source))
+    after = build_report(
+        "sample", scan_text("settings.py", source.replace("answer = 42", "eval(value)"))
+    )
+    before_result = next(
+        item
+        for item in json.loads(render_sarif(before))["runs"][0]["results"]
+        if item["ruleId"] == "SEC001"
+    )
+    after_result = next(
+        item
+        for item in json.loads(render_sarif(after))["runs"][0]["results"]
+        if item["ruleId"] == "SEC001"
+    )
+
+    assert before.findings[0].id == next(
+        item.id for item in after.findings if item.rule_id == "SEC001"
+    )
+    assert before_result["partialFingerprints"] == after_result["partialFingerprints"]
+    assert "sk-test-example-value" not in json.dumps(before_result)
+
+
+def test_sarif_fingerprint_changes_when_source_line_moves() -> None:
     source = 'API_KEY = "sk-test-example-value"\n'
     before = build_report("sample", scan_text("settings.py", source))
     after = build_report("sample", scan_text("settings.py", "answer = 42\n" + source))
     before_result = json.loads(render_sarif(before))["runs"][0]["results"][0]
     after_result = json.loads(render_sarif(after))["runs"][0]["results"][0]
 
-    assert before.findings[0].id != after.findings[0].id
-    assert before_result["partialFingerprints"] == after_result["partialFingerprints"]
-    assert "sk-test-example-value" not in json.dumps(before_result)
+    assert before_result["partialFingerprints"] != after_result["partialFingerprints"]
 
 
 def test_sarif_fingerprints_distinguish_identical_matches_in_one_file() -> None:

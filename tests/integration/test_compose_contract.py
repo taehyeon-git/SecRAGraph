@@ -27,6 +27,8 @@ def _compose_config(
         values["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
     if not values.get("SECRAGRAPH_READER_PASSWORD"):
         values["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
+    if not values.get("SECRAGRAPH_API_TOKEN"):
+        values["SECRAGRAPH_API_TOKEN"] = secrets.token_urlsafe(32)
     # The executable is resolved from PATH; every argument is fixed by this test.
     return subprocess.run(  # noqa: S603
         [docker, "compose", "config", "--format", "json"],
@@ -65,6 +67,7 @@ def test_default_stack_requires_runtime_database_secrets() -> None:
     environment = os.environ.copy()
     environment["POSTGRES_PASSWORD"] = ""
     environment["SECRAGRAPH_READER_PASSWORD"] = ""
+    environment["SECRAGRAPH_API_TOKEN"] = ""
 
     result = subprocess.run(  # noqa: S603
         [docker, "compose", "config", "--format", "json"],
@@ -78,6 +81,44 @@ def test_default_stack_requires_runtime_database_secrets() -> None:
 
     assert result.returncode != 0
     assert "POSTGRES_PASSWORD" in result.stderr or "SECRAGRAPH_READER_PASSWORD" in result.stderr
+
+
+def test_default_stack_requires_shared_api_token() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    docker = which("docker")
+    assert docker is not None
+    environment = os.environ.copy()
+    environment["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
+    environment["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
+    environment["SECRAGRAPH_API_TOKEN"] = ""
+
+    result = subprocess.run(  # noqa: S603
+        [docker, "compose", "config", "--format", "json"],
+        cwd=project_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "SECRAGRAPH_API_TOKEN" in result.stderr
+
+
+def test_api_and_web_receive_same_token_and_all_published_ports_are_loopback_only() -> None:
+    token = secrets.token_urlsafe(32)
+    environment = os.environ.copy()
+    environment["SECRAGRAPH_API_TOKEN"] = token
+    services = json.loads(_compose_config(environment=environment).stdout)["services"]
+
+    assert services["api"]["environment"]["SECRAGRAPH_API_TOKEN"] == token
+    assert services["web"]["environment"]["SECRAGRAPH_API_TOKEN"] == token
+    assert all(
+        port["host_ip"] == "127.0.0.1"
+        for service in services.values()
+        for port in service.get("ports", [])
+    )
 
 
 def test_default_stack_passes_runtime_secrets_to_database_consumers() -> None:
@@ -122,6 +163,7 @@ def test_sample_env_has_no_usable_database_password() -> None:
     values = dotenv_values(Path(__file__).resolve().parents[2] / ".env.example")
     assert values.get("POSTGRES_PASSWORD") in (None, "")
     assert values.get("SECRAGRAPH_READER_PASSWORD") in (None, "")
+    assert values.get("SECRAGRAPH_API_TOKEN") in (None, "")
 
 
 def test_integration_database_has_no_password_credentials() -> None:

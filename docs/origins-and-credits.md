@@ -13,7 +13,7 @@ SecRAGraph는 보안 문서 RAG/질의와 소스 검사 아이디어를 하나�
 
 ## SecRAGraph에서 새로 작성한 범위
 
-공유 도메인 모델과 위험 점수 계약, 텍스트 정적 스캐너와 증거 마스킹, 안전한 파일/ZIP 업로드, FastAPI·Typer CLI·Streamlit 연결, PostgreSQL 보고서·감사 저장, 별도 권한의 guarded Text2SQL, Qdrant/모델 어댑터 경계, 두 개의 LangGraph 워크플로, JSON·Markdown·SARIF 보고서, 테스트, 비루트 컨테이너·Compose, CI 및 보안 셀프 스캔 정의를 이 저장소에서 구현했습니다. 스캔 그래프의 Qdrant 검색은 문서 출처를 추가하며, Text2SQL은 별도 지식 질의 경로입니다. 두 경로를 하나의 LLM 수정 권고 생성 기능처럼 소개하지 않습니다.
+공유 도메인 모델과 위험 점수 계약, 텍스트 정적 스캐너와 소스 줄을 복사하지 않는 고정 증거 문구, 안전한 파일/ZIP 업로드, FastAPI·Typer CLI·Streamlit 연결, PostgreSQL 보고서·감사 저장, 별도 권한의 guarded Text2SQL, Qdrant/모델 어댑터 경계, 두 개의 LangGraph 워크플로, JSON·Markdown·SARIF 보고서, 테스트, 비루트 컨테이너·Compose, CI 및 보안 셀프 스캔 정의를 이 저장소에서 구현했습니다. 이후 단일 로컬 API 토큰, 출처 manifest 검증과 관리 코퍼스 동기화, 선택적 실제 제공자 관찰·외부 스캐너 벤치마크 경로도 이 저장소에서 추가했습니다. 스캔 그래프의 Qdrant 검색은 문서 출처를 추가하며, Text2SQL은 별도 지식 질의 경로입니다. 두 경로를 하나의 LLM 수정 권고 생성 기능처럼 소개하지 않습니다.
 
 `data/samples`의 CVE/CWE CSV는 실제 취약점 레코드가 아닌 합성 예시입니다. `data/knowledge`의 Markdown은 이 데모를 위해 새로 쓴 문서입니다. 제3자의 보안 문서나 실제 데이터는 재배포하지 않습니다. 문서 수집은 사용자가 적법한 원본을 확보해 직접 실행하며, 현재 UTF-8 Markdown 형식만 지원합니다.
 

@@ -9,7 +9,7 @@ from security_review.scanner.files import (
     discover_files,
     read_scannable_text,
 )
-from security_review.scanner.redaction import REDACTION_MARKER, redact_match
+from security_review.scanner.redaction import REDACTION_MARKER, safe_evidence
 from security_review.scanner.rules import DEFAULT_RULES, Rule
 
 __all__ = [
@@ -21,7 +21,7 @@ __all__ = [
     "ScannableFile",
     "SkippedFile",
     "discover_files",
-    "redact_match",
+    "safe_evidence",
     "read_scannable_text",
     "scan_text",
 ]

@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from security_review.domain.models import Confidence, Finding, Severity
 from security_review.ports import ReportRepositoryError
 from security_review.reporting.builder import build_report
+from security_review.reporting.json_report import render_json
+from security_review.reporting.markdown import render_markdown
+from security_review.reporting.sarif import render_sarif
+from security_review.scanner.engine import scan_text
 from security_review.storage.database import create_session_factory
 from security_review.storage.reports import SqlAlchemyReportRepository
 
@@ -70,6 +74,26 @@ def test_postgres_repository_round_trips_canonical_report(
     repository.save(report)
 
     assert repository.get(report.scan_id) == report
+
+
+def test_persisted_scan_never_restores_unrecognized_source_line_content(
+    session_factory: sessionmaker[Session],
+) -> None:
+    canary = "opaque-canary-12345"
+    report = build_report("app.py", scan_text("app.py", f"eval(value) # {canary}"))
+    repository = SqlAlchemyReportRepository(session_factory)
+
+    repository.save(report)
+    restored = repository.get(report.scan_id)
+
+    assert restored is not None
+    for rendered in (
+        restored.model_dump_json(),
+        render_json(restored),
+        render_markdown(restored),
+        render_sarif(restored),
+    ):
+        assert canary not in rendered
 
 
 def test_child_constraint_failure_rolls_back_parent_report(

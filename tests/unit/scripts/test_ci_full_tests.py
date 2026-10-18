@@ -45,6 +45,29 @@ def test_ci_workflow_bootstraps_qdrant_before_live_api_full_suite() -> None:
     assert not any("uv run pytest --cov=" in command for command in commands)
 
 
+def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_push() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    quality_steps = workflow["jobs"]["quality"]["steps"]
+    uploads = [step for step in quality_steps if "actions/upload-artifact@" in step.get("uses", "")]
+
+    assert len(uploads) == 1
+    assert uploads[0]["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert set(uploads[0]["with"]["path"].splitlines()) == {
+        "build/evidence/rag.json",
+        "build/evidence/rag.md",
+        "build/evidence/scanner.json",
+        "build/evidence/scanner.md",
+    }
+    assert uploads[0]["with"]["if-no-files-found"] == "error"
+
+
+def test_ci_has_full_stack_compose_smoke_gate() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    smoke = workflow["jobs"]["compose-smoke"]
+
+    assert any("scripts.compose_smoke" in step.get("run", "") for step in smoke["steps"])
+
+
 def test_full_suite_stops_api_after_tests_succeed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

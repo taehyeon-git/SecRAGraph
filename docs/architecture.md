@@ -7,7 +7,8 @@ SecRAGraph는 Python 모듈형 단일 서비스입니다. 정적 스캔과 지�
 ```mermaid
 flowchart TB
   FILE[CLI file or directory] --> SCAN[ScanService]
-  UPLOAD[FastAPI file or ZIP] --> TEMP[Validated temporary workspace]
+  UPLOAD[FastAPI file or ZIP] --> AUTH[Bearer token boundary]
+  AUTH --> TEMP[Validated temporary workspace]
   TEMP --> SCAN
   SCAN --> SGRAPH[Scan LangGraph]
   SGRAPH --> DET[Text-only deterministic scanner]
@@ -15,14 +16,15 @@ flowchart TB
   SGRAPH --> CANON[Canonical ScanReport]
   CANON --> FORMATS[JSON / Markdown / SARIF]
   CANON --> APPDB[(PostgreSQL app schema via API)]
-  QUESTION[POST /v1/knowledge/query] --> KGRAPH[Knowledge LangGraph]
+  QUESTION[POST /v1/knowledge/query] --> AUTH
+  AUTH --> KGRAPH[Knowledge LangGraph]
   KGRAPH --> SQL[Guarded Text2SQL]
   SQL --> INTEL[(PostgreSQL intel schema)]
   KGRAPH --> VEC[Vector search and grounded answer]
   VEC --> QDRANT
 ```
 
-CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없으며 PostgreSQL에 보고서를 저장하지 않습니다. API의 `ScanService`는 영속 보고서 저장소를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 결과를 `app.scan_reports` 등에 저장합니다. Streamlit은 API를 호출하는 얇은 데모 클라이언트입니다.
+CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없으며 PostgreSQL에 보고서를 저장하지 않습니다. API의 `ScanService`는 영속 보고서 저장소를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 결과를 `app.scan_reports` 등에 저장합니다. `/v1/*`는 ASGI 경계에서 본문 읽기 전에 단일 Bearer 토큰을 확인합니다. Streamlit은 같은 토큰을 전달하는 얇은 데모 클라이언트이며 자체 브라우저 로그인이 없습니다.
 
 ## 두 LangGraph의 실제 노드
 
@@ -55,27 +57,29 @@ classify_intent ─┬→ general_answer → END
 | 위치 | 책임 / 외부 경계 |
 | --- | --- |
 | `src/security_review/domain/models.py`, `risk.py` | 검증된 `Finding`, `SourceReference`, `ScanReport`와 결정적 위험 점수. FastAPI·DB·모델 SDK에 의존하지 않습니다. |
-| `scanner/files.py`, `rules.py`, `engine.py`, `redaction.py` | 지원 파일 탐색·한도, 텍스트 규칙, 결과 생성, 비밀 증거 마스킹. 제출 코드를 import하거나 실행하지 않습니다. |
+| `scanner/files.py`, `rules.py`, `engine.py`, `redaction.py` | 지원 파일 탐색·한도, 텍스트 규칙, 결과 생성, 소스 줄을 복사하지 않는 규칙별 고정 증거 문구. 제출 코드를 import하거나 실행하지 않습니다. |
 | `uploads/service.py`, `archive.py` | 파일명·MIME·크기 검증, ZIP 경로·링크·개수·압축 해제량 검사 후 임시 디렉터리 사용. |
 | `application.py` | CLI의 `scan_path`와 API의 `ScanService`; 같은 스캔 그래프를 조립하고 API 경로에서는 보고서를 저장합니다. |
 | `orchestrator/scan_graph.py`, `knowledge_graph.py`, `state.py` | 각 LangGraph의 상태, 노드, 조건부 분기와 결과 계약. |
 | `ports.py` | `ReportRepository`, `SecurityKnowledgeRepository`, `SecurityDocumentRetriever`, `ChatModel`, `EmbeddingModel` 프로토콜. 구현을 도메인 밖에 둡니다. |
-| `intelligence/ingestion.py`, `models.py` | 사용자 소유 UTF-8 Markdown 문서 탐색·chunk 및 지식 데이터 모델. |
-| `intelligence/qdrant_retriever.py`, `openai_adapters.py` | 컬렉션/차원 확인, bounded 검색·임베딩·모델 제공자 어댑터. |
+| `intelligence/ingestion.py`, `manifest.py`, `models.py` | 사용자 소유 UTF-8 Markdown 문서 탐색·chunk, 버전별 출처/권리/해시 검증, 코퍼스 식별자 및 지식 데이터 모델. |
+| `intelligence/qdrant_retriever.py`, `openai_adapters.py` | 컬렉션/차원 확인, bounded 검색·임베딩·모델 제공자 어댑터, 선택 관리 코퍼스의 미리보기/동기화. |
 | `intelligence/text2sql.py`, `sql_guard.py` | 모델 SQL 생성·재시도·답변 합성 및 SQLGlot AST 검증. |
 | `storage/database.py`, `reports.py`, `memory.py`, `models.py` | SQLAlchemy 연결·스캔 보고서 영속화·테스트용 메모리 저장소·테이블. |
 | `storage/intelligence.py`, `audit.py` | 합성 CSV 형식 검증과 `intel` 적재, 읽기 전용 쿼리 실행, 내용 없는 감사 이벤트 저장. |
 | `reporting/builder.py`, `types.py`, `json_report.py`, `markdown.py`, `sarif.py` | 하나의 `ScanReport` 정규화와 JSON/Markdown/SARIF 2.1.0 렌더링. |
 | `evaluation/offline_rag.py`, `rag_models.py`, `rag_render.py` | 고정 매니페스트·인덱싱된 chunk digest·실제 RAG 그래프 경로를 평가하고 제한된 증거를 렌더링. |
 | `scripts/run_rag_evidence.py` | 키 없는 RAG 평가를 실행하고 JSON/Markdown 파일을 원자적으로 기록하며 라벨 불일치를 실패로 반환. |
+| `evaluation/live_rag.py`, `scripts/run_live_rag_evidence.py` | 명시적 모델 키가 있을 때만 동일 지식 그래프의 제공자 경로를 관찰하고 지표 분모·모델 ID·해시·사람 검토 필요성을 로컬에 기록. |
 | `evaluation/scanner_benchmark.py`, `scanner_models.py` | 합성 스캐너 사례를 공개 스캔 경로로 평가하고 정확 일치 지표와 커버리지를 계산. |
 | `scripts/run_scanner_benchmark.py` | 엄격한 오프라인 스캐너 벤치마크를 실행하고 JSON/Markdown 증거를 기록. |
-| `api/app.py`, `dependencies.py`, `schemas.py`, `middleware.py`, `errors.py` | FastAPI 조립, 주입 경계, 검증된 요청, 상관 ID와 안전한 오류 응답. |
+| `evaluation/external_benchmark.py`, `scripts/run_external_scanner_benchmark.py` | 별도 사용자 보유 OWASP Python 코퍼스의 고정된 리비전·라벨 digest를 검증하고 소스 실행 없이 넓은 CWE 사례 점수를 분모와 함께 계산. |
+| `api/app.py`, `auth.py`, `dependencies.py`, `schemas.py`, `middleware.py`, `errors.py` | FastAPI 조립, 공유 Bearer 토큰 경계, 주입 경계, 검증된 요청, 상관 ID와 안전한 오류 응답. |
 | `api/routes/scans.py`, `reports.py`, `knowledge.py`, `health.py` | 파일·ZIP 업로드, 영속 보고서 조회/렌더링, 지식 질의, 생존/준비 상태 HTTP 경로. |
 | `cli.py`, `apps/api/`, `apps/web/` | Typer CLI, Uvicorn 진입점, Streamlit 데모. |
 | `audit.py`, `observability.py`, `config.py` | 허용 목록 기반 감사 이벤트, 구조화 로그, 환경 기반 설정. |
 
-`migrations/`는 `app`과 `intel` 스키마 및 읽기 권한을 만들고, `infra/postgres/init/`은 reader 로그인을 부트스트랩합니다. [Compose](../compose.yaml)는 PostgreSQL·Qdrant·API·웹과 일회성 초기화 서비스를 연결합니다. [CI](../.github/workflows/ci.yml)와 [보안 셀프 스캔](../.github/workflows/security-scan.yml)은 코드에 포함된 워크플로 정의이며, 호스팅 실행 성공의 증거와는 구별해야 합니다.
+`migrations/`는 `app`과 `intel` 스키마 및 읽기 권한을 만들고 과거 보고서의 소스 증거를 고정 문구로 대체합니다. `infra/postgres/init/`은 reader 로그인을 부트스트랩합니다. [Compose](../compose.yaml)는 PostgreSQL·Qdrant·API·웹과 일회성 초기화 서비스를 연결합니다. [CI](../.github/workflows/ci.yml)는 키 없는 평가 증거와 별도 Compose 스모크를 실행하도록 정의되어 있으며, 신뢰된 `main`에서만 아티팩트를 게시합니다. [보안 셀프 스캔](../.github/workflows/security-scan.yml)과 함께 호스팅 실행 성공은 해당 커밋의 실행에서 확인해야 합니다.
 
 HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/scans/file`, `POST /v1/scans/archive`, `GET /v1/scans/{scan_id}`, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`, `POST /v1/knowledge/query`입니다. JSON 보고서는 저장된 canonical report이고 Markdown/SARIF은 같은 보고서에서 렌더링합니다.
 
@@ -85,8 +89,10 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/scans/file`, `
 
 `scripts.run_scanner_benchmark`는 저장소가 작성한 39개 합성 사례를 임시 파일로 분리해 공개 `scan_path`로 검사합니다. 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 집합으로 TP·FP·FN을 계산하고, 읽지 못한 사례·파싱 경고·진단을 별도 커버리지로 남깁니다. 기본 실행은 불일치와 커버리지 실패 시 비정상 종료하며, `build/evidence/`의 JSON/Markdown에는 재현 가능한 필드만 기록합니다. [변경 전 측정](evidence/scanner-baseline.md)과 [현재 수치 및 재현 명령](demo.md#11-합성-스캐너-벤치마크)은 이 고정 코퍼스에만 적용됩니다.
 
+선택적 외부 평가는 사용자 제공 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython) 체크아웃에서 리비전과 기대 라벨 CSV 해시를 확인한 뒤 CWE-78/502 사례를 소스 실행 없이 읽습니다. `PY002`/`PY004`와의 매핑은 넓은 CWE 범주 도전이지 모든 sink를 구현했다는 뜻이 아닙니다. 합성 벤치마크의 수치와 합산하지 않으며, 미실행 외부 코퍼스 점수를 만들지 않습니다. 선택적 실제 제공자 RAG 평가는 키가 있을 때만 실행하고 사실성을 자동 채점하지 않습니다.
+
 ## 실패와 신뢰 경계
 
-정적 규칙은 키 없이 동작합니다. API 스캔 영속화는 PostgreSQL이 필요하며 `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다.
+정적 규칙은 키 없이 동작합니다. 운영 API는 `SECRAGRAPH_API_TOKEN` 없이는 시작하지 않으며 API 스캔 영속화는 PostgreSQL이 필요합니다. `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 별도의 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다. 검증된 `sync-corpus`도 Qdrant에는 비원자적으로 적용되며 실패 후 동일 manifest로 재시도해야 합니다.
 
 업로드·검색 문서·DB 행·모델 결과는 모두 신뢰하지 않는 데이터입니다. 입력 크기, SQL 권한, 결과 길이, 출처 식별자를 각 경계에서 제한합니다. 남은 위험과 운영 전제는 [위협 모델](threat-model.md)과 [운영 문서](operations.md)에 있습니다.

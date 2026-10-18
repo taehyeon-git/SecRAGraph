@@ -32,7 +32,7 @@ class RecordingHttpClient:
         url: str,
         **kwargs: object,
     ) -> Iterator[httpx.Response]:
-        assert method == "POST"
+        assert method in {"POST", "GET"}
         self.calls.append((url, kwargs))
         response = self.responses.pop(0)
         try:
@@ -71,7 +71,7 @@ def test_knowledge_query_uses_only_the_http_endpoint() -> None:
     assert http.calls == [
         (
             "http://api:8000/v1/knowledge/query",
-            {"json": {"question": "How do I prevent injection?"}},
+            {"json": {"question": "How do I prevent injection?"}, "headers": {}},
         )
     ]
 
@@ -86,8 +86,45 @@ def test_file_scan_uses_the_file_endpoint_and_multipart_metadata() -> None:
     assert http.calls == [
         (
             "http://api:8000/v1/scans/file",
-            {"files": {"file": ("app.py", b"print('safe')\n", "text/x-python")}},
+            {"files": {"file": ("app.py", b"print('safe')\n", "text/x-python")}, "headers": {}},
         )
+    ]
+
+
+def test_configured_token_is_sent_to_all_api_calls_without_error_echo() -> None:
+    token = "test-only-token"
+    http = RecordingHttpClient(
+        [
+            _response(200, _knowledge_payload()),
+            _response(200, {"scan_id": "scan-1", "findings": []}),
+            _response(401, {"code": "unauthorized", "message": "Authentication is required."}),
+        ]
+    )
+    client = SecRAGraphApiClient("http://api:8000", http_client=http, token=token)
+
+    client.query_knowledge("question")
+    client.scan_file("app.py", b"print('ok')", "text/x-python")
+    with pytest.raises(ApiClientError) as captured:
+        client.get_report_format("00000000-0000-0000-0000-000000000001", "markdown")
+
+    assert all(call[1]["headers"] == {"Authorization": f"Bearer {token}"} for call in http.calls)
+    assert token not in str(captured.value)
+
+
+def test_report_formats_are_retrieved_as_bounded_bytes() -> None:
+    scan_id = "00000000-0000-0000-0000-000000000001"
+    response = httpx.Response(
+        200,
+        content=b"# Safe report",
+        headers={"Content-Type": "text/markdown; charset=utf-8"},
+        request=httpx.Request("GET", "http://api:8000/test"),
+    )
+    http = RecordingHttpClient([response])
+    client = SecRAGraphApiClient("http://api:8000", http_client=http)
+
+    assert client.get_report_format(scan_id, "markdown") == b"# Safe report"
+    assert http.calls == [
+        (f"http://api:8000/v1/scans/{scan_id}/report?format=markdown", {"headers": {}})
     ]
 
 
@@ -352,6 +389,7 @@ class _RecordingStreamlit:
         self.warnings: list[str] = []
         self.metrics: list[tuple[str, object]] = []
         self.links: list[tuple[str, str]] = []
+        self.downloads: list[tuple[str, bytes, str, str]] = []
 
     def subheader(self, _value: str) -> None:
         return None
@@ -376,6 +414,36 @@ class _RecordingStreamlit:
 
     def link_button(self, label: str, url: str) -> None:
         self.links.append((label, url))
+
+    def download_button(
+        self, label: str, *, data: bytes, file_name: str, mime: str, on_click: str
+    ) -> None:
+        assert on_click == "ignore"
+        self.downloads.append((label, data, file_name, mime))
+
+
+def test_scan_result_offers_json_markdown_and_sarif_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _RecordingStreamlit()
+    monkeypatch.setattr(streamlit_app, "st", fake)
+    scan_id = "00000000-0000-0000-0000-000000000001"
+
+    class Reports:
+        def get_report_format(self, _scan_id: str, format_name: str) -> bytes:
+            assert _scan_id == scan_id
+            return {"markdown": b"# Report", "sarif": b"{}"}[format_name]
+
+    streamlit_app._show_report_downloads(Reports(), {"scan_id": scan_id, "findings": []})
+
+    assert [item[0] for item in fake.downloads] == [
+        "Download JSON",
+        "Download Markdown",
+        "Download SARIF",
+    ]
+    assert fake.downloads[0][2].endswith(".json")
+    assert fake.downloads[1][1] == b"# Report"
+    assert fake.downloads[2][3] == "application/sarif+json"
 
 
 def test_remote_knowledge_text_is_rendered_plain_and_without_truncation(

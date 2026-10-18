@@ -147,6 +147,7 @@ def test_ensure_collection_uses_cosine_and_creates_metadata_indexes() -> None:
     assert client.created[0][1].distance is models.Distance.COSINE
     assert {field for _, field, _ in client.indexes} == {
         "document_id",
+        "corpus_id",
         "source_path",
         "source_url",
         "page",

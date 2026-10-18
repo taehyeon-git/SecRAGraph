@@ -4,20 +4,23 @@ Run these commands from the repository root with Docker Desktop's Linux engine (
 
 ## Start and check the stack
 
-Set two independent, URL-safe passwords in the current Windows PowerShell 5.1 or PowerShell 7 session. Do not paste the generated values into source files, command arguments, or logs. Set `SECRAGRAPH_OPENAI_API_KEY` only if provider-backed answers or document ingestion are needed.
+Set two independent, URL-safe passwords and a separate API Bearer token in the current Windows PowerShell 5.1 or PowerShell 7 session. Do not paste the generated values into source files, command arguments, or logs. Set `SECRAGRAPH_OPENAI_API_KEY` only if provider-backed answers or document ingestion are needed. Production mode rejects startup if `SECRAGRAPH_API_TOKEN` is missing or blank.
 
 ```powershell
 $adminBytes = New-Object byte[] 32
 $readerBytes = New-Object byte[] 32
+$apiTokenBytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 try {
     $rng.GetBytes($adminBytes)
     $rng.GetBytes($readerBytes)
+    $rng.GetBytes($apiTokenBytes)
 } finally {
     $rng.Dispose()
 }
 $env:POSTGRES_PASSWORD = [BitConverter]::ToString($adminBytes).Replace('-', '')
 $env:SECRAGRAPH_READER_PASSWORD = [BitConverter]::ToString($readerBytes).Replace('-', '')
+$env:SECRAGRAPH_API_TOKEN = [BitConverter]::ToString($apiTokenBytes).Replace('-', '')
 docker compose config --quiet
 docker compose build api web
 docker compose up -d
@@ -37,6 +40,8 @@ docker compose logs --tail=100 api web postgres qdrant
 
 The published API and web ports default to `8000` and `8501`; all four published ports bind to host loopback. The Streamlit frontend accepts uploads up to 5 MiB and messages up to 8 MiB; the API enforces its separate 5,000,000-byte upload limit. Set `API_PORT`, `WEB_PORT`, `POSTGRES_PORT`, and `QDRANT_PORT` before startup if those host ports are occupied. Keep the password variables available in the same session for every `docker compose` command.
 
+Every `/v1/*` API route requires `Authorization: Bearer <SECRAGRAPH_API_TOKEN>`; health endpoints do not. The Streamlit container forwards the same token but does **not** authenticate its browser visitors. This shared token is for a single trusted local operator, not per-user authorization or a public multi-tenant deployment. Rotate a disclosed token by changing the current shell value, recreating `api` and `web`, and invalidating any copied credentials. Existing report IDs are not authorization boundaries. Avoid copying rendered Compose configuration, which expands secrets.
+
 ## Migrate and load sample data
 
 `docker compose up -d` runs the reader bootstrap, Alembic migration, and Qdrant collection bootstrap before starting the API. Repeat or inspect them explicitly with:
@@ -47,11 +52,18 @@ docker compose run --rm migrate /app/.venv/bin/security-review import-intelligen
 docker compose run --rm qdrant-bootstrap /app/.venv/bin/security-review bootstrap-qdrant
 ```
 
-Document ingestion calls the embedding provider and requires a real API key in the host environment. With `SECRAGRAPH_OPENAI_API_KEY` set in the current session:
+Managed document sync validates [the local manifest](../data/knowledge/manifest.json) before writing. The preview needs running Qdrant but no model key; applying nonempty documents calls the embedding provider and requires a real API key. To retain the local provenance receipt when running the one-shot container, bind only the ignored evidence directory:
 
 ```powershell
-docker compose run --rm -e SECRAGRAPH_OPENAI_API_KEY qdrant-bootstrap /app/.venv/bin/security-review ingest-documents /app/data/knowledge
+docker compose run --rm qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge
+New-Item -ItemType Directory -Force -Path build/evidence | Out-Null
+$evidenceMount = "$(Join-Path (Get-Location) 'build/evidence'):/evidence"
+docker compose run --rm --volume $evidenceMount -e SECRAGRAPH_OPENAI_API_KEY qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge --apply --receipt /evidence/ingest-receipt.json
 ```
+
+`build/evidence/ingest-receipt.json` records manifest and source digests, publisher, license, revision/date, and document counts; it may be sensitive and is not a public CI artifact. Changed/removed documents are reconciled only within their managed corpus. A zero-document deletion needs the additional `--allow-empty` flag. The update is not an atomic Qdrant transaction: a provider or Qdrant failure can leave a partial selected corpus. Inspect the error and rerun the same pinned manifest to converge; do not assume rollback. `ingest-documents` remains available for legacy, manifest-free demo ingestion, but has no provenance verification.
+
+For legacy reports created before the safe-evidence migration, `alembic upgrade head` replaces the stored `redacted_evidence` strings with a fixed privacy notice. The downgrade deliberately cannot reconstruct them. Previously exported reports, CI artifacts, database backups, and PostgreSQL WAL are outside this migration; identify and retire them separately under your data-retention policy. New reports never persist source-line evidence, but file paths and target names can still be sensitive.
 
 ## Backup, shutdown, and incidents
 

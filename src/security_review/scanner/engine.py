@@ -11,7 +11,7 @@ from re import Match
 from security_review.domain.models import Finding
 from security_review.scanner.node_tls import detect_node_tls_assignments
 from security_review.scanner.python_calls import PythonCallScanStopped, detect_python_calls
-from security_review.scanner.redaction import redact_match
+from security_review.scanner.redaction import safe_evidence
 from security_review.scanner.rules import DEFAULT_RULES, Rule
 
 PROCESSING_TIME_LIMIT_EXCEEDED = "processing_time_limit_exceeded"
@@ -93,23 +93,8 @@ def _eligible_matches(line: str, rule: Rule, extension: str) -> tuple[Match[str]
     return tuple(matches)
 
 
-def _redact_line(line: str, rules: Sequence[Rule]) -> str:
-    # Evidence includes the whole line, including comments and examples that do not
-    # qualify as findings. Mask their secret-shaped values before any report sees it.
-    spans = {
-        match.span(rule.redaction_group)
-        for rule in rules
-        if rule.redaction_group is not None and rule.pattern is not None
-        for match in rule.pattern.finditer(line)
-    }
-    redacted = line
-    for span in sorted(spans, reverse=True):
-        redacted = redact_match(redacted, span)
-    return redacted.strip()
-
-
 def finding_id(rule_id: str, path: str, line_number: int, redacted: str) -> str:
-    """Build a stable identifier using redacted evidence only."""
+    """Build a stable identifier using source-free evidence only."""
 
     payload = f"{rule_id}\0{path}\0{line_number}\0{redacted}".encode()
     return f"{rule_id}:{sha256(payload).hexdigest()[:16]}"
@@ -165,13 +150,12 @@ def scan_text_detailed(
         if should_stop is not None and should_stop():
             warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
             break
-        redacted_evidence = _redact_line(line, applicable_rules)
         for rule in regex_rules:
             if should_stop is not None and should_stop():
                 warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
                 break
             for _match in _eligible_matches(line, rule, extension):
-                add_finding(rule, line_number, redacted_evidence)
+                add_finding(rule, line_number, safe_evidence(rule.rule_id))
         if warnings:
             break
 
@@ -183,8 +167,7 @@ def scan_text_detailed(
                 ast_rule = python_rules.get(match.rule_id)
                 if ast_rule is None:
                     continue
-                redacted_evidence = _redact_line(lines[match.line_start - 1], applicable_rules)
-                add_finding(ast_rule, match.line_start, redacted_evidence)
+                add_finding(ast_rule, match.line_start, safe_evidence(ast_rule.rule_id))
         except PythonCallScanStopped:
             warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
         except (SyntaxError, RecursionError):
@@ -199,8 +182,7 @@ def scan_text_detailed(
                 warnings.append(PROCESSING_TIME_LIMIT_EXCEEDED)
             else:
                 for line_number in node_lines:
-                    redacted_evidence = _redact_line(lines[line_number - 1], applicable_rules)
-                    add_finding(node_tls_rule, line_number, redacted_evidence)
+                    add_finding(node_tls_rule, line_number, safe_evidence(node_tls_rule.rule_id))
 
     return ScanTextResult(
         findings=tuple(

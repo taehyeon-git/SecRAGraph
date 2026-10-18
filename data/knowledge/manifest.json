@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "corpus_id": "secragraph-demo-v1",
+  "documents": [
+    {
+      "path": "secragraph-security-guidelines.md",
+      "publisher": "SecRAGraph project",
+      "source_url": "https://github.com/taehyeon-git/SecRAGraph/blob/1131df51240fcac3f44db3b8a9d3125eb1263ec3/data/knowledge/secragraph-security-guidelines.md",
+      "license": "MIT",
+      "source_revision": "1131df51240fcac3f44db3b8a9d3125eb1263ec3",
+      "source_date": "2026-10-09",
+      "sha256": "2292105c8e97f190122ace11f06be64a22c422a1255dcad03cde03ace4a98e96"
+    }
+  ]
+}

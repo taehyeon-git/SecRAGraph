@@ -1,12 +1,12 @@
 # SecRAGraph
 
-[![CI](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml) · [v0.1.0 릴리스](https://github.com/taehyeon-git/SecRAGraph/releases/tag/v0.1.0) · [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)
+[![CI](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml) · [현재 main](https://github.com/taehyeon-git/SecRAGraph/tree/main) · [초기 v0.1.0 릴리스](https://github.com/taehyeon-git/SecRAGraph/releases/tag/v0.1.0) · [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)
 
 SecRAGraph는 소스 코드를 실행하지 않고 정적 규칙으로 검사하며, LangGraph로 스캔과 보안 지식 질의를 조정하고, 선택적으로 Qdrant RAG 문서 근거와 PostgreSQL CVE/CWE Text2SQL 답변을 제공하는 백엔드·DevSecOps 포트폴리오 프로젝트입니다.
 
 ## 문제 정의
 
-보안 검토 결과는 재현 가능한 탐지와 출처가 분명한 설명이 함께 있어야 유용합니다. 이 프로젝트는 파일·ZIP·로컬 디렉터리에서 제한된 텍스트만 읽어 규칙 기반 finding을 만들고, 민감한 증거를 가린 뒤 한 보고서를 JSON, Markdown, SARIF 2.1.0으로 표현합니다. API, CLI, Streamlit 데모, CI가 같은 스캔 엔진을 사용합니다.
+보안 검토 결과는 재현 가능한 탐지와 출처가 분명한 설명이 함께 있어야 유용합니다. 이 프로젝트는 파일·ZIP·로컬 디렉터리에서 제한된 텍스트만 읽어 규칙 기반 finding을 만들고, 소스 줄 대신 규칙별 고정 증거 문구만 담은 보고서를 JSON, Markdown, SARIF 2.1.0으로 표현합니다. API, CLI, Streamlit 데모, CI가 같은 스캔 엔진을 사용합니다.
 
 실제 [데모 파일](examples/insecure/sample.py)을 CLI로 스캔한 JSON의 일부입니다. `scan_id`와 생성 시각은 실행마다 달라집니다.
 
@@ -19,7 +19,7 @@ SecRAGraph는 소스 코드를 실행하지 않고 정적 규칙으로 검사하
     "rule_id": "SEC001",
     "file_path": "sample.py",
     "line_start": 5,
-    "redacted_evidence": "DEMO_API_KEY = ***REDACTED***",
+    "redacted_evidence": "Secret-like assignment detected: ***REDACTED***; source omitted for privacy.",
     "remediation": "Revoke exposed credentials and load replacements from an approved secret store.",
     "references": []
   }]
@@ -58,28 +58,31 @@ flowchart LR
 
 ## RAG와 Text2SQL
 
-- RAG 수집은 사용자가 실행합니다. 현재 UTF-8 `.md`/`.markdown` 문서만 받으며 PDF 수집은 구현되어 있지 않습니다. 임베딩 모델 키와 Qdrant 컬렉션이 필요합니다. [동봉된 지침](data/knowledge/secragraph-security-guidelines.md)은 이 저장소용으로 새로 작성한 데모 문서입니다.
+- RAG 수집은 사용자가 실행합니다. 현재 UTF-8 `.md`/`.markdown` 문서만 받으며 PDF 수집은 구현되어 있지 않습니다. 임베딩 모델 키와 Qdrant 컬렉션이 필요합니다. [동봉된 지침](data/knowledge/secragraph-security-guidelines.md)은 이 저장소용으로 새로 작성한 데모 문서이고 [검증용 manifest](data/knowledge/manifest.json)에 출처·라이선스·원본 해시가 기록됩니다. `sync-corpus`는 기본 미리보기이며 `--apply`가 있어야 해당 관리 코퍼스만 갱신합니다.
 - Text2SQL은 모델이 만든 SQL을 SQLGlot AST로 검증한 뒤 `intel.cwe`와 `intel.cve`의 제한된 `SELECT`만 읽기 전용 역할로 실행합니다. 행 수·시간·재시도가 제한됩니다. [세부 통제](docs/text2sql-security.md)를 참고하세요.
 - [동봉된 CVE/CWE CSV](data/samples/README.md)는 합성 데모 데이터입니다. 실제 취약점 피드나 운영 환경의 지식 범위를 대변하지 않습니다. 외부 자료는 권리를 확인한 사용자가 직접 확보하고 수집해야 합니다.
 
-모델 키 없이도 실제 지식 LangGraph·메모리 내 Qdrant의 RAG 경로를 재현할 수 있습니다. `uv run python -m scripts.run_rag_evidence`는 동봉한 지침과 고정 사례 4건을 평가해 `build/evidence/rag.json`, `build/evidence/rag.md`를 만들고 라벨 불일치 시 실패합니다. 2026-10-09 로컬 실행 결과는 4/4 사례 통과였으며, 직접 검색·재작성 후 검색·근거 부족 보류·가짜 인용 거부를 포함합니다. 이는 결정적 테스트 더블의 워크플로·인용 계약 결과이며 실제 LLM 품질 점수가 아닙니다. 질문, 출처 발췌, 지표 분모와 재현 절차는 [데모](docs/demo.md#2-키-없는-오프라인-rag-근거)에 있습니다.
+모델 키 없이도 실제 지식 LangGraph·메모리 내 Qdrant의 RAG 경로를 재현할 수 있습니다. `uv run python -m scripts.run_rag_evidence`는 동봉한 지침과 고정 사례 4건을 평가해 `build/evidence/rag.json`, `build/evidence/rag.md`를 만들고 라벨 불일치 시 실패합니다. 2026-10-18 로컬 실행 결과는 4/4 사례 통과였으며, 직접 검색·재작성 후 검색·근거 부족 보류·가짜 인용 거부를 포함합니다. 이는 결정적 테스트 더블의 워크플로·인용 계약 결과이며 실제 LLM 품질 점수가 아닙니다. 별도의 선택 실행 `scripts.run_live_rag_evidence`는 키가 있을 때만 실제 제공자 경로를 관찰하고, 답변의 사실성은 사람 검토가 필요하다고 표시합니다. 질문, 출처 발췌, 지표 분모와 재현 절차는 [데모](docs/demo.md#2-키-없는-오프라인-rag-근거)에 있습니다.
 
 ## 빠른 시작
 
-저장소 루트에서 Docker Desktop의 Linux 엔진(또는 Linux Docker 엔진)을 사용합니다. 아래는 Windows PowerShell 5.1/7 명령이며 두 비밀번호는 현재 셸에만 둡니다. 기존 `postgres_data` 볼륨이 있다면 새 `POSTGRES_PASSWORD` 대신 초기화 당시 비밀번호를 사용하세요. 역할 회전 절차는 [운영 문서](docs/operations.md)에 있습니다.
+저장소 루트에서 Docker Desktop의 Linux 엔진(또는 Linux Docker 엔진)을 사용합니다. 아래는 Windows PowerShell 5.1/7 명령이며 DB 비밀번호 두 개와 API 토큰은 현재 셸에만 둡니다. 기존 `postgres_data` 볼륨이 있다면 새 `POSTGRES_PASSWORD` 대신 초기화 당시 비밀번호를 사용하세요. 역할 회전 절차는 [운영 문서](docs/operations.md)에 있습니다.
 
 ```powershell
 $adminBytes = New-Object byte[] 32
 $readerBytes = New-Object byte[] 32
+$apiTokenBytes = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 try {
     $rng.GetBytes($adminBytes)
     $rng.GetBytes($readerBytes)
+    $rng.GetBytes($apiTokenBytes)
 } finally {
     $rng.Dispose()
 }
 $env:POSTGRES_PASSWORD = [BitConverter]::ToString($adminBytes).Replace('-', '')
 $env:SECRAGRAPH_READER_PASSWORD = [BitConverter]::ToString($readerBytes).Replace('-', '')
+$env:SECRAGRAPH_API_TOKEN = [BitConverter]::ToString($apiTokenBytes).Replace('-', '')
 docker compose config --quiet
 docker compose build api web
 docker compose up -d
@@ -87,7 +90,7 @@ docker compose ps -a
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
-API와 웹 UI는 기본적으로 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. UI는 브라우저에서 `http://127.0.0.1:8501`로 확인할 수 있습니다. 첫 빌드 시간은 환경에 따라 다릅니다. 비밀번호를 담은 `docker compose config` 전체 출력은 공유하지 마세요.
+API와 웹 UI는 기본적으로 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. UI는 브라우저에서 `http://127.0.0.1:8501`로 확인할 수 있습니다. `/v1/*` 직접 호출에는 Bearer 토큰이 필요하며 Streamlit은 동일 토큰을 API로 전달합니다. UI 자체의 로그인 기능은 아닙니다. 첫 빌드 시간은 환경에 따라 다릅니다. 비밀번호·토큰을 담은 `docker compose config` 전체 출력은 공유하지 마세요.
 
 로컬 CLI는 Python 3.11 이상과 `uv`를 사용합니다. 아래 스캔에는 모델 키·PostgreSQL·Qdrant가 필요하지 않습니다.
 
@@ -100,7 +103,7 @@ uv run security-review scan examples/insecure/sample.py --format sarif --output 
 실행 중인 API에 데모 파일을 보내려면 Windows PowerShell에서 `curl.exe`를 사용합니다(Unix 셸에서는 `curl`). JSON 응답의 `scan_id`로 `/v1/scans/{scan_id}` 또는 `/v1/scans/{scan_id}/report?format=markdown|sarif`를 조회할 수 있습니다. OpenAPI는 `http://127.0.0.1:8000/docs`에 있습니다.
 
 ```powershell
-curl.exe -sS -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file
+curl.exe -sS -H "Authorization: Bearer $env:SECRAGRAPH_API_TOKEN" -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file
 ```
 
 ZIP은 `POST /v1/scans/archive`에서 검증 후 처리합니다. `POST /v1/knowledge/query`는 별도 지식 기능입니다. 제공자 키, PostgreSQL 데이터, Qdrant에 수집한 문서를 준비한 뒤 호출해야 하며, 빈 Compose 시작만으로 근거 있는 답변이 생성되지는 않습니다. [운영 문서](docs/operations.md)에 샘플 데이터 적재와 Markdown 수집 명령이 있습니다.
@@ -122,11 +125,13 @@ uv run python -m scripts.run_scanner_benchmark
 
 명령은 키·Docker·네트워크 없이 `build/evidence/scanner.json`과 `scanner.md`를 생성하며, 라벨 불일치·검사 누락·예상 밖 진단이 있으면 0이 아닌 코드로 종료합니다.
 
+실제 분포에 가까운 별도 시험을 원하면 사용자가 직접 확보한 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython)의 로컬 체크아웃을 커밋 SHA와 예상 결과 CSV SHA-256으로 고정해 `scripts.run_external_scanner_benchmark`에 넘길 수 있습니다. GPL 코퍼스는 이 저장소에 복사하지 않았습니다. 이 평가는 CWE-78·CWE-502의 **넓은 분류별 사례 단위 도전**이며 `sh -c`나 `pickle.loads` 같은 미지원 sink도 포함되어 낮은 재현율이 예상됩니다. 아직 외부 코퍼스 실행 점수를 주장하지 않습니다. [실행 방법과 분모 해석](docs/demo.md)을 보세요.
+
 ## 테스트와 CI
 
-CI의 `quality` 작업은 키 없는 RAG 증거와 오프라인 스캐너 벤치마크를 각각 실행하고, 두 평가의 JSON·Markdown 증거 파일을 검증합니다.
+CI의 `quality` 작업은 키 없는 RAG 증거와 오프라인 스캐너 벤치마크를 각각 실행하고, 두 평가의 JSON·Markdown 증거 파일을 검증합니다. 신뢰된 `main` push에서만 동봉된 합성 자료로 만든 네 파일을 [CI 실행 아티팩트](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml)로 14일간 게시합니다. PR 실행은 검증만 합니다. 전체 API·웹·DB·Qdrant Compose 스모크도 독립 프로젝트에서 수행하고 볼륨을 정리합니다.
 
-별도 테스트 서비스를 시작하지 않고 아래 코드 품질 검사와 문서·CLI 테스트를 실행할 수 있습니다. [CI 정의](.github/workflows/ci.yml)는 Ruff, mypy, pytest, Bandit, 키 없는 RAG 증거 생성·파일 검증, 의존성 감사, 컨테이너 빌드를 구성합니다. [셀프 스캔 정의](.github/workflows/security-scan.yml)는 `src`를 SARIF로 스캔하고 [검증 스크립트](scripts/validate_sarif.py)를 실행합니다. GitHub Code Scanning 업로드는 권한이 허용되는 이벤트에서만 시도하도록 구성되어 있습니다. `v0.1.0` 태그가 가리키는 커밋의 [CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)과 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 모두 통과했고, SARIF는 [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 게시되었습니다.
+별도 테스트 서비스를 시작하지 않고 아래 코드 품질 검사와 문서·CLI 테스트를 실행할 수 있습니다. [CI 정의](.github/workflows/ci.yml)는 Ruff, mypy, pytest, Bandit, 키 없는 평가 증거, 의존성 감사, 컨테이너 빌드·스모크를 구성합니다. [셀프 스캔 정의](.github/workflows/security-scan.yml)는 `src`를 SARIF로 스캔하고 [검증 스크립트](scripts/validate_sarif.py)를 실행합니다. GitHub Code Scanning 업로드는 권한이 허용되는 이벤트에서만 시도하도록 구성되어 있습니다. 과거 [v0.1.0 CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)과 [셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 이 변경 이전의 증거이며 현재 `main` 기능 검증으로 인용하지 않습니다.
 
 ```powershell
 uv run ruff format --check .
@@ -140,7 +145,7 @@ uv run bandit -q -r src apps
 
 ## 한계
 
-정적 규칙은 지원되는 파일 유형과 패턴만 다룹니다. 이 프로젝트는 전문 SAST나 비밀 탐지기, 침투 시험을 대체하지 않으며, 탐지 결과가 곧 실제 악용 가능성의 증명도 아닙니다. 인증·다중 테넌트 접근 제어·자동 수정은 구현되어 있지 않으므로 공개 인터넷 서비스로 바로 배포하면 안 됩니다. 모델 답변은 오류나 프롬프트 인젝션 영향을 받을 수 있고, 문서 근거의 품질은 사용자가 수집한 자료에 좌우됩니다. 자세한 경계와 잔여 위험은 [위협 모델](docs/threat-model.md)에 있습니다.
+정적 규칙은 지원되는 파일 유형과 패턴만 다룹니다. 이 프로젝트는 전문 SAST나 비밀 탐지기, 침투 시험을 대체하지 않으며, 탐지 결과가 곧 실제 악용 가능성의 증명도 아닙니다. API 토큰은 한 사람의 로컬 사용을 위한 공통 비밀일 뿐 Streamlit 사용자 인증·다중 테넌트 권한·속도 제한이 아닙니다. 공개 인터넷 서비스로 바로 배포하면 안 됩니다. 보고서의 소스 줄 증거는 제거했지만 사용자가 지정한 파일 경로·대상 이름·인용 메타데이터는 민감할 수 있고, 과거 내보낸 보고서·백업은 회수되지 않습니다. 모델 답변은 오류나 프롬프트 인젝션 영향을 받을 수 있고, 문서 근거의 품질은 사용자가 수집한 자료에 좌우됩니다. 자세한 경계와 잔여 위험은 [위협 모델](docs/threat-model.md)에 있습니다.
 
 ## 출처와 기여
 
