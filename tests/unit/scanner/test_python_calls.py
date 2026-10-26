@@ -34,6 +34,143 @@ def test_detects_supported_calls_at_call_start(
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        'import subprocess\nsubprocess.run(["sh", "-c", f"echo {value}"])\n',
+        'from subprocess import Popen as launch\nlaunch(["cmd.exe", "/c", "echo " + value])\n',
+    ],
+)
+def test_detects_explicit_shell_launcher_with_dynamic_argv(source: str) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY002", 2)
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import subprocess\nsubprocess.run(["python", "-c", f"print({value})"])\n',
+        'import subprocess\nsubprocess.run(["sh", "-c", "echo fixed"])\n',
+        'import subprocess\nsubprocess.run(["sh", "/c", f"echo {value}"])\n',
+        'import subprocess\nsubprocess.run(["cmd.exe", "-c", f"echo {value}"])\n',
+    ],
+)
+def test_rejects_non_shell_or_constant_shell_argv(source: str) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert detect_python_calls(source) == ()
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ('import sqlite3\nc.execute(f"SELECT * FROM users WHERE id={user}")\n', [("PY005", 2)]),
+        ("import sqlite3\nc.execute('DELETE FROM users WHERE id=%s' % user)\n", [("PY005", 2)]),
+        (
+            "from sqlalchemy import text as sql\n"
+            "sql(\"UPDATE users SET name='{}'\".format(name))\n",
+            [("PY005", 2)],
+        ),
+        ("c.execute('SELECT * FROM ' + table)\n", [("PY005", 1)]),
+        ("import pickle as p\np.loads(data)\n", [("PY006", 2)]),
+        ("from pickle import loads as decode\ndecode(data)\n", [("PY006", 2)]),
+        ("import pickle\npickle.load(handle)\n", [("PY006", 2)]),
+    ],
+)
+def test_detects_dynamic_sql_and_pickle_calls(source, expected) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'c.execute("SELECT * FROM users WHERE id=?", (user,))\n',
+        'c.execute("SELECT * FROM users")\n',
+        'c.execute("SELECT * FROM " + "users")\n',
+        'c.execute(f"hello {user}")\n',
+        'c.execute(f"-- no {user}")\n',
+        "# pickle.loads(data)\n",
+        "example = 'pickle.loads(data)'\n",
+        "import pickle\npickle = safe_module\npickle.loads(data)\n",
+        "import pickle\ndef work(pickle):\n    pickle.loads(data)\n",
+        "from pickle import loads as decode\ndef decode(data):\n    return data\ndecode(user)\n",
+        'import sqlalchemy\nsqlalchemy = other\nsqlalchemy.text(f"SELECT {user}")\n',
+    ],
+)
+def test_rejects_parameterized_static_or_shadowed_calls(source) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert detect_python_calls(source) == ()
+
+
+def test_detects_simple_local_dynamic_sql_assignment_at_execution_sink() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = 'query = f"SELECT * FROM users WHERE id={user}"\ncursor.execute(query)\n'
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY005", 2)
+    ]
+
+
+def test_detects_dynamic_sql_through_local_assignment_aliases() -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    source = (
+        'query = f"SELECT * FROM users WHERE id={user}"\n'
+        "sql = query\n"
+        "statement = sql\n"
+        "cursor.execute(statement)\n"
+    )
+
+    assert [(item.rule_id, item.line_start) for item in detect_python_calls(source)] == [
+        ("PY005", 4)
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'query = "SELECT * FROM users"\ncursor.execute(query)\n',
+        'query = "SELECT * FROM users WHERE id=?"\ncursor.execute(query, (user,))\n',
+        'query = f"SELECT * FROM users WHERE id={user}"\n'
+        'query = "SELECT * FROM users"\ncursor.execute(query)\n',
+        (
+            'query = f"SELECT * FROM users WHERE id={user}"\n'
+            'sql = query\nsql = "SELECT * FROM users"\ncursor.execute(sql)\n'
+        ),
+        (
+            'query = f"SELECT * FROM users WHERE id={user}"\n'
+            'if flag:\n    query = "SELECT * FROM users"\n'
+            "cursor.execute(query)\n"
+        ),
+        (
+            'query = f"SELECT * FROM users WHERE id={user}"\n'
+            "def helper(query):\n    cursor.execute(query)\n"
+        ),
+        (
+            "for user in users:\n"
+            '    query = f"SELECT * FROM users WHERE id={user}"\n'
+            "cursor.execute(query)\n"
+        ),
+        (
+            'query = f"SELECT * FROM users WHERE id={user}"\n'
+            "for query in queries:\n    pass\n"
+            "cursor.execute(query)\n"
+        ),
+    ],
+)
+def test_local_sql_assignment_flow_rejects_static_reassigned_or_shadowed_queries(source) -> None:
+    from security_review.scanner.python_calls import detect_python_calls
+
+    assert detect_python_calls(source) == ()
+
+
+@pytest.mark.parametrize(
     ("source", "line"),
     [
         ("yaml.unsafe_load(data)\n", 1),

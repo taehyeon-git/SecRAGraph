@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from security_review.domain.models import (
     Confidence,
@@ -79,6 +79,23 @@ def test_repository_protocol_accepts_an_in_memory_fake() -> None:
 
 def test_in_memory_adapter_obeys_repository_contract() -> None:
     repository_contract(InMemoryReportRepository(), sample_report())
+
+
+def test_in_memory_report_ownership_is_isolated_from_other_members() -> None:
+    repository = InMemoryReportRepository()
+    owner = uuid4()
+    other = uuid4()
+    report = sample_report()
+    legacy = sample_report().model_copy(update={"scan_id": uuid4()})
+
+    repository.save(report, owner_member_id=owner)
+    repository.save(legacy)
+
+    assert repository.get(report.scan_id, owner_member_id=owner) == report
+    assert repository.get(report.scan_id, owner_member_id=other) is None
+    assert repository.get(legacy.scan_id, owner_member_id=owner) is None
+    assert repository.get(report.scan_id) == report
+    assert repository.get(legacy.scan_id) == legacy
 
 
 def test_finding_row_round_trips_every_canonical_field() -> None:

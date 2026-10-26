@@ -106,8 +106,16 @@ def test_live_text2sql_and_original_markdown_rag_paths() -> None:
         )
         with TestClient(app) as client:
             readiness = client.get("/health/ready")
-            sql = client.post("/v1/knowledge/query", json={"question": "List one CVE"})
-            rag = client.post("/v1/knowledge/query", json={"question": question})
+            username = f"flow-{uuid4().hex[:12]}"
+            password = "integration-only-password"
+            app.state.membership_service.register(username, password)
+            login = client.post("/v1/auth/login", json={"username": username, "password": password})
+            assert login.status_code == 200
+            headers = {"Authorization": f"Session {login.json()['token']}"}
+            sql = client.post(
+                "/v1/knowledge/query", json={"question": "List one CVE"}, headers=headers
+            )
+            rag = client.post("/v1/knowledge/query", json={"question": question}, headers=headers)
 
         assert readiness.status_code == 200
         assert readiness.json()["dependencies"] == {"postgres": True, "qdrant": True}

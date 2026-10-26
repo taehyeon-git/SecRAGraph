@@ -7,7 +7,7 @@ SecRAGraph는 Python 모듈형 단일 서비스입니다. 정적 스캔과 지�
 ```mermaid
 flowchart TB
   FILE[CLI file or directory] --> SCAN[ScanService]
-  UPLOAD[FastAPI file or ZIP] --> AUTH[Bearer token boundary]
+  UPLOAD[FastAPI file or ZIP] --> AUTH[Member Session or optional operator Bearer]
   AUTH --> TEMP[Validated temporary workspace]
   TEMP --> SCAN
   SCAN --> SGRAPH[Scan LangGraph]
@@ -24,7 +24,7 @@ flowchart TB
   VEC --> QDRANT
 ```
 
-CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없으며 PostgreSQL에 보고서를 저장하지 않습니다. API의 `ScanService`는 영속 보고서 저장소를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 결과를 `app.scan_reports` 등에 저장합니다. `/v1/*`는 ASGI 경계에서 본문 읽기 전에 단일 Bearer 토큰을 확인합니다. Streamlit은 같은 토큰을 전달하는 얇은 데모 클라이언트이며 자체 브라우저 로그인이 없습니다.
+CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없으며 PostgreSQL에 보고서를 저장하지 않습니다. API의 `ScanService`는 영속 보고서 저장소를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
 
 ## 두 LangGraph의 실제 노드
 
@@ -74,25 +74,33 @@ classify_intent ─┬→ general_answer → END
 | `evaluation/scanner_benchmark.py`, `scanner_models.py` | 합성 스캐너 사례를 공개 스캔 경로로 평가하고 정확 일치 지표와 커버리지를 계산. |
 | `scripts/run_scanner_benchmark.py` | 엄격한 오프라인 스캐너 벤치마크를 실행하고 JSON/Markdown 증거를 기록. |
 | `evaluation/external_benchmark.py`, `scripts/run_external_scanner_benchmark.py` | 별도 사용자 보유 OWASP Python 코퍼스의 고정된 리비전·라벨 digest를 검증하고 소스 실행 없이 넓은 CWE 사례 점수를 분모와 함께 계산. |
-| `api/app.py`, `auth.py`, `dependencies.py`, `schemas.py`, `middleware.py`, `errors.py` | FastAPI 조립, 공유 Bearer 토큰 경계, 주입 경계, 검증된 요청, 상관 ID와 안전한 오류 응답. |
+| `api/app.py`, `member_auth.py`, `dependencies.py`, `schemas.py`, `middleware.py`, `errors.py`, `routes/members.py` | FastAPI 조립, 회원 Session 및 선택적 운영 Bearer 인증 경계, 의존성 주입, 검증 요청, 상관 ID와 안전한 오류 응답. |
 | `api/routes/scans.py`, `reports.py`, `knowledge.py`, `health.py` | 파일·ZIP 업로드, 영속 보고서 조회/렌더링, 지식 질의, 생존/준비 상태 HTTP 경로. |
 | `cli.py`, `apps/api/`, `apps/web/` | Typer CLI, Uvicorn 진입점, Streamlit 데모. |
 | `audit.py`, `observability.py`, `config.py` | 허용 목록 기반 감사 이벤트, 구조화 로그, 환경 기반 설정. |
 
 `migrations/`는 `app`과 `intel` 스키마 및 읽기 권한을 만들고 과거 보고서의 소스 증거를 고정 문구로 대체합니다. `infra/postgres/init/`은 reader 로그인을 부트스트랩합니다. [Compose](../compose.yaml)는 PostgreSQL·Qdrant·API·웹과 일회성 초기화 서비스를 연결합니다. [CI](../.github/workflows/ci.yml)는 키 없는 평가 증거와 별도 Compose 스모크를 실행하도록 정의되어 있으며, 신뢰된 `main`에서만 아티팩트를 게시합니다. [보안 셀프 스캔](../.github/workflows/security-scan.yml)과 함께 호스팅 실행 성공은 해당 커밋의 실행에서 확인해야 합니다.
 
-HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/scans/file`, `POST /v1/scans/archive`, `GET /v1/scans/{scan_id}`, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`, `POST /v1/knowledge/query`입니다. JSON 보고서는 저장된 canonical report이고 Markdown/SARIF은 같은 보고서에서 렌더링합니다.
+HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `POST /v1/scans/file`, `POST /v1/scans/archive`, `GET /v1/scans/{scan_id}`, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`, `POST /v1/knowledge/query`, `POST /v1/vulnerabilities/query`입니다. `/v1/auth/register`는 개발 환경에서 명시적으로 허용한 경우에만 사용할 수 있습니다. JSON 보고서는 저장된 canonical report이고 Markdown/SARIF은 같은 보고서에서 렌더링합니다.
 
 ## 스캐너 규칙과 측정 경계
 
 스캐너는 Python 파일의 `eval`, `subprocess`/`os.system`, `requests` TLS 설정, 명시적 위험 PyYAML 로더 호출을 실행 없이 AST로 읽습니다. `SEC001`은 지원 텍스트 파일의 비밀 유사 값을 마스킹하고, `JS001`은 JavaScript/TypeScript 또는 `.env`의 명시적 Node TLS 검증 해제 할당을 제한된 어휘 검사로 찾습니다. JS 템플릿 문자열 안의 보간 코드는 평가하지 않습니다. Python 구문 분석이 실패하면 텍스트 규칙은 계속 검사하고 `python_syntax_error` 경고를 보고하며, 이 사례를 정상 사례 오경보율 분모에 넣지 않습니다.
 
-`scripts.run_scanner_benchmark`는 저장소가 작성한 39개 합성 사례를 임시 파일로 분리해 공개 `scan_path`로 검사합니다. 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 집합으로 TP·FP·FN을 계산하고, 읽지 못한 사례·파싱 경고·진단을 별도 커버리지로 남깁니다. 기본 실행은 불일치와 커버리지 실패 시 비정상 종료하며, `build/evidence/`의 JSON/Markdown에는 재현 가능한 필드만 기록합니다. [변경 전 측정](evidence/scanner-baseline.md)과 [현재 수치 및 재현 명령](demo.md#11-합성-스캐너-벤치마크)은 이 고정 코퍼스에만 적용됩니다.
+`scripts.run_scanner_benchmark`는 저장소가 작성한 53개 합성 사례를 임시 파일로 분리해 공개 `scan_path`로 검사합니다. 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 집합으로 TP·FP·FN을 계산하고, 읽지 못한 사례·파싱 경고·진단을 별도 커버리지로 남깁니다. 기본 실행은 불일치와 커버리지 실패 시 비정상 종료하며, `build/evidence/`의 JSON/Markdown에는 재현 가능한 필드만 기록합니다. [변경 전 측정](evidence/scanner-baseline.md)과 [현재 수치 및 재현 명령](demo.md#11-합성-스캐너-벤치마크)은 이 고정 코퍼스에만 적용됩니다.
 
-선택적 외부 평가는 사용자 제공 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython) 체크아웃에서 리비전과 기대 라벨 CSV 해시를 확인한 뒤 CWE-78/502 사례를 소스 실행 없이 읽습니다. `PY002`/`PY004`와의 매핑은 넓은 CWE 범주 도전이지 모든 sink를 구현했다는 뜻이 아닙니다. 합성 벤치마크의 수치와 합산하지 않으며, 미실행 외부 코퍼스 점수를 만들지 않습니다. 선택적 실제 제공자 RAG 평가는 키가 있을 때만 실행하고 사실성을 자동 채점하지 않습니다.
+선택적 외부 평가는 사용자 제공 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython) 체크아웃에서 리비전과 기대 라벨 CSV 해시를 확인한 뒤 CWE-78/89/502 사례를 소스 실행 없이 읽습니다. 매핑은 `PY002`, `PY005`, `PY004`/`PY006`이며, `sh -c`, 다른 SQL API, pickle 이외 역직렬화 sink는 미지원으로 공개합니다. 제한된 로컬 도전 결과와 분모는 [데모 문서](demo.md#22-외부-스캐너-코퍼스-도전)에 기록했으며 합성 벤치마크와 합산하지 않습니다. 선택적 실제 제공자 RAG 평가는 키가 있을 때만 실행하고 사실성을 자동 채점하지 않습니다.
+
+## 회원 인증과 취약점 조회
+
+`POST /v1/auth/login`은 회원 자격 증명을 확인하고 opaque Session 토큰을 발급합니다. 저장소에는 토큰 digest만 저장하며 절대/유휴 만료, logout 폐기, 실패 로그인 잠금이 적용됩니다. 운영 Bearer 토큰은 설정 시 자동화 클라이언트의 대체 자격 증명으로 허용되며 웹 컨테이너에는 전달되지 않습니다. 사용자 계정과 기존 owner 없는 보고서의 동작은 [회원 문서](membership.md)에 있습니다.
+
+`POST /v1/vulnerabilities/query`는 사용자가 지정한 ecosystem/package/exact version만 OSV.dev에 보냅니다. 고정 HTTPS origin과 페이지·응답 크기·레코드 제한으로 호출하며 불완전/오류 응답은 503입니다. OSV advisory ID와 실제 CVE 기본 ID 또는 alias를 반환하고 CWE나 정적 finding으로부터 CVE를 추정하지 않습니다. 구현과 한계는 [OSV 문서](osv.md)를 참고하세요.
+
+관리 `sync-corpus`는 manifest의 명시 파일 중 Markdown과 PDF를 처리합니다. PDF는 SHA-256 검증 후 pypdf로 추출합니다. 입력 바이트·페이지 수·원시 페이지 스트림·추출 후 문자 수에 한도를 두지만, 압축된 PDF 데이터의 파싱 자원 소모를 완전히 제한하지는 않습니다. 자동 탐색·다운로드나 OCR은 없습니다. 파일은 컨테이너 밖의 로컬 CLI 프로세스에서 처리되므로 manifest provenance는 무해성이나 권리 허가를 의미하지 않습니다. [공식 PDF 코퍼스 절차](official-corpus.md)를 참고하세요.
 
 ## 실패와 신뢰 경계
 
-정적 규칙은 키 없이 동작합니다. 운영 API는 `SECRAGRAPH_API_TOKEN` 없이는 시작하지 않으며 API 스캔 영속화는 PostgreSQL이 필요합니다. `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 별도의 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다. 검증된 `sync-corpus`도 Qdrant에는 비원자적으로 적용되며 실패 후 동일 manifest로 재시도해야 합니다.
+정적 규칙은 키 없이 동작합니다. 기본 로컬 API는 회원 Session으로 인증하며 `SECRAGRAPH_API_TOKEN`은 선택적 운영 Bearer 자격 증명입니다. 회원 로그인에는 IP별/전역 속도 제한이 없으므로 API와 웹은 루프백에 바인딩된 로컬 배포로만 사용해야 합니다. API 스캔 영속화는 PostgreSQL이 필요합니다. `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 별도의 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다. 검증된 `sync-corpus`도 Qdrant에는 비원자적으로 적용되며 실패 후 동일 manifest로 재시도해야 합니다.
 
 업로드·검색 문서·DB 행·모델 결과는 모두 신뢰하지 않는 데이터입니다. 입력 크기, SQL 권한, 결과 길이, 출처 식별자를 각 경계에서 제한합니다. 남은 위험과 운영 전제는 [위협 모델](threat-model.md)과 [운영 문서](operations.md)에 있습니다.

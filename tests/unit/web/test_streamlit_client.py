@@ -618,8 +618,14 @@ class _MainStreamlit(_RecordingStreamlit):
     def caption(self, _value: str) -> None:
         return None
 
-    def tabs(self, _labels: list[str]) -> tuple[_Tab, _Tab]:
-        return _Tab(), _Tab()
+    def tabs(self, _labels: list[str]) -> tuple[_Tab, _Tab, _Tab]:
+        return _Tab(), _Tab(), _Tab()
+
+    def selectbox(self, _label: str, _options: list[str]) -> str:
+        return "PyPI"
+
+    def text_input(self, _label: str, **_kwargs: object) -> str:
+        return ""
 
     def file_uploader(self, *_args: object, **_kwargs: object) -> _OversizedUpload:
         return _OversizedUpload()
@@ -637,6 +643,7 @@ def test_streamlit_checks_upload_size_before_getvalue_or_network(
 ) -> None:
     fake = _MainStreamlit()
     monkeypatch.setattr(streamlit_app, "st", fake)
+    monkeypatch.setattr(streamlit_app, "_member_client", lambda _http: object())
 
     streamlit_app.main()
 

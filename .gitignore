@@ -3,6 +3,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -11,3 +12,5 @@ build/
 dist/
 *.egg-info/
 .env
+data/knowledge/**/*.pdf
+data/knowledge/official/

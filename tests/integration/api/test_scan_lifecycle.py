@@ -10,8 +10,15 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def live_client() -> httpx.Client:
-    base_url = os.getenv("SECRAGRAPH_TEST_API_URL", "http://127.0.0.1:8000")
+    base_url = os.getenv("SECRAGRAPH_TEST_API_URL")
+    username = os.getenv("SECRAGRAPH_TEST_MEMBER_USERNAME")
+    password = os.getenv("SECRAGRAPH_TEST_MEMBER_PASSWORD")
+    if not base_url or not username or not password:
+        pytest.skip("set isolated API URL and member credentials for live API checks")
     with httpx.Client(base_url=base_url, timeout=10.0) as client:
+        login = client.post("/v1/auth/login", json={"username": username, "password": password})
+        assert login.status_code == 200, login.text
+        client.headers["Authorization"] = f"Session {login.json()['token']}"
         yield client
 
 

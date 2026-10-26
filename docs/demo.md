@@ -22,15 +22,17 @@ uv run python scripts/validate_sarif.py build/self-scan.sarif
 
 ### 1.1 합성 스캐너 벤치마크
 
-키·Docker·네트워크 없이 저장소 루트에서 고정된 39개 합성 사례를 재검사합니다. 평가기는 사례 파일을 실행하거나 import하지 않고 `scan_path`에 전달합니다. 매니페스트 SHA-256은 `6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d`이며 변경 전 스캐너 기준 리비전은 `ac88e9f`입니다. [기준선의 실행 가능 커밋과 원본 출력](evidence/scanner-baseline.md)을 보존했습니다.
+키·Docker·네트워크 없이 저장소 루트에서 고정 합성 사례를 재검사합니다. 평가기는 사례 파일을 실행하거나 import하지 않고 `scan_path`에 전달합니다. 변경 전 비교는 원래 39개 매니페스트(SHA-256 `6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d`)와 기준 리비전 `ac88e9f`를 사용합니다. 현재 코퍼스는 53개이며 manifest SHA-256은 `8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826`, 규칙 버전은 `2026.10.4`입니다. [기준선의 실행 가능 커밋과 원본 출력](evidence/scanner-baseline.md)을 보존했습니다.
 
 ```powershell
 uv run python -m scripts.run_scanner_benchmark
 ```
 
-기본 명령은 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 라벨과 검사 커버리지를 강제하고, `build/evidence/scanner.json` 및 `build/evidence/scanner.md`를 생성합니다. 이번 실행에서는 39/39 사례를 읽었고 건너뜀 0건, 파싱 경고 0건, 예상·예상 밖·누락 진단 0건이었습니다. 두 파일에는 UUID와 실행 시각을 넣지 않아 같은 리비전에서 바이트가 재현됩니다.
+기본 명령은 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 라벨과 검사 커버리지를 강제하고, `build/evidence/scanner.json` 및 `build/evidence/scanner.md`를 생성합니다. 현재 실행은 53/53 사례를 읽었고 TP=25, FP=0, FN=0, 정상 사례 28건이었습니다(정밀도·재현율·F1 각 1.000). 증거 파일에는 UUID와 실행 시각을 넣지 않아 같은 리비전에서 바이트가 재현됩니다.
 
-| 범위 | 변경 전 TP / FP / FN | 변경 전 정밀도 / 재현율 / F1 | 현재 TP / FP / FN | 현재 정밀도 / 재현율 / F1 |
+원래 39개 코퍼스의 역사적 변경 전후 비교:
+
+| 범위 | 변경 전 TP / FP / FN | 변경 전 정밀도 / 재현율 / F1 | 당시 TP / FP / FN | 당시 정밀도 / 재현율 / F1 |
 | --- | ---: | ---: | ---: | ---: |
 | 전체 | 9 / 6 / 9 | 0.600 (15) / 0.500 (18) / 0.545 | 18 / 0 / 0 | 1.000 (18) / 1.000 (18) / 1.000 |
 | `JS001` | 0 / 0 / 3 | N/A (0) / 0.000 (3) / N/A | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
@@ -40,7 +42,13 @@ uv run python -m scripts.run_scanner_benchmark
 | `PY004` | 0 / 0 / 3 | N/A (0) / 0.000 (3) / N/A | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
 | `SEC001` | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
 
-정상 사례 오경보율은 기준선 6/21 (0.286), 현재 0/21 (0.000)입니다. 이는 완전히 평가 가능한 정상 사례 중 하나 이상 예상 밖 finding이 난 비율입니다. 변경 전 `PY004`·`JS001`은 아직 구현되지 않아 TP가 0건입니다. 이 결과는 규칙 작성자가 만든 작은 합성 집합에만 해당하며, 임의 저장소의 정확도나 실제 취약점 존재를 보증하지 않습니다. 규칙별 정상 사례 분모와 불일치 목록은 생성된 Markdown에서 확인할 수 있습니다.
+현재 코퍼스 (`2026.10.4`) 결과:
+
+| TP / FP / FN | 정밀도 / 재현율 / F1 | 정상 사례 오경보 / 적격 사례 | 읽은 사례 / 전체 | manifest SHA-256 |
+| ---: | ---: | ---: | ---: | --- |
+| 25 / 0 / 0 | 1.000 / 1.000 / 1.000 | 0/28 (0.000) | 53/53 | `8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826` |
+
+위 표와 정상 사례 오경보율은 원래 39개 코퍼스에 대한 역사적 비교입니다(기준선 6/21, 현재 당시 규칙 0/21). 최신 53개 실행은 정상 사례 28개 모두에서 finding이 없었습니다. 오경보율은 완전히 평가 가능한 정상 사례 중 하나 이상 예상 밖 finding이 난 비율입니다. 변경 전 `PY004`·`JS001`은 아직 구현되지 않아 TP가 0건입니다. 모든 수치는 규칙 작성자가 만든 작은 합성 집합에만 해당하며, 임의 저장소의 정확도나 실제 취약점 존재를 보증하지 않습니다. 규칙별 정상 사례 분모와 불일치 목록은 생성된 Markdown에서 확인할 수 있습니다.
 
 ## 2. 키 없는 오프라인 RAG 근거
 
@@ -79,21 +87,36 @@ $expectedHash = (Get-FileHash -Algorithm SHA256 (Join-Path $benchmarkRoot 'expec
 uv run python -m scripts.run_external_scanner_benchmark --root $benchmarkRoot --revision $revision --expected-sha256 $expectedHash
 ```
 
-이 도구는 대상 Python 코드를 실행/import하지 않고 읽기만 합니다. CWE-78→`PY002`, CWE-502→`PY004`의 **넓은 CWE 단위 사례 평가**이며 해당 CWE의 모든 sink를 탐지한다는 뜻이 아닙니다. TP/FP/FN/TN과 전체 라벨·지원 범위·누락/중복/파싱 실패 분모를 분리합니다. 누락·불완전 사례가 있으면 0이 아닌 종료 코드를 반환합니다. 현재 저장소는 이 외부 코퍼스를 실제 실행한 점수를 주장하지 않습니다.
+이 도구는 대상 Python 코드를 실행/import하지 않고 읽기만 합니다. CWE-78→`PY002`, CWE-89→`PY005`, CWE-502→`PY004`/`PY006`의 **넓은 CWE 단위 사례 평가**이며 해당 CWE의 모든 sink를 탐지한다는 뜻이 아닙니다. case는 기대 규칙군과 실제 일치 규칙 ID를 기록하고 관련 없는 규칙 finding은 매치로 세지 않습니다. TP/FP/FN/TN과 전체 라벨·지원 범위·누락/중복/파싱 실패 분모를 분리합니다. 동적으로 조립한 `sh -c` 인수, 다른 SQL API 및 pickle 이외 역직렬화 API는 미지원 sink이며, CWE 단위 범위가 낮은 재현율로 이어질 수 있습니다. 누락·불완전 사례가 있으면 0이 아닌 종료 코드를 반환합니다.
 
-## 3. 루프백 API와 웹
+2026-10-27 로컬 도전 실행은 BenchmarkPython revision `f1291485808b66e20ddb6b01b10dc71b3df8c8ba`와 라벨 CSV SHA-256 `0c5ae0f9a8cdcb49549c459a25651cc058c7b17d621fc064ade2bd942dad80b8`을 검증했습니다. 총 1,230개 라벨 중 지원 CWE 78/89/502 사례 90개, 스캔 완료 82개(불완전 Python 사례 8개)는 TP=27, FP=18, FN=6, TN=31이었습니다(precision 27/45=0.600, recall 27/33=0.818). 좁은 local def-use 추적으로 전체 TP가 22에서 27로 늘고 FN이 11에서 6으로 줄었습니다. 나머지 1,140개 지원 밖 CWE 사례는 점수에서 제외했습니다: CWE-22 168, CWE-328 151, CWE-330 326, CWE-501 37, CWE-601 34, CWE-611 28, CWE-614 39, CWE-643 186, CWE-79 89, CWE-90 29, CWE-94 53. 이는 범위가 제한된 도전 결과이며 전체 BenchmarkPython 성능을 나타내지 않습니다.
 
-[README 빠른 시작](../README.md#빠른-시작)의 PowerShell 비밀번호·API 토큰 설정과 Compose 명령을 먼저 실행하고 `/health/ready`가 200인지 확인합니다. 기존 PostgreSQL 볼륨의 비밀번호가 다르면 [운영 문서](operations.md)의 회전 절차를 따르며 볼륨을 지우지 않습니다. API는 `http://127.0.0.1:8000`, Streamlit은 `http://127.0.0.1:8501`입니다. 아래 `/v1/*` 호출에는 모두 같은 Bearer 토큰을 보냅니다.
+오류 유형을 확인하기 위해 사례 소스는 실행하지 않고 AST 구조만 읽었습니다. 예를 들어 `BenchmarkTest00349`는 benign 라벨이어도 `pickle.loads` 호출이 있어 입력 신뢰도를 구별하지 못하는 `PY006` 오경보였고, `BenchmarkTest00350`은 benign 라벨의 `subprocess.run(shell=True)`가 `PY002` 오경보가 됐습니다. `BenchmarkTest00099`처럼 SQL f-string을 변수에 저장한 뒤 `execute`에 전달하는 사례는 좁은 local def-use 추적으로 잡혔습니다. 남은 `BenchmarkTest00165` FN은 목록에 명령 인수를 나중에 추가하는 방식이어서 현재 PY002 규칙의 범위 밖입니다. 리터럴 `sh -c`·`cmd /c` 목록에 동적 명령 문자열이 직접 들어간 경우는 탐지합니다. 점수는 넓은 CWE 범위와 8개 불완전 파일의 한계를 포함하며 일반적인 재현율을 뜻하지 않습니다.
+
+## 3. 로컬 회원 로그인과 루프백 API
+
+[README 빠른 시작](../README.md#빠른-시작)의 PowerShell DB 비밀번호 설정과 Compose 명령을 실행한 뒤 `create-user alice`로 회원을 만드세요. 웹 UI(`http://127.0.0.1:8501`)가 기본 클라이언트이며, 직접 API 호출은 다음처럼 회원 Session을 사용합니다. `Get-Credential`은 비밀번호를 입력 기록에 남기지 않습니다. 기존 PostgreSQL 볼륨의 비밀번호가 다르면 [운영 문서](operations.md)의 회전 절차를 따르며 볼륨을 지우지 않습니다.
 
 ```powershell
-$headers = @{Authorization = "Bearer $env:SECRAGRAPH_API_TOKEN"}
-$scan = curl.exe -sS -H "Authorization: Bearer $env:SECRAGRAPH_API_TOKEN" -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
+$credential = Get-Credential -UserName alice -Message 'SecRAGraph member login'
+$secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
+try {
+    $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer)
+    $loginBody = @{username = $credential.UserName; password = $plainPassword} | ConvertTo-Json -Compress
+    $session = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/auth/login -ContentType 'application/json' -Body $loginBody
+} finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)
+    Remove-Variable plainPassword, loginBody -ErrorAction SilentlyContinue
+}
+$authHeader = "Authorization: Session $($session.token)"
+$headers = @{Authorization = "Session $($session.token)"}
+$scan = curl.exe -sS -H $authHeader -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
 $scan.scan_id
 Invoke-RestMethod "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)" -Headers $headers
-curl.exe -sS -H "Authorization: Bearer $env:SECRAGRAPH_API_TOKEN" "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)/report?format=markdown"
+curl.exe -sS -H $authHeader "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)/report?format=markdown"
 ```
 
-ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크·크기 제한을 검사합니다. 보고서는 `GET /v1/scans/{scan_id}`에서 JSON, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`에서 렌더링된 표현으로 조회합니다. 토큰 없이 `/v1/*`를 호출하면 401입니다. `GET /health/live`는 프로세스 생존, `GET /health/ready`는 PostgreSQL과 Qdrant 준비 상태를 확인합니다. 요청·응답 스키마는 `/docs`의 OpenAPI에서 볼 수 있습니다. Streamlit은 API 토큰을 전달하지만 자체 사용자 로그인을 제공하지 않습니다.
+ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크·크기 제한을 검사합니다. 보고서는 `GET /v1/scans/{scan_id}`에서 JSON, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`에서 렌더링된 표현으로 조회하며 회원은 자신의 보고서만 볼 수 있습니다. Session 또는 설정된 운영 Bearer 자격 증명 없이 보호된 `/v1/*` 경로를 호출하면 401입니다. `GET /health/live`는 프로세스 생존, `GET /health/ready`는 PostgreSQL과 Qdrant 준비 상태를 확인합니다. 요청·응답 스키마는 `/docs`의 OpenAPI에서 볼 수 있습니다. 회원 로그인·세션 동작은 [회원 문서](membership.md)를 참고하세요.
 
 ## 4. 선택적 지식 질의
 
@@ -103,7 +126,7 @@ ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크�
 docker compose run --rm migrate /app/.venv/bin/security-review import-intelligence --cwe /app/data/samples/cwe.csv --cve /app/data/samples/cve.csv
 ```
 
-RAG와 Text2SQL 답변에는 유효한 모델/임베딩 제공자 키가 필요합니다. `SECRAGRAPH_OPENAI_API_KEY`를 현재 셸의 런타임 환경 변수로 안전하게 설정하고 API를 그 설정으로 다시 시작하세요. 다음 명령은 버전·출처·라이선스·원본 SHA-256을 적은 [매니페스트](../data/knowledge/manifest.json)를 먼저 검증하고 해당 코퍼스의 변경을 미리 보여 줍니다. 수집 대상은 사용자가 권리를 확인한 UTF-8 `.md`/`.markdown` 문서뿐입니다. 동봉한 `data/knowledge`는 프로젝트 고유의 예시이며 PDF 인덱싱은 지원하지 않습니다.
+RAG와 Text2SQL 답변에는 유효한 모델/임베딩 제공자 키가 필요합니다. `SECRAGRAPH_OPENAI_API_KEY`를 현재 셸의 런타임 환경 변수로 안전하게 설정하고 API를 그 설정으로 다시 시작하세요. 다음 명령은 버전·출처·라이선스·원본 SHA-256을 적은 [매니페스트](../data/knowledge/manifest.json)를 먼저 검증하고 해당 코퍼스의 변경을 미리 보여 줍니다. 수집 대상은 manifest에 명시된 Markdown 또는 PDF입니다. 동봉한 `data/knowledge`는 프로젝트 고유의 Markdown 예시입니다. 공식 PDF를 쓸 때는 [명시적 acquisition, 권리 검토, digest 절차](official-corpus.md)를 먼저 확인하세요. PDF에는 OCR이나 자동 다운로드가 없습니다.
 
 ```powershell
 docker compose up -d --force-recreate api

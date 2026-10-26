@@ -22,13 +22,17 @@ def _compose(*args: str, project: str | None = None) -> subprocess.CompletedProc
     docker = which("docker")
     assert docker is not None
     env = os.environ.copy()
-    if not env.get("POSTGRES_PASSWORD"):
-        env["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
-    if not env.get("SECRAGRAPH_READER_PASSWORD"):
-        env["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
-    if not env.get("SECRAGRAPH_API_TOKEN"):
-        env["SECRAGRAPH_API_TOKEN"] = secrets.token_urlsafe(32)
+    env_file = env.get("SECRAGRAPH_RUNTIME_ENV_FILE")
+    if not env_file:
+        if not env.get("POSTGRES_PASSWORD"):
+            env["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
+        if not env.get("SECRAGRAPH_READER_PASSWORD"):
+            env["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
+        if not env.get("SECRAGRAPH_API_TOKEN"):
+            env["SECRAGRAPH_API_TOKEN"] = secrets.token_urlsafe(32)
     command = [docker, "compose"]
+    if env_file:
+        command.extend(("--env-file", env_file))
     if project is not None:
         command.extend(("-p", project))
     return subprocess.run(  # noqa: S603
@@ -80,8 +84,18 @@ def _url(service: str, path: str) -> str:
 
 def _api_headers() -> dict[str, str]:
     token = os.environ.get("SECRAGRAPH_API_TOKEN")
-    assert token, "SECRAGRAPH_API_TOKEN must match the isolated runtime stack"
-    return {"Authorization": f"Bearer {token}"}
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    username = os.environ.get("SECRAGRAPH_TEST_MEMBER_USERNAME")
+    password = os.environ.get("SECRAGRAPH_TEST_MEMBER_PASSWORD")
+    assert username and password, "member smoke credentials must be configured"
+    login = httpx.post(
+        _url("api", "/v1/auth/login"),
+        json={"username": username, "password": password},
+        timeout=10,
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Session {login.json()['token']}"}
 
 
 def test_api_and_web_compose_runtime_restrictions() -> None:
@@ -106,13 +120,10 @@ def test_web_compose_limits_streamlit_upload_and_message_sizes() -> None:
     assert "--server.maxMessageSize=8" in web["command"]
 
 
-def test_runtime_compose_api_and_web_have_shared_token() -> None:
+def test_runtime_compose_operator_token_stays_out_of_web() -> None:
     services = json.loads(_compose("config", "--format", "json").stdout)["services"]
-    assert services["api"]["environment"]["SECRAGRAPH_API_TOKEN"]
-    assert (
-        services["api"]["environment"]["SECRAGRAPH_API_TOKEN"]
-        == services["web"]["environment"]["SECRAGRAPH_API_TOKEN"]
-    )
+    assert "SECRAGRAPH_API_TOKEN" in services["api"]["environment"]
+    assert "SECRAGRAPH_API_TOKEN" not in services["web"]["environment"]
 
 
 def test_runtime_request_headers_use_the_configured_token(

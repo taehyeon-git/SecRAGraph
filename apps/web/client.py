@@ -89,15 +89,95 @@ class SecRAGraphApiClient:
     """Call only the documented SecRAGraph HTTP endpoints."""
 
     def __init__(
-        self, base_url: str, *, http_client: httpx.Client, token: str | None = None
+        self,
+        base_url: str,
+        *,
+        http_client: httpx.Client,
+        token: str | None = None,
+        session_token: str | None = None,
     ) -> None:
         self._base_url = validate_api_base_url(base_url)
         self._http = http_client
+        if token is not None and session_token is not None:
+            raise ValueError("Choose only one credential mode")
         if token is not None and (
             not token.strip() or token != token.strip() or _contains_control(token)
         ):
             raise ValueError("API token is invalid")
-        self._headers = {"Authorization": f"Bearer {token}"} if token is not None else {}
+        if session_token is not None and (
+            not session_token.strip()
+            or session_token != session_token.strip()
+            or len(session_token) > 256
+            or _contains_control(session_token)
+        ):
+            raise ValueError("session token is invalid")
+        self._headers = (
+            {"Authorization": f"Bearer {token}"}
+            if token is not None
+            else {"Authorization": f"Session {session_token}"}
+            if session_token is not None
+            else {}
+        )
+
+    def register(self, username: str, password: str) -> dict[str, Any]:
+        """Request optional development self-registration."""
+
+        credentials = _validated_credentials(username, password)
+        status, content, _ = self._send(
+            lambda: self._http.stream(
+                "POST", f"{self._base_url}/v1/auth/register", json=credentials, headers={}
+            )
+        )
+        payload = _decode_response(status, content)
+        _validate_member_payload(payload, status_code=status)
+        return payload
+
+    def login(self, username: str, password: str) -> dict[str, Any]:
+        """Exchange a member password for an opaque session without an operator key."""
+
+        credentials = _validated_credentials(username, password)
+        status, content, _ = self._send(
+            lambda: self._http.stream(
+                "POST", f"{self._base_url}/v1/auth/login", json=credentials, headers={}
+            )
+        )
+        payload = _decode_response(status, content)
+        token = payload.get("token")
+        expiry = payload.get("expires_at")
+        username_value = payload.get("username")
+        if (
+            not isinstance(token, str)
+            or not _valid_text(token, maximum=256)
+            or token != token.strip()
+            or not _valid_text(expiry, maximum=64)
+            or not _valid_text(username_value, maximum=32)
+        ):
+            raise ApiClientError(status, "invalid_api_response", "The API response was invalid.")
+        return payload
+
+    def me(self) -> dict[str, Any]:
+        """Read the current member identity."""
+
+        status, content, _ = self._send(
+            lambda: self._http.stream("GET", f"{self._base_url}/v1/auth/me", headers=self._headers)
+        )
+        payload = _decode_response(status, content)
+        _validate_member_payload(payload, status_code=status)
+        return payload
+
+    def logout(self) -> None:
+        """Revoke the current member session."""
+
+        status, content, _ = self._send(
+            lambda: self._http.stream(
+                "POST", f"{self._base_url}/v1/auth/logout", headers=self._headers
+            )
+        )
+        if status == 204 and not content:
+            return
+        if not 200 <= status < 300:
+            _decode_response(status, content)
+        raise ApiClientError(status, "invalid_api_response", "The API response was invalid.")
 
     def query_knowledge(self, question: str) -> dict[str, Any]:
         """Send one normalized question to the knowledge endpoint."""
@@ -113,6 +193,41 @@ class SecRAGraphApiClient:
         )
         payload = _decode_response(status_code, content)
         _validate_knowledge_payload(payload, status_code=status_code)
+        return payload
+
+    def query_vulnerabilities(self, ecosystem: str, package: str, version: str) -> dict[str, Any]:
+        """Query OSV evidence for an explicitly named package version."""
+
+        values = (ecosystem, package, version)
+        limits = (40, 255, 100)
+        if any(
+            not isinstance(value, str)
+            or not _valid_text(value, maximum=limit)
+            or value != value.strip()
+            for value, limit in zip(values, limits, strict=True)
+        ):
+            raise ValueError("package query is invalid")
+        status, content, _ = self._send(
+            lambda: self._http.stream(
+                "POST",
+                f"{self._base_url}/v1/vulnerabilities/query",
+                json={"ecosystem": ecosystem, "package": package, "version": version},
+                headers=self._headers,
+            )
+        )
+        payload = _decode_response(status, content)
+        advisories = payload.get("advisories")
+        valid = (
+            all(
+                payload.get(key) == value
+                for key, value in zip(("ecosystem", "package", "version"), values, strict=True)
+            )
+            and isinstance(advisories, list)
+            and len(advisories) <= 500
+            and all(_valid_osv_advisory(item) for item in advisories)
+        )
+        if not valid:
+            raise ApiClientError(status, "invalid_api_response", "The API response was invalid.")
         return payload
 
     def scan_file(
@@ -191,6 +306,31 @@ def _validated_question(value: str) -> str:
     ):
         raise ValueError("question is invalid")
     return normalized
+
+
+def _validated_credentials(username: str, password: str) -> dict[str, str]:
+    if (
+        not isinstance(username, str)
+        or not 1 <= len(username) <= 32
+        or _contains_control(username)
+        or not isinstance(password, str)
+        or not password
+        or len(password.encode("utf-8")) > 1_024
+        or _contains_control(password)
+    ):
+        raise ValueError("credentials are invalid")
+    return {"username": username, "password": password}
+
+
+def _validate_member_payload(payload: dict[str, Any], *, status_code: int) -> None:
+    username = payload.get("username")
+    user_id = payload.get("user_id")
+    try:
+        valid_id = str(UUID(user_id)) == user_id
+    except (TypeError, ValueError, AttributeError):
+        valid_id = False
+    if not valid_id or not _valid_text(username, maximum=32):
+        raise ApiClientError(status_code, "invalid_api_response", "The API response was invalid.")
 
 
 def _validated_filename(value: str) -> str:
@@ -329,6 +469,28 @@ def _valid_source(value: object, *, intent: str) -> bool:
             or (intent != "text2sql" and _valid_text(section, maximum=500))
         )
         and (score is None or _valid_score(score))
+    )
+
+
+def _valid_osv_advisory(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    ids = value.get("cve_ids")
+    source_url = value.get("source_url")
+    published = value.get("published_at")
+    return (
+        _valid_text(value.get("id"), maximum=128)
+        and isinstance(ids, list)
+        and len(ids) <= 100
+        and all(
+            _valid_text(identifier, maximum=32) and identifier.startswith("CVE-")
+            for identifier in ids
+        )
+        and _valid_text(value.get("summary"), maximum=500)
+        and isinstance(source_url, str)
+        and source_url.startswith("https://osv.dev/vulnerability/")
+        and safe_source_url(source_url) is not None
+        and (published is None or _valid_text(published, maximum=64))
     )
 
 

@@ -14,6 +14,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 
 
+@pytest.fixture(autouse=True)
+def _stub_test_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = importlib.import_module("scripts.ci_full_tests")
+    monkeypatch.setattr(module, "_create_test_member", lambda: ("test-user", "test-pass"))
+
+
 def _capture_api_process(
     monkeypatch: pytest.MonkeyPatch, module: Any
 ) -> list[subprocess.Popen[Any]]:
@@ -93,6 +99,30 @@ def test_full_suite_stops_api_after_tests_succeed(
     assert readiness == [("http://127.0.0.1:8000/health/ready", 60.0)]
     assert len(started) == 1
     assert started[0].poll() is not None
+
+
+def test_full_suite_passes_ephemeral_member_credentials_only_to_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("scripts.ci_full_tests")
+    _capture_api_process(monkeypatch, module)
+    monkeypatch.setattr(module, "wait_for_url", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "_create_test_member", lambda: ("ci-random-user", "ci-random-pass"))
+    seen: list[dict[str, str] | None] = []
+
+    def capture_run(_command, *, check, env=None):
+        assert check
+        seen.append(env)
+
+    monkeypatch.setattr(module, "run", capture_run)
+    module.run_full_suite(
+        api_command=_sleeping_api_command(), test_command=(sys.executable, "-m", "pytest")
+    )
+
+    assert seen[0] is not None
+    assert seen[0]["SECRAGRAPH_TEST_MEMBER_USERNAME"] == "ci-random-user"
+    assert seen[0]["SECRAGRAPH_TEST_MEMBER_PASSWORD"] == "ci-random-pass"
+    assert seen[0]["SECRAGRAPH_TEST_API_URL"] == "http://127.0.0.1:8000"
 
 
 def test_full_suite_waits_for_selected_local_api(monkeypatch: pytest.MonkeyPatch) -> None:

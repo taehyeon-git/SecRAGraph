@@ -11,9 +11,9 @@ from sqlalchemy import Engine
 from starlette.middleware.base import RequestResponseEndpoint
 
 from security_review import __version__
-from security_review.api.auth import ApiTokenMiddleware
 from security_review.api.dependencies import KnowledgeAnswerer
 from security_review.api.errors import register_error_handlers
+from security_review.api.member_auth import MemberAuthMiddleware
 from security_review.api.middleware import RequestBodyLimitMiddleware, correlation_id
 from security_review.api.routes.health import (
     CompositeReadinessProbe,
@@ -24,11 +24,16 @@ from security_review.api.routes.health import (
 )
 from security_review.api.routes.health import router as health_router
 from security_review.api.routes.knowledge import router as knowledge_router
+from security_review.api.routes.members import MembershipManager
+from security_review.api.routes.members import router as members_router
 from security_review.api.routes.reports import router as reports_router
 from security_review.api.routes.scans import router as scans_router
+from security_review.api.routes.vulnerabilities import OsvQueryer
+from security_review.api.routes.vulnerabilities import router as vulnerabilities_router
 from security_review.application import ScanService
 from security_review.config import Settings
 from security_review.intelligence.openai_adapters import OpenAIChatAdapter, OpenAIEmbeddingAdapter
+from security_review.intelligence.osv import LiveOsvClient
 from security_review.intelligence.qdrant_retriever import QdrantDocumentRetriever
 from security_review.intelligence.text2sql import Text2SqlService
 from security_review.observability import bind_audit_sink, bind_context, configure_logging
@@ -70,6 +75,8 @@ def create_app(
     chat_model: ChatModel | None = None,
     embeddings: EmbeddingModel | None = None,
     qdrant_client: QdrantClient | None = None,
+    membership: MembershipManager | None = None,
+    osv_client: OsvQueryer | None = None,
 ) -> FastAPI:
     """Create an isolated API instance for production or tests."""
 
@@ -77,27 +84,41 @@ def create_app(
     configured_token = (
         configured.api_token.get_secret_value() if configured.api_token is not None else None
     )
+    configured_token = configured_token or None
     if configured_token is not None and (
         not configured_token.strip() or configured_token != configured_token.strip()
     ):
         raise ValueError("API token must be nonblank without surrounding whitespace")
-    if configured.environment == "production" and configured_token is None:
-        raise ValueError("API token is required when serving the production API")
     configure_logging(configured.environment)
     app = FastAPI(title="SecRAGraph", version=__version__, lifespan=_lifespan)
     app.state.settings = configured
     app.state.audit_sink = None
     report_repository = reports
+    database_sessions = None
     readiness_probe: ReadinessProbe = DefaultReadinessProbe(testing=configured.testing)
     if report_repository is None and configured.testing:
         report_repository = InMemoryReportRepository()
     if report_repository is None:
         engine = create_database_engine(configured.database_url)
         sessions = create_session_factory(configured.database_url, engine=engine)
+        database_sessions = sessions
         app.state.database_engine = engine
         report_repository = SqlAlchemyReportRepository(sessions)
         app.state.audit_sink = PostgresAuditSink(sessions)
         readiness_probe = DatabaseReadinessProbe(engine)
+    if membership is None and not configured.testing:
+        from security_review.membership.service import MembershipService
+        from security_review.storage.members import SqlAlchemyMembershipRepository
+
+        if database_sessions is None:
+            engine = create_database_engine(configured.database_url)
+            database_sessions = create_session_factory(configured.database_url, engine=engine)
+            app.state.database_engine = engine
+        membership = MembershipService(SqlAlchemyMembershipRepository(database_sessions))
+    if configured.environment == "production" and configured_token is None and membership is None:
+        raise ValueError("API token or membership store is required in production")
+    app.state.membership_service = membership
+    app.state.osv_client = osv_client or LiveOsvClient()
     if not configured.testing or (chat_model is not None and embeddings is not None):
         if qdrant_client is None:
             qdrant_client = QdrantClient(
@@ -193,10 +214,21 @@ def create_app(
         return response
 
     app.add_middleware(RequestBodyLimitMiddleware, max_bytes=configured.max_request_bytes)
-    app.add_middleware(ApiTokenMiddleware, token=configured_token)
+    app.add_middleware(
+        MemberAuthMiddleware,
+        token=configured_token,
+        membership=membership,
+        allow_anonymous=(
+            configured.environment != "production"
+            and configured_token is None
+            and membership is None
+        ),
+    )
 
     register_error_handlers(app)
     app.include_router(health_router)
+    app.include_router(members_router)
+    app.include_router(vulnerabilities_router)
     app.include_router(knowledge_router)
     app.include_router(scans_router)
     app.include_router(reports_router)

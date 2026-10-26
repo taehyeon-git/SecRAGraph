@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -148,6 +149,25 @@ def test_text2sql_stops_at_retry_limit_without_query_or_synthesis() -> None:
 
     assert captured.value.attempts == 2
     assert "DELETE" not in str(captured.value)
+    assert len(sql_model.calls) == 2
+    assert answer_model.calls == []
+    assert repository.queries == []
+
+
+@pytest.mark.parametrize("malformed", [None, 7])
+def test_non_string_sql_generation_exhausts_bounded_retries_without_side_effects(
+    malformed: object,
+) -> None:
+    response = cast(str, malformed)
+    service, sql_model, answer_model, repository = _service(
+        [response, response],
+        [],
+    )
+
+    with pytest.raises(Text2SqlExhaustedError) as captured:
+        service.answer("show CWE entries")
+
+    assert captured.value.attempts == 2
     assert len(sql_model.calls) == 2
     assert answer_model.calls == []
     assert repository.queries == []

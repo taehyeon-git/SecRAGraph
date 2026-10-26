@@ -32,3 +32,22 @@ def test_failed_compose_start_still_cleans_exact_isolated_project(
     assert calls[0][0] == calls[1][0]
     assert calls[0][0].startswith("secragraph-smoke-")
     assert "--volumes" in calls[1][1]
+
+
+def test_smoke_provisions_member_and_does_not_configure_operator_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(compose_smoke, "_docker_executable", lambda: "docker")
+    monkeypatch.setattr(compose_smoke, "_reserve_port", iter((41001, 41002, 41003, 41004)).__next__)
+    environments: list[dict[str, str]] = []
+
+    def fake_compose(_docker, _project, arguments, environment, _timeout):
+        environments.append(environment.copy())
+        return subprocess.CompletedProcess(arguments, 0)
+
+    monkeypatch.setattr(compose_smoke, "_run_compose", fake_compose)
+    monkeypatch.setattr(compose_smoke, "_smoke_endpoints", lambda *_args: None)
+    monkeypatch.setattr(compose_smoke, "_create_synthetic_member", lambda *_args: None)
+
+    assert compose_smoke.main() == 0
+    assert all("SECRAGRAPH_API_TOKEN" not in env for env in environments)

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "corpus_id": "official-security-guidance-local",
+  "documents": [
+    {
+      "path": "NIST.SP.800-218.pdf",
+      "title": "Secure Software Development Framework (SSDF) Version 1.1: Recommendations for Mitigating the Risk of Software Vulnerabilities",
+      "publisher": "National Institute of Standards and Technology",
+      "source_url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "license": "NIST PDF states no U.S. copyright; attribution appreciated; local analysis",
+      "source_revision": "SP 800-218 final, Version 1.1",
+      "source_date": "2022-02-03",
+      "sha256": "617746e553a9e2da49bfbd4eef0dfc3094758a39b869314e4173ac36605cde22"
+    }
+  ]
+}

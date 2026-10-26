@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from fastapi import Request
 
 from security_review.api.errors import APIError
+from security_review.api.member_auth import Principal
 from security_review.application import ScanService
 from security_review.config import Settings
 from security_review.orchestrator.state import KnowledgeAnswer
@@ -35,6 +36,17 @@ def get_settings(request: Request) -> Settings:
     """Return the settings owned by this application instance."""
 
     return cast(Settings, request.app.state.settings)
+
+
+def get_principal(request: Request) -> Principal:
+    """Return the early ASGI-authenticated principal."""
+
+    principal = getattr(request.state, "principal", None)
+    if not isinstance(principal, Principal):
+        raise APIError(401, "unauthorized", "Authentication is required.")
+    if principal.kind == "member" and principal.member_id is None:
+        raise APIError(401, "unauthorized", "Authentication is required.")
+    return principal
 
 
 def get_scan_service(request: Request) -> ScanService:

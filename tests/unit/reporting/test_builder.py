@@ -64,7 +64,7 @@ def test_report_version_and_new_rules_cwe_mappings_reach_outputs() -> None:
     )
     report = build_report("sample", findings)
 
-    assert report.rule_set_version == "2026.10.2"
+    assert report.rule_set_version == "2026.10.4"
     run = json.loads(render_sarif(report))["runs"][0]
     assert {result["ruleId"]: result["properties"]["cweIds"] for result in run["results"]} == {
         "JS001": ["CWE-295"],

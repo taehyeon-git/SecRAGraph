@@ -5,15 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Response, UploadFile
 
 from security_review.api.dependencies import (
     TempDirectoryFactory,
+    get_principal,
     get_scan_service,
     get_settings,
     get_temp_factory,
 )
 from security_review.api.errors import APIError
+from security_review.api.member_auth import Principal
 from security_review.api.schemas import ScanReport
 from security_review.application import ScanService
 from security_review.config import Settings
@@ -63,16 +65,20 @@ def _save(
 @router.post("/file", response_model=ScanReport)
 def scan_file_upload(
     file: Annotated[UploadFile | str, File()],
+    response: Response,
     service: Annotated[ScanService, Depends(get_scan_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     temp_factory: Annotated[TempDirectoryFactory, Depends(get_temp_factory)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> ScanReport:
     """Scan one supported source file without executing it."""
 
     try:
         with temp_factory() as directory:
             target, name = _save(file, Path(directory), settings, archive=False)
-            return service.scan(target, target_name=name)
+            report = service.scan(target, target_name=name, owner_member_id=principal.member_id)
+            response.headers["Cache-Control"] = "no-store"
+            return report
     except UploadError as error:
         raise _upload_api_error(error) from error
 
@@ -80,9 +86,11 @@ def scan_file_upload(
 @router.post("/archive", response_model=ScanReport)
 def scan_archive_upload(
     file: Annotated[UploadFile | str, File()],
+    response: Response,
     service: Annotated[ScanService, Depends(get_scan_service)],
     settings: Annotated[Settings, Depends(get_settings)],
     temp_factory: Annotated[TempDirectoryFactory, Depends(get_temp_factory)],
+    principal: Annotated[Principal, Depends(get_principal)],
 ) -> ScanReport:
     """Safely extract and scan one ZIP archive without executing its contents."""
 
@@ -99,7 +107,9 @@ def scan_archive_upload(
                     max_extracted_bytes=settings.max_extracted_bytes,
                 ),
             )
-            return service.scan(extracted, target_name=name)
+            report = service.scan(extracted, target_name=name, owner_member_id=principal.member_id)
+            response.headers["Cache-Control"] = "no-store"
+            return report
     except UploadError as error:
         raise _upload_api_error(error) from error
     except UnsafeArchiveError as error:

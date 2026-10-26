@@ -29,6 +29,8 @@ def test_secret_is_absent_from_finding_dump() -> None:
     ("path", "source", "rule_id"),
     [
         ("app.py", "eval(user_input) # opaque-canary-12345", "PY001"),
+        ("app.py", 'cursor.execute(f"SELECT /*opaque-canary-12345*/ * WHERE id={user}")', "PY005"),
+        ("app.py", "import pickle\npickle.loads('opaque-canary-12345')", "PY006"),
         (
             "settings.py",
             'API_KEY = "synthetic-key-1234567890" # opaque-canary-12345',

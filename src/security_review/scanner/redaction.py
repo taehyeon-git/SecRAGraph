@@ -7,6 +7,8 @@ _RULE_EVIDENCE = {
     "PY002": "Shell execution pattern detected; source omitted for privacy.",
     "PY003": "Disabled TLS verification pattern detected; source omitted for privacy.",
     "PY004": "Unsafe YAML loader pattern detected; source omitted for privacy.",
+    "PY005": "Dynamic SQL construction pattern detected; source omitted for privacy.",
+    "PY006": "Pickle deserialization pattern detected; source omitted for privacy.",
     "JS001": "Disabled Node TLS verification pattern detected; source omitted for privacy.",
     "SEC001": f"Secret-like assignment detected: {REDACTION_MARKER}; source omitted for privacy.",
 }

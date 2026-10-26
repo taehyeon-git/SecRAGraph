@@ -35,22 +35,39 @@ CASES = REPOSITORY_ROOT / "data/evaluation/rag_cases.json"
 def test_source_fingerprint_includes_render_and_command_code(
     tmp_path: Path, changed_source: str
 ) -> None:
-    source_names = (
-        "src/security_review/evaluation/offline_rag.py",
-        "src/security_review/evaluation/rag_models.py",
-        "src/security_review/evaluation/rag_render.py",
-        "src/security_review/orchestrator/knowledge_graph.py",
-        "src/security_review/intelligence/ingestion.py",
-        "src/security_review/intelligence/qdrant_retriever.py",
-        "scripts/run_rag_evidence.py",
-    )
-    for name in source_names:
+    for name in offline_rag._SOURCE_FILES:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"original fixture bytes")
 
     original_fingerprint = offline_rag._source_fingerprint(tmp_path)
     (tmp_path / changed_source).write_bytes(b"changed fixture bytes")
+
+    assert offline_rag._source_fingerprint(tmp_path) != original_fingerprint
+
+
+@pytest.mark.parametrize(
+    "contract_source",
+    (
+        "src/security_review/orchestrator/state.py",
+        "src/security_review/intelligence/models.py",
+        "src/security_review/domain/models.py",
+        "src/security_review/ports.py",
+    ),
+)
+def test_source_fingerprint_includes_transitive_rag_contracts(
+    tmp_path: Path, contract_source: str
+) -> None:
+    assert contract_source in offline_rag._SOURCE_FILES
+
+    for name in offline_rag._SOURCE_FILES:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"original fixture bytes")
+
+    original_fingerprint = offline_rag._source_fingerprint(tmp_path)
+    changed_path = tmp_path / contract_source
+    changed_path.write_bytes(b"changed contract bytes")
 
     assert offline_rag._source_fingerprint(tmp_path) != original_fingerprint
 

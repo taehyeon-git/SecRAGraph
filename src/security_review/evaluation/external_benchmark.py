@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from security_review.scanner.engine import scan_text_detailed
 
 _EXPECTED = "expectedresults-0.1.csv"
-_CHALLENGES = {78: "PY002", 502: "PY004"}
+_CHALLENGES = {78: ("PY002",), 89: ("PY005",), 502: ("PY004", "PY006")}
 _CASE_ID = re.compile(r"BenchmarkTest[0-9]{5}")
 _MAX_EXPECTED_BYTES = 1_000_000
 _MAX_SOURCE_BYTES = 250_000
@@ -30,7 +30,9 @@ class ExternalCase(BaseModel):
 
     case_id: str
     cwe_id: str
-    rule_id: str
+    expected_rule_ids: tuple[str, ...]
+    matched_rule_ids: tuple[str, ...]
+    unsupported_sink_caveat: str
     expected_vulnerable: bool
     detected: bool
     outcome: Literal["tp", "fp", "fn", "tn"]
@@ -62,8 +64,9 @@ class ExternalBenchmarkEvaluation(BaseModel):
     cases: tuple[ExternalCase, ...]
     has_errors: bool
     coverage_note: str = (
-        "CWE-78→PY002 and CWE-502→PY004 are broad mappings, not full sink coverage; "
-        "sh -c and pickle.loads cases may be missed."
+        "Broad case-level challenge only: CWE-78→PY002, CWE-89→PY005, and "
+        "CWE-502→PY004/PY006. Shell -c, other SQL APIs, and non-pickle deserializers "
+        "remain unsupported; missed cases remain in recall denominators."
     )
 
 
@@ -185,8 +188,8 @@ def run_external_benchmark(
     challenge_labeled = 0
     total_source_bytes = 0
     for case_id, vulnerable, cwe in labels:
-        rule_id = _CHALLENGES.get(cwe)
-        if rule_id is None:
+        rule_ids = _CHALLENGES.get(cwe)
+        if rule_ids is None:
             unsupported[f"CWE-{cwe}"] += 1
             continue
         challenge_labeled += 1
@@ -219,7 +222,10 @@ def run_external_benchmark(
         if result.warnings:
             incomplete.append(case_id)
             continue
-        detected = any(finding.rule_id == rule_id for finding in result.findings)
+        matched_rule_ids = tuple(
+            rule_id for rule_id in rule_ids if any(f.rule_id == rule_id for f in result.findings)
+        )
+        detected = bool(matched_rule_ids)
         outcome: Literal["tp", "fp", "fn", "tn"] = (
             "tp" if vulnerable and detected else "fn" if vulnerable else "fp" if detected else "tn"
         )
@@ -227,7 +233,11 @@ def run_external_benchmark(
             ExternalCase(
                 case_id=case_id,
                 cwe_id=f"CWE-{cwe}",
-                rule_id=rule_id,
+                expected_rule_ids=rule_ids,
+                matched_rule_ids=matched_rule_ids,
+                unsupported_sink_caveat=(
+                    "Only declared rule family is scored; other sink forms may be missed."
+                ),
                 expected_vulnerable=vulnerable,
                 detected=detected,
                 outcome=outcome,
