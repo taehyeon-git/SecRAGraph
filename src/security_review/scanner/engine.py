@@ -16,7 +16,7 @@ from security_review.scanner.rules import DEFAULT_RULES, Rule
 
 PROCESSING_TIME_LIMIT_EXCEEDED = "processing_time_limit_exceeded"
 PYTHON_SYNTAX_ERROR = "python_syntax_error"
-_PYTHON_CALL_RULES = frozenset({"PY001", "PY002", "PY003", "PY004"})
+_PYTHON_CALL_RULES = frozenset({"PY001", "PY002", "PY003", "PY004", "PY005", "PY006"})
 
 
 @dataclass(frozen=True, slots=True)

@@ -34,7 +34,8 @@ def _checkout(root: Path, *, missing: bool = False, duplicate: bool = False) -> 
         "BenchmarkTest00002": "import subprocess\nsubprocess.run(user, shell=True)\n",
         "BenchmarkTest00003": "import pickle\nvalue = pickle.loads(user)\n",
         "BenchmarkTest00004": "import yaml\nvalue = yaml.safe_load(user)\n",
-        "BenchmarkTest00005": "raise AssertionError('must never execute')\n",
+        "BenchmarkTest00005": 'cursor.execute(f"SELECT * FROM users WHERE id={user}")\n',
+        "BenchmarkTest00006": "raise AssertionError('must never execute')\n",
     }
     for case_id, source in cases.items():
         if not (missing and case_id == "BenchmarkTest00003"):
@@ -46,6 +47,7 @@ def _checkout(root: Path, *, missing: bool = False, duplicate: bool = False) -> 
         "BenchmarkTest00003,deserialization,true,502",
         "BenchmarkTest00004,deserialization,false,502",
         "BenchmarkTest00005,sqli,true,89",
+        "BenchmarkTest00006,unsupported,true,999",
     ]
     if duplicate:
         rows.append("BenchmarkTest00001,cmdi,false,78")
@@ -71,13 +73,42 @@ def test_case_level_challenge_counts_and_unsupported_cwe_are_explicit(tmp_path: 
 
     result = run_external_benchmark(tmp_path, revision, digest)
 
-    assert (result.tp, result.fp, result.fn, result.tn) == (1, 1, 1, 1)
-    assert result.labeled_total == 5
-    assert result.challenge_labeled == 4
-    assert result.scored_cases == 4
-    assert result.unsupported_cwe_counts == {"CWE-89": 1}
+    assert (result.tp, result.fp, result.fn, result.tn) == (3, 1, 0, 1)
+    assert result.labeled_total == 6
+    assert result.challenge_labeled == 5
+    assert result.scored_cases == 5
+    assert result.unsupported_cwe_counts == {"CWE-999": 1}
     assert result.missing_case_ids == ()
     assert result.broad_cwe_challenge is True
+    by_id = {case.case_id: case for case in result.cases}
+    assert by_id["BenchmarkTest00005"].expected_rule_ids == ("PY005",)
+    assert by_id["BenchmarkTest00003"].matched_rule_ids == ("PY006",)
+    assert "pickle" in result.coverage_note
+
+
+def test_cwe_502_ignores_unrelated_supported_rule_matches(tmp_path: Path) -> None:
+    revision, digest = _checkout(tmp_path)
+    source = tmp_path / "testcode" / "BenchmarkTest00003.py"
+    source.write_text("import subprocess\nsubprocess.run(user, shell=True)\n", encoding="utf-8")
+    _git(tmp_path, "add", "testcode/BenchmarkTest00003.py")
+    _git(
+        tmp_path,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "unrelated",
+    )
+    revision = _git(tmp_path, "rev-parse", "HEAD")
+
+    result = run_external_benchmark(tmp_path, revision, digest)
+    case = next(case for case in result.cases if case.case_id == "BenchmarkTest00003")
+
+    assert case.expected_rule_ids == ("PY004", "PY006")
+    assert case.matched_rule_ids == ()
+    assert case.detected is False
 
 
 def test_missing_challenge_source_is_recorded_without_shrinking_denominator(
@@ -87,8 +118,8 @@ def test_missing_challenge_source_is_recorded_without_shrinking_denominator(
 
     result = run_external_benchmark(tmp_path, revision, digest)
 
-    assert result.challenge_labeled == 4
-    assert result.scored_cases == 3
+    assert result.challenge_labeled == 5
+    assert result.scored_cases == 4
     assert result.missing_case_ids == ("BenchmarkTest00003",)
     assert result.has_errors is True
 
@@ -127,5 +158,5 @@ def test_cli_writes_error_record_and_returns_nonzero_for_missing_case(tmp_path: 
 
     assert exit_code == 1
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["challenge_labeled"] == 4
+    assert payload["challenge_labeled"] == 5
     assert payload["missing_case_ids"] == ["BenchmarkTest00003"]

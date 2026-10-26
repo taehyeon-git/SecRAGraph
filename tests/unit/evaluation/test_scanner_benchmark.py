@@ -141,9 +141,9 @@ def test_fixed_corpus_has_three_same_format_pairs_for_every_planned_rule() -> No
     corpus_path = Path(__file__).resolve().parents[3] / "data/evaluation/scanner_cases.json"
     cases = load_scanner_cases(corpus_path)
     by_id = {case.case_id: case for case in cases}
-    planned_rules = {"PY001", "PY002", "PY003", "PY004", "SEC001", "JS001"}
+    planned_rules = {"PY001", "PY002", "PY003", "PY004", "PY005", "PY006", "SEC001", "JS001"}
 
-    assert len(cases) == 39
+    assert len(cases) == 53
     for rule_id in planned_rules:
         positives = [case for case in cases if any(label[0] == rule_id for label in case.expected)]
         assert len(positives) >= 3, rule_id
@@ -327,40 +327,50 @@ def test_default_command_writes_stable_final_corpus_evidence(tmp_path: Path) -> 
         first_json.decode("utf-8")
         == json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     )
-    assert payload["rule_set_version"] == "2026.10.2"
-    assert "Rule set version: `2026.10.2`" in first_markdown.decode("utf-8")
+    assert payload["rule_set_version"] == "2026.10.4"
+    assert "Rule set version: `2026.10.4`" in first_markdown.decode("utf-8")
     assert "scan_id" not in payload and "created_at" not in payload
     assert payload["corpus_sha256"] == (
-        "6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d"
+        "8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826"
     )
     assert payload["scanner_base_revision"] == "ac88e9f"
     assert payload["coverage"] == {
-        "total": 39,
-        "scanned": 39,
+        "total": 53,
+        "scanned": 53,
         "skipped": 0,
         "parse_warnings": 0,
         "expected_diagnostics": 0,
         "unexpected_diagnostics": 0,
         "missing_diagnostics": 0,
     }
-    assert len(payload["cases"]) == 39
+    assert len(payload["cases"]) == 53
     assert [case["case_id"] for case in payload["cases"]] == sorted(
         case["case_id"] for case in payload["cases"]
     )
     assert (payload["metrics"]["tp"], payload["metrics"]["fp"], payload["metrics"]["fn"]) == (
-        18,
+        25,
         0,
         0,
     )
-    assert payload["metrics"]["precision_denominator"] == 18
-    assert payload["metrics"]["recall_denominator"] == 18
-    assert payload["metrics"]["eligible_benign_cases"] == 21
+    assert payload["metrics"]["precision_denominator"] == 25
+    assert payload["metrics"]["recall_denominator"] == 25
+    assert payload["metrics"]["eligible_benign_cases"] == 28
     assert payload["metrics"]["benign_false_alarm_cases"] == 0
-    assert list(payload["by_rule"]) == ["JS001", "PY001", "PY002", "PY003", "PY004", "SEC001"]
-    for metrics in payload["by_rule"].values():
-        assert (metrics["tp"], metrics["fp"], metrics["fn"]) == (3, 0, 0)
-        assert metrics["precision_denominator"] == 3
-        assert metrics["recall_denominator"] == 3
+    assert list(payload["by_rule"]) == [
+        "JS001",
+        "PY001",
+        "PY002",
+        "PY003",
+        "PY004",
+        "PY005",
+        "PY006",
+        "SEC001",
+    ]
+    for rule_id, metrics in payload["by_rule"].items():
+        expected_count = 4 if rule_id == "PY005" else 3
+        assert (metrics["tp"], metrics["fp"], metrics["fn"]) == (expected_count, 0, 0)
+        assert metrics["precision_denominator"] == expected_count
+        assert metrics["recall_denominator"] == expected_count
 
 
 def test_expected_python_syntax_diagnostic_is_not_eligible_benign(tmp_path: Path) -> None:

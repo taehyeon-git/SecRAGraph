@@ -18,10 +18,14 @@ from apps.web.client import (
 )
 
 API_BASE_URL = os.environ.get("SECRAGRAPH_API_BASE_URL", "http://api:8000")
-API_TOKEN = os.environ.get("SECRAGRAPH_API_TOKEN")
+_SESSION_KEY = "member_session"
 
 
 def _show_client_error(error: ApiClientError) -> None:
+    if error.status_code == 401 and _SESSION_KEY in st.session_state:
+        st.session_state.pop(_SESSION_KEY, None)
+        st.warning("Your session expired. Sign in again.")
+        return
     correlation = f" (request {error.correlation_id})" if error.correlation_id else ""
     st.error("The API request failed.")
     st.text(
@@ -120,6 +124,78 @@ def _show_knowledge_result(result: dict[str, Any]) -> None:
             st.link_button(f"Open source {index}", url)
 
 
+def _show_osv_result(result: dict[str, Any]) -> None:
+    """Display only validated, version-scoped OSV records and CVE aliases."""
+
+    advisories = result.get("advisories")
+    if not isinstance(advisories, list) or not advisories:
+        st.info(
+            "OSV returned no advisory for this package version; this is not a safety guarantee."
+        )
+        return
+    st.subheader(f"OSV advisories: {len(advisories)}")
+    for index, advisory in enumerate(advisories, start=1):
+        if not isinstance(advisory, dict):
+            continue
+        st.text(_safe_text(advisory.get("id"), f"Advisory {index}", maximum=128))
+        st.text(_safe_text(advisory.get("summary"), "Summary unavailable.", maximum=500))
+        aliases = advisory.get("cve_ids")
+        if isinstance(aliases, list) and aliases:
+            st.text("CVE aliases: " + ", ".join(str(item) for item in aliases[:100]))
+        source = safe_source_url(advisory.get("source_url"))
+        if source is not None:
+            st.link_button(f"Open OSV advisory {index}", source)
+
+
+def _member_client(http: httpx.Client) -> SecRAGraphApiClient | None:
+    """Establish or validate a member session held only in Streamlit server state."""
+
+    token = st.session_state.get(_SESSION_KEY)
+    if not isinstance(token, str) or not token:
+        st.subheader("Member sign in")
+        with st.form("member-login"):
+            username = st.text_input("Username", max_chars=32)
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Sign in")
+        if submitted:
+            try:
+                anonymous = SecRAGraphApiClient(API_BASE_URL, http_client=http)
+                login = anonymous.login(username, password)
+            except (ApiClientError, ValueError) as error:
+                if isinstance(error, ApiClientError):
+                    _show_client_error(error)
+                else:
+                    st.error("Enter a valid username and password.")
+            else:
+                st.session_state[_SESSION_KEY] = login["token"]
+                st.rerun()
+        return None
+
+    try:
+        api = SecRAGraphApiClient(API_BASE_URL, http_client=http, session_token=token)
+        identity = api.me()
+    except (ApiClientError, ValueError) as error:
+        if isinstance(error, ApiClientError):
+            _show_client_error(error)
+        else:
+            st.session_state.pop(_SESSION_KEY, None)
+            st.error("The saved session is invalid. Sign in again.")
+        return None
+
+    st.caption(f"Signed in as {identity['username']}")
+    if st.button("Sign out"):
+        try:
+            api.logout()
+        except ApiClientError as error:
+            if error.status_code != 401:
+                _show_client_error(error)
+        finally:
+            st.session_state.pop(_SESSION_KEY, None)
+            st.rerun()
+        return None
+    return api
+
+
 def main() -> None:
     """Render the two-tab portfolio demo."""
 
@@ -129,12 +205,14 @@ def main() -> None:
     timeout = httpx.Timeout(45.0, connect=5.0, write=5.0, pool=5.0)
     with httpx.Client(timeout=timeout, follow_redirects=False) as http:
         try:
-            api = SecRAGraphApiClient(API_BASE_URL, http_client=http, token=API_TOKEN)
+            api = _member_client(http)
         except ValueError:
             st.error("The configured API base URL is invalid.")
             return
+        if api is None:
+            return
 
-        scan_tab, knowledge_tab = st.tabs(["File scan", "Security Q&A"])
+        scan_tab, knowledge_tab, osv_tab = st.tabs(["File scan", "Security Q&A", "Dependency CVEs"])
         with scan_tab:
             st.caption("Deterministic, keyless source scan. Uploaded code is never executed.")
             uploaded = st.file_uploader(
@@ -181,6 +259,23 @@ def main() -> None:
                     _show_client_error(error)
                 else:
                     _show_knowledge_result(result)
+        with osv_tab:
+            st.caption(
+                "Queries OSV.dev for a known package version. "
+                "Package name and version are sent to OSV."
+            )
+            ecosystem = st.selectbox("Ecosystem", ["PyPI", "npm", "Go", "Maven"])
+            package = st.text_input("Package name", max_chars=255)
+            version = st.text_input("Package version", max_chars=100)
+            if st.button("Check OSV"):
+                try:
+                    result = api.query_vulnerabilities(ecosystem, package, version)
+                except ValueError:
+                    st.error("Enter a package name and version.")
+                except ApiClientError as error:
+                    _show_client_error(error)
+                else:
+                    _show_osv_result(result)
 
 
 if __name__ == "__main__":

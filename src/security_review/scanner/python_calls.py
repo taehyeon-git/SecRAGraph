@@ -6,6 +6,7 @@ This module parses source text only. It never imports or evaluates scanned code.
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import cast
@@ -26,6 +27,7 @@ class _Scope:
     parent: _Scope | None = None
     kind: str = "module"
     bindings: dict[str, str | None] = field(default_factory=dict)
+    sql_bindings: dict[str, tuple[str, bool] | None] = field(default_factory=dict)
     local_names: frozenset[str] = frozenset()
     global_names: frozenset[str] = frozenset()
     nonlocal_names: frozenset[str] = frozenset()
@@ -38,11 +40,73 @@ _DEFAULT_BINDINGS: dict[str, str] = {
     "requests": "requests",
     "subprocess": "subprocess",
     "yaml": "yaml",
+    "pickle": "pickle",
+    "sqlalchemy": "sqlalchemy",
 }
-_DIRECT_IMPORTS = frozenset({"builtins", "os", "requests", "subprocess", "yaml"})
+_DIRECT_IMPORTS = frozenset(
+    {"builtins", "os", "requests", "subprocess", "yaml", "pickle", "sqlalchemy"}
+)
 _UNSAFE_YAML_LOADERS = frozenset(
     {"yaml.Loader", "yaml.UnsafeLoader", "yaml.CLoader", "yaml.CUnsafeLoader"}
 )
+_SQL_VERB = re.compile(
+    r"^\s*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|WITH)\b", re.I
+)
+_SHELL_EXECUTABLES = frozenset({"sh", "bash", "dash", "zsh", "cmd", "cmd.exe"})
+
+
+def _sql_expression(node: ast.expr) -> tuple[str, bool]:
+    """Return the statically visible prefix and whether the expression is dynamic."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value, False
+    if isinstance(node, ast.JoinedStr):
+        prefix = ""
+        dynamic = False
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                prefix += value.value
+            else:
+                dynamic = True
+                break
+        return prefix, dynamic
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, _ = _sql_expression(node.left)
+        right, _ = _sql_expression(node.right)
+        if (
+            isinstance(node.left, ast.Constant)
+            and isinstance(node.left.value, str)
+            and isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, str)
+        ):
+            return left + right, False
+        return left, True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        prefix, _ = _sql_expression(node.left)
+        return prefix, True
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+    ):
+        prefix, _ = _sql_expression(node.func.value)
+        return prefix, True
+    return "", False
+
+
+def _is_dynamic_shell_argv(node: ast.expr) -> bool:
+    """Recognize a literal argv that explicitly invokes a shell with dynamic text."""
+    if not isinstance(node, (ast.List, ast.Tuple)) or len(node.elts) < 3:
+        return False
+    executable, option, command = node.elts[:3]
+    if not isinstance(executable, ast.Constant) or not isinstance(executable.value, str):
+        return False
+    if not isinstance(option, ast.Constant) or not isinstance(option.value, str):
+        return False
+    normalized_executable = executable.value.lower()
+    expected_option = "/c" if normalized_executable in {"cmd", "cmd.exe"} else "-c"
+    if normalized_executable not in _SHELL_EXECUTABLES or option.value.lower() != expected_option:
+        return False
+    return not (isinstance(command, ast.Constant) and isinstance(command.value, str))
 
 
 class _ComprehensionWalrusBindings(ast.NodeVisitor):
@@ -285,6 +349,7 @@ class _CallVisitor(ast.NodeVisitor):
                 parent=parent,
                 kind=original.kind,
                 bindings=dict(original.bindings),
+                sql_bindings=dict(original.sql_bindings),
                 local_names=original.local_names,
                 global_names=original.global_names,
                 nonlocal_names=original.nonlocal_names,
@@ -304,35 +369,56 @@ class _CallVisitor(ast.NodeVisitor):
         return tuple(scopes)
 
     @staticmethod
-    def _snapshot(scopes: Sequence[_Scope]) -> tuple[dict[str, str | None], ...]:
-        return tuple(dict(scope.bindings) for scope in scopes)
+    def _snapshot(
+        scopes: Sequence[_Scope],
+    ) -> tuple[tuple[dict[str, str | None], dict[str, tuple[str, bool] | None]], ...]:
+        return tuple((dict(scope.bindings), dict(scope.sql_bindings)) for scope in scopes)
 
     @staticmethod
-    def _restore(scopes: Sequence[_Scope], state: Sequence[dict[str, str | None]]) -> None:
-        for scope, bindings in zip(scopes, state, strict=True):
+    def _restore(
+        scopes: Sequence[_Scope],
+        state: Sequence[tuple[dict[str, str | None], dict[str, tuple[str, bool] | None]]],
+    ) -> None:
+        for scope, (bindings, sql_bindings) in zip(scopes, state, strict=True):
             scope.bindings = dict(bindings)
+            scope.sql_bindings = dict(sql_bindings)
 
     @staticmethod
-    def _merge(scopes: Sequence[_Scope], states: Sequence[Sequence[dict[str, str | None]]]) -> None:
+    def _merge(
+        scopes: Sequence[_Scope],
+        states: Sequence[
+            Sequence[tuple[dict[str, str | None], dict[str, tuple[str, bool] | None]]]
+        ],
+    ) -> None:
         missing = object()
         for index, scope in enumerate(scopes):
             merged: dict[str, str | None] = {}
-            keys = set().union(*(state[index] for state in states))
+            keys = set().union(*(state[index][0] for state in states))
             for name in keys:
-                values = [state[index].get(name, missing) for state in states]
+                values = [state[index][0].get(name, missing) for state in states]
                 if all(value == values[0] for value in values):
                     if values[0] is not missing:
                         merged[name] = cast("str | None", values[0])
                 else:
                     merged[name] = None
             scope.bindings = merged
+            sql_merged: dict[str, tuple[str, bool] | None] = {}
+            sql_keys = set().union(*(state[index][1] for state in states))
+            for name in sql_keys:
+                values = [state[index][1].get(name, missing) for state in states]
+                if all(value == values[0] for value in values):
+                    if values[0] is not missing:
+                        sql_merged[name] = cast("tuple[str, bool] | None", values[0])
+                else:
+                    sql_merged[name] = None
+            scope.sql_bindings = sql_merged
 
     def _visit_branch(
         self,
         statements: Sequence[ast.stmt],
         scopes: Sequence[_Scope],
-        initial: Sequence[dict[str, str | None]],
-    ) -> tuple[dict[str, str | None], ...]:
+        initial: Sequence[tuple[dict[str, str | None], dict[str, tuple[str, bool] | None]]],
+    ) -> tuple[tuple[dict[str, str | None], dict[str, tuple[str, bool] | None]], ...]:
         self._restore(scopes, initial)
         for statement in statements:
             self.visit(statement)
@@ -370,7 +456,9 @@ class _CallVisitor(ast.NodeVisitor):
         return self._scope
 
     def _bind(self, name: str, value: str | None = None) -> None:
-        self._binding_scope(name).bindings[name] = value
+        scope = self._binding_scope(name)
+        scope.bindings[name] = value
+        scope.sql_bindings.pop(name, None)
 
     def _resolve(self, name: str) -> str | None:
         scope: _Scope | None = self._scope
@@ -383,6 +471,28 @@ class _CallVisitor(ast.NodeVisitor):
                 return None
             scope = scope.parent
         return None
+
+    def _sql_expression_for_sink(self, node: ast.expr) -> tuple[str, bool]:
+        if not isinstance(node, ast.Name):
+            return _sql_expression(node)
+        scope: _Scope | None = self._scope
+        while scope is not None:
+            if node.id in scope.sql_bindings:
+                return scope.sql_bindings[node.id] or ("", False)
+            if node.id in scope.local_names:
+                return "", False
+            scope = scope.parent
+        return "", False
+
+    def _set_sql_binding(self, target: ast.expr, sql_value: tuple[str, bool]) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        prefix, dynamic = sql_value
+        binding = (prefix, True) if dynamic and _SQL_VERB.match(prefix) else None
+        self._binding_scope(target.id).sql_bindings[target.id] = binding
+
+    def _sql_value(self, value: ast.expr) -> tuple[str, bool]:
+        return self._sql_expression_for_sink(value)
 
     def _symbol(self, node: ast.expr) -> str | None:
         if isinstance(node, ast.Name):
@@ -415,7 +525,9 @@ class _CallVisitor(ast.NodeVisitor):
         elif symbol == "os.system":
             rule_id = "PY002"
         elif symbol in {"subprocess.run", "subprocess.call", "subprocess.Popen"}:
-            if self._literal_keyword(node, "shell", True):
+            if self._literal_keyword(node, "shell", True) or (
+                node.args and _is_dynamic_shell_argv(node.args[0])
+            ):
                 rule_id = "PY002"
         elif symbol is not None and symbol.startswith("requests."):
             if self._literal_keyword(node, "verify", False):
@@ -424,6 +536,16 @@ class _CallVisitor(ast.NodeVisitor):
             rule_id = "PY004"
         elif symbol == "yaml.load" and self._uses_unsafe_yaml_loader(node):
             rule_id = "PY004"
+        elif symbol in {"pickle.load", "pickle.loads"}:
+            rule_id = "PY006"
+        elif node.args and (
+            symbol in {"sqlalchemy.text", "sqlalchemy.sql.text"}
+            or isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"execute", "executemany"}
+        ):
+            prefix, dynamic = self._sql_expression_for_sink(node.args[0])
+            if dynamic and _SQL_VERB.match(prefix):
+                rule_id = "PY005"
         if rule_id is not None:
             self.matches.append(PythonCallMatch(rule_id, node.lineno))
         self.generic_visit(node)
@@ -454,6 +576,22 @@ class _CallVisitor(ast.NodeVisitor):
         self.visit(node.target)
         for statement in (*node.body, *node.orelse):
             self.visit(statement)
+        assigned = _LocalBindings()
+        assigned.visit(node.target)
+        for statement in (*node.body, *node.orelse):
+            assigned.visit(statement)
+        for name in assigned.names:
+            self._binding_scope(name).sql_bindings[name] = None
+
+    def visit_While(self, node: ast.While) -> None:
+        self.visit(node.test)
+        for statement in (*node.body, *node.orelse):
+            self.visit(statement)
+        assigned = _LocalBindings()
+        for statement in (*node.body, *node.orelse):
+            assigned.visit(statement)
+        for name in assigned.names:
+            self._binding_scope(name).sql_bindings[name] = None
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -561,14 +699,21 @@ class _CallVisitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
+        sql_value = self._sql_value(node.value)
         for target in node.targets:
             self.visit(target)
+            self._set_sql_binding(target, sql_value)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self.visit(node.annotation)
         if node.value is not None:
             self.visit(node.value)
+            sql_value = self._sql_value(node.value)
+        else:
+            sql_value = ("", False)
         self.visit(node.target)
+        if node.value is not None:
+            self._set_sql_binding(node.target, sql_value)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         self.visit(node.value)

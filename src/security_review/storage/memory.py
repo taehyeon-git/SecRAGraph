@@ -13,12 +13,15 @@ class InMemoryReportRepository:
 
     def __init__(self) -> None:
         self._lock = RLock()
-        self._reports: dict[UUID, ScanReport] = {}
+        self._reports: dict[UUID, tuple[ScanReport, UUID | None]] = {}
 
-    def save(self, report: ScanReport) -> None:
+    def save(self, report: ScanReport, *, owner_member_id: UUID | None = None) -> None:
         with self._lock:
-            self._reports[report.scan_id] = report
+            self._reports[report.scan_id] = (report, owner_member_id)
 
-    def get(self, scan_id: UUID) -> ScanReport | None:
+    def get(self, scan_id: UUID, *, owner_member_id: UUID | None = None) -> ScanReport | None:
         with self._lock:
-            return self._reports.get(scan_id)
+            entry = self._reports.get(scan_id)
+            if entry is None or (owner_member_id is not None and entry[1] != owner_member_id):
+                return None
+            return entry[0]

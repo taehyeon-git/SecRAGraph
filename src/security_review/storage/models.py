@@ -43,6 +43,12 @@ class ScanReportRow(Base):
     __tablename__ = "scan_reports"
 
     scan_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    owner_member_id: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("app.members.user_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(64), nullable=False)
     target_name: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -93,6 +99,39 @@ class ScanReportRow(Base):
                 "rule_set_version": self.rule_set_version,
             }
         )
+
+
+class MemberRow(Base):
+    """A locally provisioned account with a versioned password verifier."""
+
+    __tablename__ = "members"
+
+    user_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True)
+    username: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(512), nullable=False)
+    disabled: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    failed_attempts: Mapped[int] = mapped_column(nullable=False, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class MemberSessionRow(Base):
+    """Opaque session metadata keyed only by the SHA-256 token digest."""
+
+    __tablename__ = "member_sessions"
+
+    token_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    member_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("app.members.user_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class FindingRow(Base):

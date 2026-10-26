@@ -96,8 +96,12 @@ _SOURCE_FILES = (
     "src/security_review/evaluation/rag_models.py",
     "src/security_review/evaluation/rag_render.py",
     "src/security_review/orchestrator/knowledge_graph.py",
+    "src/security_review/orchestrator/state.py",
     "src/security_review/intelligence/ingestion.py",
+    "src/security_review/intelligence/models.py",
     "src/security_review/intelligence/qdrant_retriever.py",
+    "src/security_review/domain/models.py",
+    "src/security_review/ports.py",
     "scripts/run_rag_evidence.py",
 )
 _CITATION = re.compile(r"\[source:([^\]\r\n]+)\]")

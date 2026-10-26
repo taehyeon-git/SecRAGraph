@@ -125,6 +125,9 @@ class Text2SqlService:
             except IntelligenceConfigurationError:
                 log_dependency_failed("chat", "configuration")
                 raise
+            if not isinstance(raw_sql, str):
+                last_reason = "invalid_response"
+                continue
             try:
                 guarded_sql = validate_readonly_sql(
                     _strip_optional_sql_fence(raw_sql),

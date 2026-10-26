@@ -218,6 +218,83 @@
       "case_id": "js001-template-negative", "file_path": "settings.js",
       "source": "const note = `process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'`;\n",
       "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-fstring-positive", "file_path": "sql/fstring.py",
+      "source": "import sqlite3\ncursor.execute(f\"SELECT * FROM users WHERE id={user}\")\n",
+      "expected": [{"rule_id": "PY005", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-fstring-negative", "file_path": "sql/fstring.py",
+      "source": "import sqlite3\ncursor.execute(\"SELECT * FROM users WHERE id=?\", (user,))\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-percent-positive", "file_path": "sql/percent.py",
+      "source": "cursor.execute(\"DELETE FROM users WHERE id=%s\" % user)\n",
+      "expected": [{"rule_id": "PY005", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-percent-negative", "file_path": "sql/percent.py",
+      "source": "cursor.execute(\"DELETE FROM users WHERE id=%s\", (user,))\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-concat-positive", "file_path": "sql/concat.py",
+      "source": "cursor.execute(\"UPDATE users SET name=\" + name)\n",
+      "expected": [{"rule_id": "PY005", "line_start": 1}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-concat-negative", "file_path": "sql/concat.py",
+      "source": "cursor.execute(f\"hello {name}\")\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-alias-positive", "file_path": "pickle/alias.py",
+      "source": "import pickle as p\np.loads(data)\n",
+      "expected": [{"rule_id": "PY006", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-alias-negative", "file_path": "pickle/alias.py",
+      "source": "import pickle as p\np = safe_module\np.loads(data)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-import-positive", "file_path": "pickle/imported.py",
+      "source": "from pickle import load as decode\ndecode(handle)\n",
+      "expected": [{"rule_id": "PY006", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-import-negative", "file_path": "pickle/imported.py",
+      "source": "from pickle import load as decode\ndef decode(handle):\n    return handle\ndecode(user)\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-module-positive", "file_path": "pickle/module.py",
+      "source": "import pickle\npickle.load(handle)\n",
+      "expected": [{"rule_id": "PY006", "line_start": 2}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "pickle-module-negative", "file_path": "pickle/module.py",
+      "source": "# pickle.load(handle)\nvalue = 1\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-local-positive", "file_path": "sql/local.py",
+      "source": "def process(user):\n    query = f\"SELECT * FROM users WHERE id={user}\"\n    cursor.execute(query)\n",
+      "expected": [{"rule_id": "PY005", "line_start": 3}], "is_benign": false,
+      "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "sql-local-negative", "file_path": "sql/local.py",
+      "source": "def process(user):\n    query = \"SELECT * FROM users WHERE id=?\"\n    cursor.execute(query, (user,))\n",
+      "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
     }
   ]
 }

@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 from typing import cast
+from uuid import UUID
 
 from security_review.domain.models import Finding, ScanReport
 from security_review.observability import log_scan_completed, request_context_bound
@@ -163,7 +164,13 @@ class ScanService:
                 services = replace(services, deterministic_scanner=_deterministic_scan)
             self._graph = build_scan_graph(services)
 
-    def scan(self, target: Path, *, target_name: str | None = None) -> ScanReport:
+    def scan(
+        self,
+        target: Path,
+        *,
+        target_name: str | None = None,
+        owner_member_id: UUID | None = None,
+    ) -> ScanReport:
         """Scan a safe local target while preserving its public display name."""
 
         report = _invoke_scan_graph(
@@ -173,7 +180,10 @@ class ScanService:
             target_name=target_name,
             clock=monotonic,
         )
-        self._reports.save(report)
+        if owner_member_id is None:
+            self._reports.save(report)
+        else:
+            self._reports.save(report, owner_member_id=owner_member_id)
         if request_context_bound():
             log_scan_completed(
                 scan_id=str(report.scan_id),

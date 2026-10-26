@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Annotated
+from typing import Annotated, Protocol
 
 import typer
+from sqlalchemy.exc import SQLAlchemyError
 
 from security_review.application import UnsupportedTargetError, scan_path
 from security_review.config import Settings
@@ -18,12 +21,14 @@ from security_review.intelligence.ingestion import (
     load_knowledge_documents,
 )
 from security_review.intelligence.manifest import ManifestError, load_verified_corpus
+from security_review.intelligence.osv import LiveOsvClient, OsvInputError, OsvUnavailableError
 from security_review.intelligence.qdrant_retriever import CorpusSyncResult
+from security_review.membership.service import MembershipError
 from security_review.ports import IntelligenceConfigurationError, IntelligenceUnavailableError
 from security_review.reporting.sarif import render_sarif
 from security_review.reporting.types import ReportFormat, render_report
 from security_review.scanner.files import ScanLimits
-from security_review.storage.database import create_database_engine
+from security_review.storage.database import create_database_engine, create_session_factory
 from security_review.storage.intelligence import IntelligenceImportError, import_intelligence_data
 
 app = typer.Typer(
@@ -36,6 +41,96 @@ app = typer.Typer(
 @app.callback()
 def main() -> None:
     """Run SecRAGraph's local, non-executing security review tools."""
+
+
+class MembershipAdmin(Protocol):
+    def register(self, username: str, password: str) -> object: ...
+
+    def disable(self, username: str) -> None: ...
+
+    def unlock(self, username: str) -> None: ...
+
+
+@contextmanager
+def _membership_service_context() -> Iterator[MembershipAdmin]:
+    """Open and dispose the local account database without logging credentials."""
+
+    from security_review.membership.service import MembershipService
+    from security_review.storage.members import SqlAlchemyMembershipRepository
+
+    settings = Settings()
+    engine = create_database_engine(settings.database_url)
+    try:
+        sessions = create_session_factory(settings.database_url, engine=engine)
+        yield MembershipService(SqlAlchemyMembershipRepository(sessions))
+    finally:
+        engine.dispose()
+
+
+@app.command("create-user")
+def create_user(username: Annotated[str, typer.Argument(help="Member username")]) -> None:
+    """Create a member account; prompt for the password without terminal echo."""
+
+    password = typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+    try:
+        with _membership_service_context() as membership:
+            membership.register(username, password)
+    except (MembershipError, SQLAlchemyError, ValueError) as error:
+        del error
+        typer.echo("Could not create member account.", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"Member {username} created.")
+
+
+@app.command("disable-user")
+def disable_user(username: Annotated[str, typer.Argument(help="Member username")]) -> None:
+    """Disable a member and revoke their sessions."""
+
+    try:
+        with _membership_service_context() as membership:
+            membership.disable(username)
+    except (MembershipError, SQLAlchemyError, ValueError) as error:
+        del error
+        typer.echo("Could not disable member account.", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"Member {username} disabled.")
+
+
+@app.command("unlock-user")
+def unlock_user(username: Annotated[str, typer.Argument(help="Member username")]) -> None:
+    """Clear a member's failed-login lockout after local identity checks."""
+
+    try:
+        with _membership_service_context() as membership:
+            membership.unlock(username)
+    except (MembershipError, SQLAlchemyError, ValueError) as error:
+        del error
+        typer.echo("Could not unlock member account.", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(f"Member {username} unlocked.")
+
+
+def _osv_client_factory() -> LiveOsvClient:
+    return LiveOsvClient()
+
+
+@app.command("osv-query")
+def osv_query(
+    ecosystem: Annotated[str, typer.Option("--ecosystem")],
+    package: Annotated[str, typer.Option("--package")],
+    version: Annotated[str, typer.Option("--version")],
+) -> None:
+    """Fetch OSV advisories and CVE identifiers for a named package version."""
+
+    try:
+        result = _osv_client_factory().query_package(ecosystem, package, version)
+    except OsvInputError as error:
+        typer.echo("The package query is invalid.", err=True)
+        raise typer.Exit(code=2) from error
+    except OsvUnavailableError as error:
+        typer.echo("OSV vulnerability data is unavailable.", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(json.dumps(asdict(result), ensure_ascii=False))
 
 
 def _write_atomically(output: Path, rendered: str) -> None:

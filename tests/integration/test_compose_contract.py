@@ -27,8 +27,6 @@ def _compose_config(
         values["POSTGRES_PASSWORD"] = secrets.token_urlsafe(32)
     if not values.get("SECRAGRAPH_READER_PASSWORD"):
         values["SECRAGRAPH_READER_PASSWORD"] = secrets.token_urlsafe(32)
-    if not values.get("SECRAGRAPH_API_TOKEN"):
-        values["SECRAGRAPH_API_TOKEN"] = secrets.token_urlsafe(32)
     # The executable is resolved from PATH; every argument is fixed by this test.
     return subprocess.run(  # noqa: S603
         [docker, "compose", "config", "--format", "json"],
@@ -83,7 +81,7 @@ def test_default_stack_requires_runtime_database_secrets() -> None:
     assert "POSTGRES_PASSWORD" in result.stderr or "SECRAGRAPH_READER_PASSWORD" in result.stderr
 
 
-def test_default_stack_requires_shared_api_token() -> None:
+def test_default_stack_allows_no_operator_api_token() -> None:
     project_root = Path(__file__).resolve().parents[2]
     docker = which("docker")
     assert docker is not None
@@ -102,18 +100,20 @@ def test_default_stack_requires_shared_api_token() -> None:
         timeout=30,
     )
 
-    assert result.returncode != 0
-    assert "SECRAGRAPH_API_TOKEN" in result.stderr
+    assert result.returncode == 0
+    services = json.loads(result.stdout)["services"]
+    assert services["api"]["environment"]["SECRAGRAPH_API_TOKEN"] == ""
+    assert "SECRAGRAPH_API_TOKEN" not in services["web"]["environment"]
 
 
-def test_api_and_web_receive_same_token_and_all_published_ports_are_loopback_only() -> None:
+def test_operator_token_is_only_in_api_and_all_published_ports_are_loopback_only() -> None:
     token = secrets.token_urlsafe(32)
     environment = os.environ.copy()
     environment["SECRAGRAPH_API_TOKEN"] = token
     services = json.loads(_compose_config(environment=environment).stdout)["services"]
 
     assert services["api"]["environment"]["SECRAGRAPH_API_TOKEN"] == token
-    assert services["web"]["environment"]["SECRAGRAPH_API_TOKEN"] == token
+    assert "SECRAGRAPH_API_TOKEN" not in services["web"]["environment"]
     assert all(
         port["host_ip"] == "127.0.0.1"
         for service in services.values()

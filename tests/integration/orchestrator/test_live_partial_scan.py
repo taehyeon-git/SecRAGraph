@@ -59,10 +59,17 @@ def test_live_qdrant_search_failure_preserves_deterministic_findings(tmp_path: P
         with TestClient(app) as client:
             readiness = client.get("/health/ready")
             assert readiness.status_code == 200
+            username = f"partial-{uuid4().hex[:12]}"
+            password = "integration-only-password"
+            app.state.membership_service.register(username, password)
+            login = client.post("/v1/auth/login", json={"username": username, "password": password})
+            assert login.status_code == 200
+            headers = {"Authorization": f"Session {login.json()['token']}"}
             with patch.object(qdrant, "query_points", side_effect=OSError("isolated outage")):
                 response = client.post(
                     "/v1/scans/file",
                     files={"file": ("sample.py", source.read_bytes(), "text/x-python")},
+                    headers=headers,
                 )
 
         assert response.status_code == 200
