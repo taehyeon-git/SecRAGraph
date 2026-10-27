@@ -1,0 +1,1422 @@
+{
+  "authentication": {
+    "authenticated_uploads": 53,
+    "finding_locations_verified": 25,
+    "foreign_member_rejected": true,
+    "logged_out_rejected": true,
+    "persisted_reports_verified": 53,
+    "unauthenticated_rejected": true
+  },
+  "evaluation": "member-authenticated API scan of the synthetic scanner corpus",
+  "scanner": {
+    "benchmark": "small, author-created synthetic scanner corpus",
+    "by_rule": {
+      "JS001": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "PY001": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "PY002": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "PY003": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "PY004": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "PY005": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 4,
+        "recall": 1.0,
+        "recall_denominator": 4,
+        "tp": 4
+      },
+      "PY006": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      },
+      "SEC001": {
+        "benign_false_alarm_cases": 0,
+        "benign_false_alarm_denominator": 28,
+        "benign_false_alarm_rate": 0.0,
+        "eligible_benign_cases": 28,
+        "f1": 1.0,
+        "f1_denominator": 2.0,
+        "fn": 0,
+        "fp": 0,
+        "precision": 1.0,
+        "precision_denominator": 3,
+        "recall": 1.0,
+        "recall_denominator": 3,
+        "tp": 3
+      }
+    },
+    "cases": [
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-block-comment-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.js",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-env-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": ".env",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "js001-env-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "case_id": "js001-env-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "js001-env-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "file_path": ".env",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-js-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.js",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "js001-js-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "case_id": "js001-js-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "js001-js-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "file_path": "settings.js",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-regex-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.js",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-template-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.js",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "js001-ts-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.ts",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "js001-ts-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "case_id": "js001-ts-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "js001-ts-positive",
+            "JS001",
+            1
+          ]
+        ],
+        "file_path": "settings.ts",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "pickle-alias-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "pickle/alias.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "pickle-alias-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "case_id": "pickle-alias-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "pickle-alias-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "file_path": "pickle/alias.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "pickle-import-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "pickle/imported.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "pickle-import-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "case_id": "pickle-import-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "pickle-import-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "file_path": "pickle/imported.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "pickle-module-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "pickle/module.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "pickle-module-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "case_id": "pickle-module-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "pickle-module-positive",
+            "PY006",
+            2
+          ]
+        ],
+        "file_path": "pickle/module.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py001-direct-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py001-direct-positive",
+            "PY001",
+            1
+          ]
+        ],
+        "case_id": "py001-direct-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py001-direct-positive",
+            "PY001",
+            1
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py001-function-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py001-function-positive",
+            "PY001",
+            2
+          ]
+        ],
+        "case_id": "py001-function-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py001-function-positive",
+            "PY001",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py001-multiline-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py001-multiline-positive",
+            "PY001",
+            1
+          ]
+        ],
+        "case_id": "py001-multiline-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py001-multiline-positive",
+            "PY001",
+            1
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py002-multiline-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py002-multiline-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "case_id": "py002-multiline-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py002-multiline-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py002-run-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py002-run-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "case_id": "py002-run-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py002-run-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py002-system-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py002-system-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "case_id": "py002-system-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py002-system-positive",
+            "PY002",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py003-alias-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py003-alias-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "case_id": "py003-alias-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py003-alias-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py003-get-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py003-get-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "case_id": "py003-get-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py003-get-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py003-multiline-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py003-multiline-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "case_id": "py003-multiline-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py003-multiline-positive",
+            "PY003",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py004-alias-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py004-alias-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "case_id": "py004-alias-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py004-alias-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py004-loader-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py004-loader-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "case_id": "py004-loader-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py004-loader-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "py004-unsafe-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "py004-unsafe-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "case_id": "py004-unsafe-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "py004-unsafe-positive",
+            "PY004",
+            2
+          ]
+        ],
+        "file_path": "sample.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sec001-env-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": ".env",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sec001-env-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "case_id": "sec001-env-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sec001-env-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "file_path": ".env",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sec001-json-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.json",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sec001-json-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "case_id": "sec001-json-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sec001-json-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "file_path": "settings.json",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sec001-python-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "settings.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sec001-python-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "case_id": "sec001-python-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sec001-python-positive",
+            "SEC001",
+            1
+          ]
+        ],
+        "file_path": "settings.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sql-concat-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sql/concat.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sql-concat-positive",
+            "PY005",
+            1
+          ]
+        ],
+        "case_id": "sql-concat-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sql-concat-positive",
+            "PY005",
+            1
+          ]
+        ],
+        "file_path": "sql/concat.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sql-fstring-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sql/fstring.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sql-fstring-positive",
+            "PY005",
+            2
+          ]
+        ],
+        "case_id": "sql-fstring-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sql-fstring-positive",
+            "PY005",
+            2
+          ]
+        ],
+        "file_path": "sql/fstring.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sql-local-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sql/local.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sql-local-positive",
+            "PY005",
+            3
+          ]
+        ],
+        "case_id": "sql-local-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sql-local-positive",
+            "PY005",
+            3
+          ]
+        ],
+        "file_path": "sql/local.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [],
+        "case_id": "sql-percent-negative",
+        "eligible_benign": true,
+        "expected_diagnostics": [],
+        "expected_findings": [],
+        "file_path": "sql/percent.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      },
+      {
+        "actual_diagnostics": [],
+        "actual_findings": [
+          [
+            "sql-percent-positive",
+            "PY005",
+            1
+          ]
+        ],
+        "case_id": "sql-percent-positive",
+        "eligible_benign": false,
+        "expected_diagnostics": [],
+        "expected_findings": [
+          [
+            "sql-percent-positive",
+            "PY005",
+            1
+          ]
+        ],
+        "file_path": "sql/percent.py",
+        "missing_diagnostics": [],
+        "missing_findings": [],
+        "parse_warning": false,
+        "scanned": true,
+        "skipped": false,
+        "unassessed_findings": [],
+        "unassessed_rules": [],
+        "unexpected_diagnostics": [],
+        "unexpected_findings": []
+      }
+    ],
+    "corpus_sha256": "8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826",
+    "coverage": {
+      "expected_diagnostics": 0,
+      "missing_diagnostics": 0,
+      "parse_warnings": 0,
+      "scanned": 53,
+      "skipped": 0,
+      "total": 53,
+      "unexpected_diagnostics": 0
+    },
+    "current_revision": "af3844c9b7462c547c25e6dc37feb5e6728599fe",
+    "expected_diagnostics": [],
+    "metrics": {
+      "benign_false_alarm_cases": 0,
+      "benign_false_alarm_denominator": 28,
+      "benign_false_alarm_rate": 0.0,
+      "eligible_benign_cases": 28,
+      "f1": 1.0,
+      "f1_denominator": 2.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 25,
+      "recall": 1.0,
+      "recall_denominator": 25,
+      "tp": 25
+    },
+    "rule_set_version": "2026.10.4",
+    "scanner_base_revision": "ac88e9f",
+    "unexpected_diagnostics": []
+  }
+}
