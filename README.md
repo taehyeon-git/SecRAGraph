@@ -118,6 +118,23 @@ uv run python -m scripts.run_scanner_benchmark
 
 명령은 키·Docker·네트워크 없이 `build/evidence/scanner.json`과 `scanner.md`를 생성하며, 라벨 불일치·검사 누락·예상 밖 진단이 있으면 0이 아닌 코드로 종료합니다.
 
+### 회원 로그인 API 실측
+
+같은 53개 합성 사례를 **실제 회원 로그인 후 FastAPI에 업로드**해 2026-10-27에 별도로 측정했습니다. 격리된 Docker Compose에서 임시 회원 2명을 만들고, 각 사례를 ZIP으로 전송한 뒤 저장된 보고서를 다시 조회했습니다. 모델 API 키는 사용하지 않았고 자동 CWE·OSV 조회도 껐습니다.
+
+| 평가 경로 | TP / FP / FN | 정밀도 / 재현율 / F1 | 정상 사례 오경보 | 업로드 / 저장 보고서 대조 | 인증·소유권 검사 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 로컬 직접 스캔 | 25 / 0 / 0 | 1.000 / 1.000 / 1.000 | 0/28 | 해당 없음 | 해당 없음 |
+| 회원 로그인 API | 25 / 0 / 0 | 1.000 / 1.000 / 1.000 | 0/28 | 53/53 · 53/53 | 무인증 401 · 다른 회원 404 · 로그아웃 후 401 |
+
+API 경로는 탐지 25건의 원본 상대 경로도 확인했고, 두 경로의 manifest SHA-256·규칙 버전·사례별 채점 결과가 같았습니다. 이는 **같은 합성 코퍼스를 두 실행 경로로 통과시킨 기능 검증**이며 독립적인 실세계 탐지율 검증은 아닙니다. [실측 기록과 원본 JSON·Markdown](docs/evidence/authenticated-scanner-2026-10-27.md)에 사용한 코드 커밋, 분모와 한계를 적었습니다.
+
+```powershell
+uv run --frozen python -m scripts.run_authenticated_scanner_benchmark
+```
+
+이 명령은 Docker가 필요하며 컨테이너 이미지를 처음 준비할 때 네트워크가 필요할 수 있습니다. 로컬 루프백에 격리된 서비스를 열고, 임시 회원·볼륨을 종료 시 정리합니다. 시작할 때 이전 생성 파일을 지우며 삭제할 수 없으면 평가를 시작하지 않습니다. 성공하면 `build/evidence/member-scanner.json`과 `.md`를 만듭니다. [재현 절차](docs/demo.md#12-회원-로그인-api-평가)를 참고하세요.
+
 실제 분포에 가까운 별도 시험을 원하면 사용자가 직접 확보한 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython)의 로컬 체크아웃을 커밋 SHA와 예상 결과 CSV SHA-256으로 고정해 `scripts.run_external_scanner_benchmark`에 넘길 수 있습니다. GPL 코퍼스는 이 저장소에 복사하지 않았습니다. 이 평가는 CWE-78·CWE-89·CWE-502의 **넓은 분류별 사례 단위 도전**입니다. CWE-78은 `PY002`, CWE-89는 `PY005`, CWE-502는 `PY004`/`PY006`으로 매핑하며 동적으로 조립한 `sh -c` 인수, 다른 SQL API, pickle 이외 역직렬화 sink는 미지원으로 표시합니다. 고정한 외부 도전 결과는 지원 대상 사례 90개 중 82개 스캔 완료(8개 불완전 파일 제외)로 TP=27, FP=18, FN=6, TN=31이었습니다. 이는 CWE 78/89/502의 제한된 사례 단위 결과이며 전체 OWASP Benchmark 성능이나 일반적인 코드베이스 품질을 나타내지 않습니다. [실행 방법, 고정 입력, 분모 해석](docs/demo.md)을 보세요.
 
 ## 패키지 취약점 조회

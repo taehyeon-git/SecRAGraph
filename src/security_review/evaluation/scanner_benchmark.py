@@ -144,9 +144,11 @@ class CaseAssessment:
 
 
 def _diagnostic_code(warning: str, file_path: str) -> str:
-    leaf = Path(file_path).name
-    prefix = f"{leaf}:"
-    return warning[len(prefix) :] if warning.startswith(prefix) else warning
+    for path in (file_path, Path(file_path).name):
+        prefix = f"{path}:"
+        if warning.startswith(prefix):
+            return warning[len(prefix) :]
+    return warning
 
 
 def assess_scanner_case(
@@ -376,6 +378,18 @@ def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
 
     if len(rule_set_versions) != 1:
         raise ValueError("inconsistent rule-set versions across scanner cases")
+    return summarize_scanner_assessments(
+        assessments,
+        corpus_sha256=corpus_sha256,
+        rule_set_version=rule_set_versions.pop(),
+    )
+
+
+def summarize_scanner_assessments(
+    assessments: list[CaseAssessment], *, corpus_sha256: str, rule_set_version: str
+) -> ScannerBenchmark:
+    """Score validated case assessments from the local or authenticated API path."""
+
     assessed = tuple(sorted(assessments, key=lambda case: case.case_id))
     expected = frozenset(key for case in assessed for key in case.expected_findings)
     actual_keys = frozenset(key for case in assessed for key in case.actual_findings)
@@ -413,5 +427,5 @@ def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
         corpus_sha256=corpus_sha256,
         scanner_base_revision=SCANNER_BASE_REVISION,
         current_revision=_current_revision(),
-        rule_set_version=rule_set_versions.pop(),
+        rule_set_version=rule_set_version,
     )
