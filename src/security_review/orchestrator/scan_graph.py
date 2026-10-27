@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
-from typing import TYPE_CHECKING, Protocol, TypeAlias, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, TypedDict, cast
 from urllib.parse import urlsplit
 
 from langgraph.graph import END, START, StateGraph
@@ -17,6 +17,7 @@ from security_review.domain.models import (
     Finding,
     ReportSummary,
     RiskSummary,
+    ScanExecution,
     ScanReport,
     ScanStatus,
     SourceReference,
@@ -75,6 +76,7 @@ class DeterministicScanResult:
     target_name: str
     findings: tuple[Finding, ...]
     warnings: tuple[str, ...] = ()
+    executions: tuple[ScanExecution, ...] = ()
 
 
 class DeterministicScanner(Protocol):
@@ -107,6 +109,8 @@ class ReportBuilder(Protocol):
         target_name: str,
         findings: Sequence[Finding],
         warnings: Sequence[str] = (),
+        *,
+        executions: Sequence[ScanExecution] = (),
     ) -> ScanReport: ...
 
 
@@ -124,6 +128,7 @@ class ScanState(TypedDict, total=False):
     findings: tuple[Finding, ...]
     deterministic_warnings: tuple[str, ...]
     warnings: tuple[str, ...]
+    executions: tuple[ScanExecution, ...]
     risk: RiskSummary | None
     report: ScanReport | None
 
@@ -207,6 +212,7 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             "findings": (),
             "deterministic_warnings": (),
             "warnings": (),
+            "executions": (),
             "risk": None,
             "report": None,
         }
@@ -220,6 +226,7 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
                 "findings": findings,
                 "deterministic_warnings": (),
                 "warnings": (),
+                "executions": (),
             }
         if services.deterministic_scanner is None:
             raise ScanWorkflowError("missing_deterministic_scanner")
@@ -231,12 +238,14 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             raise ScanWorkflowError("invalid_deterministic_target_name")
         findings = _validated_finding_tuple(result.findings)
         warnings = _validated_warning_tuple(result.warnings)
+        executions = _validated_execution_tuple(result.executions)
         return {
             "target_name": target_name,
             "deterministic_findings": findings,
             "findings": findings,
             "deterministic_warnings": warnings,
             "warnings": warnings,
+            "executions": executions,
         }
 
     def normalize_findings(state: ScanState) -> ScanState:
@@ -398,20 +407,71 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
     def audit_dependencies(state: ScanState) -> ScanState:
         findings = _required_findings(state, "findings")
         warnings = _required_warnings(state)
+        executions = _validated_execution_tuple(state.get("executions"))
         request = state.get("request")
-        if (
-            request is None
-            or services.dependency_auditor is None
-            or PROCESSING_TIME_LIMIT_EXCEEDED in warnings
-        ):
+        if request is None or services.dependency_auditor is None:
             return {"findings": findings}
+        direct_lockfile = request.target.name.lower() in {"uv.lock", "package-lock.json"}
+        eligible_lockfiles = (request.target.name,) if direct_lockfile else ()
+        deadline_execution = ScanExecution(
+            engine="osv",
+            kind="dependency",
+            status="not_run",
+            elapsed_ms=0,
+            eligible_files=eligible_lockfiles,
+            languages=(("python",) if request.target.name.lower() == "uv.lock" else ("javascript",))
+            if direct_lockfile
+            else (),
+            checks=("OSV.dev/v1/querybatch",),
+            reason="scan_deadline_exceeded",
+        )
+        if PROCESSING_TIME_LIMIT_EXCEEDED in warnings:
+            return {
+                "findings": findings,
+                "executions": (*executions, deadline_execution),
+            }
         try:
             _require_enrichment_time(state)
         except _EnrichmentDeadlineReached:
-            return {"warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED)}
+            return {
+                "warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED),
+                "executions": (*executions, deadline_execution),
+            }
         result = services.dependency_auditor(request.target, request.limits)
         additions = _validated_finding_tuple(result.findings)
         added_warnings = _validated_warning_tuple(result.warnings)
+        status = getattr(result, "status", "partial" if added_warnings else "completed")
+        if status not in {"completed", "partial", "not_run", "error", "skipped"}:
+            raise ScanWorkflowError("invalid_dependency_coverage")
+        eligible_files = getattr(result, "eligible_files", ())
+        scanned_files = getattr(result, "scanned_files", ())
+        elapsed_ms = getattr(result, "elapsed_ms", 0)
+        version = getattr(result, "version", None)
+        reason = next(
+            (warning for warning in added_warnings if warning.startswith("dependency_")), None
+        )
+        try:
+            dependency_execution = ScanExecution(
+                engine="osv",
+                kind="dependency",
+                status=cast(Literal["completed", "partial", "not_run", "error", "skipped"], status),
+                version=version,
+                elapsed_ms=elapsed_ms,
+                eligible_files=eligible_files,
+                scanned_files=scanned_files,
+                languages=tuple(
+                    sorted(
+                        {
+                            "python" if path.endswith("uv.lock") else "javascript"
+                            for path in eligible_files
+                        }
+                    )
+                ),
+                checks=("OSV.dev/v1/querybatch",),
+                reason=reason,
+            )
+        except Exception as error:
+            raise ScanWorkflowError("invalid_dependency_coverage") from error
         merged = normalize_report_findings((*findings, *additions))
         warnings = tuple(
             warning
@@ -427,7 +487,11 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             _require_enrichment_time(state)
         except _EnrichmentDeadlineReached:
             warnings = _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED)
-        return {"findings": merged, "warnings": warnings}
+        return {
+            "findings": merged,
+            "warnings": warnings,
+            "executions": (*executions, dependency_execution),
+        }
 
     def build_report(state: ScanState) -> ScanState:
         target_name = _validated_target_name(state.get("target_name"))
@@ -436,12 +500,16 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
         findings = _required_findings(state, "findings")
         warnings = _required_warnings(state)
         risk = state.get("risk")
+        executions = _validated_execution_tuple(state.get("executions"))
         if not isinstance(risk, RiskSummary):
             raise ScanWorkflowError("missing_risk")
-        report = services.report_builder(target_name, findings, warnings)
+        report = services.report_builder(target_name, findings, warnings, executions=executions)
         expected_warnings = normalize_warnings(warnings)
         expected_status = (
-            ScanStatus.COMPLETED_WITH_WARNINGS if expected_warnings else ScanStatus.COMPLETED
+            ScanStatus.COMPLETED_WITH_WARNINGS
+            if expected_warnings
+            or any(execution.status not in {"completed", "skipped"} for execution in executions)
+            else ScanStatus.COMPLETED
         )
         if (
             not isinstance(report, ScanReport)
@@ -449,6 +517,7 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             or report.findings != findings
             or report.warnings != expected_warnings
             or report.status is not expected_status
+            or report.executions != executions
             or report.summary != ReportSummary.from_findings(findings)
             or report.risk != risk
         ):
@@ -497,6 +566,12 @@ def _validated_warning_tuple(value: object) -> tuple[str, ...]:
     if not isinstance(value, tuple) or not all(isinstance(item, str) and item for item in value):
         raise ScanWorkflowError("invalid_deterministic_warnings")
     return cast(tuple[str, ...], value)
+
+
+def _validated_execution_tuple(value: object) -> tuple[ScanExecution, ...]:
+    if not isinstance(value, tuple) or not all(isinstance(item, ScanExecution) for item in value):
+        raise ScanWorkflowError("invalid_scan_executions")
+    return cast(tuple[ScanExecution, ...], value)
 
 
 def _required_findings(state: ScanState, key: str) -> tuple[Finding, ...]:
@@ -675,6 +750,8 @@ def _rebuild_enriched_finding(
         cwe_ids=finding.cwe_ids,
         remediation=remediation,
         references=references,
+        engine=finding.engine,
+        trace=finding.trace,
     )
     if _protected_fields(enriched) != _protected_fields(finding):
         raise ScanWorkflowError("protected_finding_fields_changed")
@@ -694,6 +771,8 @@ def _protected_fields(finding: Finding) -> tuple[object, ...]:
         finding.redacted_evidence,
         finding.confidence,
         finding.cwe_ids,
+        finding.engine,
+        finding.trace,
     )
 
 

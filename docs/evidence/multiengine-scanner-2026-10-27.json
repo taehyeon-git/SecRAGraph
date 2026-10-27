@@ -1,0 +1,1073 @@
+{
+  "assessments": [
+    {
+      "case_id": "python-eval",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "eval_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_eval_rule-eval",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-eval",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "eval_literal.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_eval_rule-eval",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-eval",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "eval_shadowed.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_eval_rule-eval",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-pickle",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "pickle_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_deserialization_rule-pickle",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-pickle",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "pickle_json.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_deserialization_rule-pickle",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-shell",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "shell_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-shell",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "shell_list.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-sql",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "sql_concat.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-sql",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "sql_format.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-sql",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "sql_fstring.py",
+      "fn": 1,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-sql",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "sql_parameterized.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-yaml",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "yaml_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_deserialization_rule-yaml-load",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-yaml",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "yaml_safe.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_deserialization_rule-yaml-load",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "javascript-eval",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "js_eval_positive.js",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/javascript_eval_rule-eval-with-expression",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "javascript-eval",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "js_eval_json.js",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/javascript_eval_rule-eval-with-expression",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "react-xss",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "react_positive.jsx",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/javascript_react_rule-dangerouslysetinnerhtml",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "react-xss",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "react_escaped.jsx",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/javascript_react_rule-dangerouslysetinnerhtml",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "generic-secret",
+      "engine": "gitleaks",
+      "expected_trace": null,
+      "file_path": "secret.env",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "GITLEAKS/generic-api-key",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "generic-secret",
+      "engine": "gitleaks",
+      "expected_trace": null,
+      "file_path": "example.env",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "GITLEAKS/generic-api-key",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "open.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_24",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "restricted.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_24",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "open.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_23",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "restricted.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_23",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "open.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV2_AWS_5",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "restricted.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV2_AWS_5",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV2_AWS_62",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV2_AWS_61",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_145",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_144",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_18",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV2_AWS_6",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "terraform-s3",
+      "engine": "checkov",
+      "expected_trace": null,
+      "file_path": "bucket.tf",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "CHECKOV/CKV_AWS_21",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": {
+        "required_steps": [
+          {
+            "file": "python_command_positive.py",
+            "line": 4
+          }
+        ],
+        "sink_file": "python_command_positive.py",
+        "sink_line": 10,
+        "source_file": "python_command_positive.py",
+        "source_line": 9
+      },
+      "file_path": "python_command_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [
+        {
+          "file_path": "python_command_positive.py",
+          "line_start": 9,
+          "role": "source"
+        },
+        {
+          "file_path": "python_command_positive.py",
+          "line_start": 9,
+          "role": "step"
+        },
+        {
+          "file_path": "python_command_positive.py",
+          "line_start": 10,
+          "role": "step"
+        },
+        {
+          "file_path": "python_command_positive.py",
+          "line_start": 4,
+          "role": "step"
+        },
+        {
+          "file_path": "python_command_positive.py",
+          "line_start": 10,
+          "role": "sink"
+        }
+      ],
+      "reason": null,
+      "rule_id": "OG/python-web-command-taint",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": "verified"
+    },
+    {
+      "case_id": "python-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "python_numeric_safe.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python-web-command-taint",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "python_command_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "python_numeric_safe.py",
+      "fn": 0,
+      "fp": 1,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "python-web-sql-flow",
+      "engine": "opengrep",
+      "expected_trace": {
+        "required_steps": [
+          {
+            "file": "python_sql_positive.py",
+            "line": 2
+          }
+        ],
+        "sink_file": "python_sql_positive.py",
+        "sink_line": 3,
+        "source_file": "python_sql_positive.py",
+        "source_line": 2
+      },
+      "file_path": "python_sql_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [
+        {
+          "file_path": "python_sql_positive.py",
+          "line_start": 2,
+          "role": "source"
+        },
+        {
+          "file_path": "python_sql_positive.py",
+          "line_start": 2,
+          "role": "step"
+        },
+        {
+          "file_path": "python_sql_positive.py",
+          "line_start": 3,
+          "role": "sink"
+        }
+      ],
+      "reason": null,
+      "rule_id": "OG/python-web-sql-taint",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": "verified"
+    },
+    {
+      "case_id": "python-web-sql-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "python_sql_safe.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python-web-sql-taint",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "javascript-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": {
+        "required_steps": [
+          {
+            "file": "javascript_command_positive.js",
+            "line": 3
+          }
+        ],
+        "sink_file": "javascript_command_positive.js",
+        "sink_line": 9,
+        "source_file": "javascript_command_positive.js",
+        "source_line": 8
+      },
+      "file_path": "javascript_command_positive.js",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [
+        {
+          "file_path": "javascript_command_positive.js",
+          "line_start": 8,
+          "role": "source"
+        },
+        {
+          "file_path": "javascript_command_positive.js",
+          "line_start": 8,
+          "role": "step"
+        },
+        {
+          "file_path": "javascript_command_positive.js",
+          "line_start": 9,
+          "role": "step"
+        },
+        {
+          "file_path": "javascript_command_positive.js",
+          "line_start": 3,
+          "role": "step"
+        },
+        {
+          "file_path": "javascript_command_positive.js",
+          "line_start": 9,
+          "role": "sink"
+        }
+      ],
+      "reason": null,
+      "rule_id": "OG/javascript-web-command-taint",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": "verified"
+    },
+    {
+      "case_id": "javascript-web-command-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "javascript_numeric_safe.js",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/javascript-web-command-taint",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    },
+    {
+      "case_id": "flask-header-sql-flow",
+      "engine": "opengrep",
+      "expected_trace": {
+        "required_steps": [
+          {
+            "file": "flask_header_sql_positive.py",
+            "line": 5
+          }
+        ],
+        "sink_file": "flask_header_sql_positive.py",
+        "sink_line": 6,
+        "source_file": "flask_header_sql_positive.py",
+        "source_line": 5
+      },
+      "file_path": "flask_header_sql_positive.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [
+        {
+          "file_path": "flask_header_sql_positive.py",
+          "line_start": 5,
+          "role": "source"
+        },
+        {
+          "file_path": "flask_header_sql_positive.py",
+          "line_start": 5,
+          "role": "step"
+        },
+        {
+          "file_path": "flask_header_sql_positive.py",
+          "line_start": 6,
+          "role": "sink"
+        }
+      ],
+      "reason": null,
+      "rule_id": "OG/python-web-sql-taint",
+      "status": "scored",
+      "tp": 1,
+      "trace_status": "verified"
+    },
+    {
+      "case_id": "flask-header-sql-flow",
+      "engine": "opengrep",
+      "expected_trace": null,
+      "file_path": "flask_header_sql_safe.py",
+      "fn": 0,
+      "fp": 0,
+      "observed_trace": [],
+      "reason": null,
+      "rule_id": "OG/python-web-sql-taint",
+      "status": "scored",
+      "tp": 0,
+      "trace_status": null
+    }
+  ],
+  "by_engine": {
+    "checkov": {
+      "assessments_scored": 13,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 12,
+      "recall": 1.0,
+      "recall_denominator": 12,
+      "tp": 12
+    },
+    "gitleaks": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep": {
+      "assessments_scored": 27,
+      "f1": 0.9285714285714286,
+      "fn": 1,
+      "fp": 1,
+      "precision": 0.9285714285714286,
+      "precision_denominator": 14,
+      "recall": 0.9285714285714286,
+      "recall_denominator": 14,
+      "tp": 13
+    }
+  },
+  "by_rule": {
+    "checkov:CHECKOV/CKV2_AWS_5": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 2,
+      "recall": 1.0,
+      "recall_denominator": 2,
+      "tp": 2
+    },
+    "checkov:CHECKOV/CKV2_AWS_6": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV2_AWS_61": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV2_AWS_62": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV_AWS_144": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV_AWS_145": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV_AWS_18": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV_AWS_21": {
+      "assessments_scored": 1,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "checkov:CHECKOV/CKV_AWS_23": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 2,
+      "recall": 1.0,
+      "recall_denominator": 2,
+      "tp": 2
+    },
+    "checkov:CHECKOV/CKV_AWS_24": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "gitleaks:GITLEAKS/generic-api-key": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/javascript-web-command-taint": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/javascript_eval_rule-eval-with-expression": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/javascript_react_rule-dangerouslysetinnerhtml": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/python-web-command-taint": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/python-web-sql-taint": {
+      "assessments_scored": 4,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 2,
+      "recall": 1.0,
+      "recall_denominator": 2,
+      "tp": 2
+    },
+    "opengrep:OG/python_deserialization_rule-pickle": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/python_deserialization_rule-yaml-load": {
+      "assessments_scored": 2,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/python_eval_rule-eval": {
+      "assessments_scored": 3,
+      "f1": 1.0,
+      "fn": 0,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 1,
+      "recall": 1.0,
+      "recall_denominator": 1,
+      "tp": 1
+    },
+    "opengrep:OG/python_exec_rule-subprocess-popen-shell-true": {
+      "assessments_scored": 4,
+      "f1": 0.8,
+      "fn": 0,
+      "fp": 1,
+      "precision": 0.6666666666666666,
+      "precision_denominator": 3,
+      "recall": 1.0,
+      "recall_denominator": 2,
+      "tp": 2
+    },
+    "opengrep:OG/python_sql_rule-hardcoded-sql-expression": {
+      "assessments_scored": 4,
+      "f1": 0.8,
+      "fn": 1,
+      "fp": 0,
+      "precision": 1.0,
+      "precision_denominator": 2,
+      "recall": 0.6666666666666666,
+      "recall_denominator": 3,
+      "tp": 2
+    }
+  },
+  "corpus": {
+    "ground_truth_sha256": null,
+    "manifest_sha256": "682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152",
+    "name": "SecRAGraph multi-engine authored regression fixtures",
+    "source_revision": null
+  },
+  "coverage": {
+    "assessments_scored": 42,
+    "assessments_total": 42,
+    "assessments_unscored": 0,
+    "cases_scanned": 14,
+    "cases_total": 14,
+    "traces_expected": 4,
+    "traces_scored": 4,
+    "traces_unscored": 0,
+    "traces_unverified": 0,
+    "traces_verified": 4,
+    "unassessed_finding_count": 0
+  },
+  "engine_coverage": {
+    "checkov": {
+      "completed": 2,
+      "elapsed_ms": 14304,
+      "eligible_files": 3,
+      "error": 0,
+      "not_run": 0,
+      "partial": 0,
+      "runs": 14,
+      "scanned_files": 3,
+      "skipped": 12
+    },
+    "gitleaks": {
+      "completed": 14,
+      "elapsed_ms": 7122,
+      "eligible_files": 30,
+      "error": 0,
+      "not_run": 0,
+      "partial": 0,
+      "runs": 14,
+      "scanned_files": 1,
+      "skipped": 0
+    },
+    "opengrep": {
+      "completed": 11,
+      "elapsed_ms": 115205,
+      "eligible_files": 25,
+      "error": 0,
+      "not_run": 0,
+      "partial": 0,
+      "runs": 14,
+      "scanned_files": 25,
+      "skipped": 3
+    },
+    "osv": {
+      "completed": 0,
+      "elapsed_ms": 0,
+      "eligible_files": 0,
+      "error": 0,
+      "not_run": 0,
+      "partial": 0,
+      "runs": 14,
+      "scanned_files": 0,
+      "skipped": 14
+    }
+  },
+  "engine_elapsed_ms": {
+    "checkov": 14304,
+    "gitleaks": 7122,
+    "opengrep": 115205,
+    "osv": 0
+  },
+  "interpretation": "Author-written regression cases; results do not estimate real-world detection.",
+  "metrics": {
+    "assessments_scored": 42,
+    "f1": 0.9629629629629629,
+    "fn": 1,
+    "fp": 1,
+    "precision": 0.9629629629629629,
+    "precision_denominator": 27,
+    "recall": 0.9629629629629629,
+    "recall_denominator": 27,
+    "tp": 26
+  },
+  "scope": "synthetic_regression",
+  "wall_elapsed_ms": 136905
+}

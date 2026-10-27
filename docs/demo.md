@@ -1,156 +1,49 @@
-# 재현 가능한 데모
+# 평가와 데모
 
-아래 명령은 저장소 루트에서 실행합니다. 로컬 CLI는 Python 3.11 이상과 `uv`, API 데모는 Docker Desktop Linux 엔진 또는 Linux Docker 엔진이 필요합니다. 민감한 실제 프로젝트 대신 [가짜 값만 든 예제](../examples/insecure/sample.py)를 사용하세요. 네트워크 제공자 호출은 별도 선택 사항입니다.
+이 문서는 **현재 다중 엔진 경로**의 실행 방법과 측정 한계를 기록합니다. 서비스의 유일한 로컬 시작 명령은 [README](../README.md)의 `scripts.local_up`입니다. 평가 명령은 스캐너 검증용이며 서비스를 구동하지 않습니다.
 
-## 1. 모델 키 없이 정적 스캔
+## 1. 작성자 회귀 사례
 
-```powershell
-uv sync --frozen --dev
-uv run security-review scan examples/insecure/sample.py --format json --output build/demo.json
-uv run security-review scan examples/insecure/sample.py --format markdown --output build/demo.md
-uv run security-review scan examples/insecure/sample.py --format sarif --output build/demo.sarif
-```
+[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다.
 
-이 예제의 현재 규칙 결과는 비밀 유사 값(`SEC001`), `shell=True`(`PY002`), `eval`(`PY001`) 세 건입니다. 예제 파일은 검사 중 실행되지 않습니다. `redacted_evidence`는 소스 줄에서 일부를 가린 문자열이 아니라 규칙별 고정 문구입니다. 비밀의 원문·주변 텍스트를 보고서에 복사하지 않습니다. `references`가 비어 있어도 결정적 finding·수정 권고는 유효합니다. 실행마다 UUID/시각은 달라질 수 있으므로 규칙 ID·위치·고정 증거 문구를 확인하세요.
+- 입력 SHA-256: `682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152`
+- 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30; 잠금 파일이 없어 OSV는 이 자료에서 미채점
+- 결과: 사례 14/14, 라벨 42/42 채점, 라벨 밖 finding 0건, 흐름 경로 4/4 확인
+- 합계: TP 26, FP 1, FN 1; 정밀도·재현율·F1 모두 26/27 = 0.963
+- 총 경과: 136,905 ms. 엔진별 누적 시간은 해당 엔진이 적격인 사례의 실행 시간 합계이며 총 경과와 정확히 같을 필요는 없습니다.
 
-CI와 같은 SARIF 경로를 검증할 때는 실제 `src` 스캔을 사용합니다. [검증 스크립트](../scripts/validate_sarif.py)는 저장소의 `src/` 안에 있는 추적 파일 경로만 허용합니다. 위 예제의 `build/demo.sarif`는 이 스크립트의 입력 대상이 아닙니다.
-
-```powershell
-uv run security-review scan src --format sarif --output build/self-scan.sarif
-uv run python scripts/validate_sarif.py build/self-scan.sarif
-```
-
-### 1.1 합성 스캐너 벤치마크
-
-키·Docker·네트워크 없이 저장소 루트에서 고정 합성 사례를 재검사합니다. 평가기는 사례 파일을 실행하거나 import하지 않고 `scan_path`에 전달합니다. 변경 전 비교는 원래 39개 매니페스트(SHA-256 `6d77a9b45f1d9df215892969d3af6ce95f61e4ed20202fad61a24a5330bd6c2d`)와 기준 리비전 `ac88e9f`를 사용합니다. 현재 코퍼스는 기존 53개를 보존하고 67개를 더한 120개이며 manifest SHA-256은 `af99933a52a09d5e7a566a567382f2b13bce3d2047bafb1e597d7ea51d3dc403`, 규칙 버전은 `2026.10.4`입니다. [기준선의 실행 가능 커밋과 원본 출력](evidence/scanner-baseline.md), [이전 53개 입력](../data/evaluation/history/scanner_cases_53_2026-10-27.json), [현재 확장 실측](evidence/expanded-scanner-2026-10-27.md)을 보존했습니다.
-
-```powershell
-uv run python -m scripts.run_scanner_benchmark
-```
-
-기본 명령은 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 라벨과 검사 커버리지를 강제하고, `build/evidence/scanner.json` 및 `build/evidence/scanner.md`를 생성합니다. 현재 실행은 120/120 사례를 읽었고 건너뜀 0건, 예상한 Python 문법 진단 2건, 예상 밖·누락 진단 0건이었습니다. TP=69, FP=0, FN=0이고 정밀도·재현율·F1은 각각 1.000입니다. 56개 무라벨 사례 중 문법 오류로 Python 규칙을 평가하지 못한 1건은 정상 사례 오경보율 분모에서 제외해 0/55로 계산했습니다. 증거 파일에는 UUID와 실행 시각을 넣지 않아 같은 리비전에서 바이트가 재현됩니다.
-
-원래 39개 코퍼스의 역사적 변경 전후 비교:
-
-| 범위 | 변경 전 TP / FP / FN | 변경 전 정밀도 / 재현율 / F1 | 당시 TP / FP / FN | 당시 정밀도 / 재현율 / F1 |
+| 엔진 | TP | FP | FN | 엔진 누적 시간 |
 | --- | ---: | ---: | ---: | ---: |
-| 전체 | 9 / 6 / 9 | 0.600 (15) / 0.500 (18) / 0.545 | 18 / 0 / 0 | 1.000 (18) / 1.000 (18) / 1.000 |
-| `JS001` | 0 / 0 / 3 | N/A (0) / 0.000 (3) / N/A | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
-| `PY001` | 3 / 2 / 0 | 0.600 (5) / 1.000 (3) / 0.750 | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
-| `PY002` | 2 / 2 / 1 | 0.500 (4) / 0.667 (3) / 0.571 | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
-| `PY003` | 1 / 2 / 2 | 0.333 (3) / 0.333 (3) / 0.333 | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
-| `PY004` | 0 / 0 / 3 | N/A (0) / 0.000 (3) / N/A | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
-| `SEC001` | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 | 3 / 0 / 0 | 1.000 (3) / 1.000 (3) / 1.000 |
+| Opengrep | 13 | 1 | 1 | 115,205 ms |
+| Gitleaks | 1 | 0 | 0 | 7,122 ms |
+| Checkov | 12 | 0 | 0 | 14,304 ms |
 
-코퍼스별 결과 (`2026.10.4`; 서로 다른 입력 집합):
+동봉한 벤더 SQL 패턴 규칙은 외부 입력으로 만든 f-string 쿼리 한 건을 놓쳤습니다. 별도 웹 입력 taint 규칙은 평가에서 라벨을 붙인 다른 SQL 흐름을 탐지했습니다. 개별 규칙의 분모·시간·누락과 각 실행의 파일 범위는 `build/evidence/multiengine-scanner.json` 및 `.md`에 생성됩니다. 이 사례들은 작성자가 만들었으므로 회귀 평가이지 임의 저장소의 탐지율 추정이 아닙니다. 과거 8개 자체 규칙의 120건 결과는 [역사적 증거](evidence/expanded-scanner-2026-10-27.md)로만 보존하며 현재 수치와 합치지 않습니다.
 
-| TP / FP / FN | 정밀도 / 재현율 / F1 | 정상 사례 오경보 / 적격 사례 | 읽은 사례 / 전체 | manifest SHA-256 |
-| ---: | ---: | ---: | ---: | --- |
-| 25 / 0 / 0 (기존 53건) | 1.000 / 1.000 / 1.000 | 0/28 (0.000) | 53/53 | `8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826` |
-| 69 / 0 / 0 (현재 120건) | 1.000 / 1.000 / 1.000 | 0/55 (0.000) | 120/120 | `af99933a52a09d5e7a566a567382f2b13bce3d2047bafb1e597d7ea51d3dc403` |
+CI는 [고정 도구 이미지](../Dockerfile)를 빌드한 다음, 네트워크를 끈 읽기 전용 컨테이너에서 다음 평가를 실행합니다. Opengrep 보조 실행 파일용 `/tmp/secragraph`는 실행 가능한 임시 영역이고 제출 소스 스냅샷용 `/tmp/secragraph-snapshots`는 `noexec`입니다. 전체 Docker 옵션은 [CI 설정](../.github/workflows/ci.yml)을 참고하세요.
 
-39개 표의 정상 사례 오경보율은 원래 코퍼스에 대한 역사적 비교입니다(기준선 6/21, 당시 개선 규칙 0/21). 오경보율은 완전히 평가 가능한 정상 사례 중 하나 이상 예상 밖 finding이 난 비율입니다. 규칙별 분모는 해당 규칙이 스캔할 수 있는 파일 형식의 적격 사례만 셉니다. TP 69는 취약 호출 수가 아닌 정확히 일치한 `(사례 ID, 규칙 ID, 시작 줄)` 라벨 수입니다. 변경 전 `PY004`·`JS001`은 아직 구현되지 않아 TP가 0건입니다. 두 최신 결과는 규칙 작성자가 만든 합성 집합에만 해당하며, 임의 저장소의 정확도나 실제 취약점 존재를 보증하지 않습니다. 규칙별 정상 사례 분모와 불일치 목록은 생성된 Markdown에서 확인할 수 있습니다.
-
-### 1.2 회원 로그인 API 평가
-
-로컬 직접 스캔과 별도로, 같은 매니페스트의 **모든 사례를 회원 Session으로 실제 FastAPI에 업로드**해 저장된 보고서까지 확인합니다. Docker Desktop Linux 엔진 또는 Linux Docker 엔진을 준비하고 저장소 루트에서 실행하세요. 명령이 임의의 루프백 포트로 격리된 Compose 프로젝트를 시작하고 회원 서비스에 임시 회원 2명을 만듭니다. 회원 생성 정보는 Docker exec 표준 입력으로 넘기고, 로그인 정보는 격리된 `127.0.0.1` API에 전송합니다. 테스트 종료 후 컨테이너와 볼륨을 정리합니다. 제공자 API 키는 사용하지 않고 자동 CWE·OSV 조회를 끕니다. 최초 이미지 빌드나 풀에는 네트워크가 필요할 수 있습니다.
-
-```powershell
-uv sync --frozen --dev
-uv run --frozen python -m scripts.run_authenticated_scanner_benchmark
+```text
+python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_cases.json --staging-dir /tmp/secragraph --require-complete --require-traces
 ```
 
-사례마다 파일 하나를 담은 ZIP을 사용하므로 중첩 경로와 `.env` 파일도 원래 이름으로 검사합니다. 로그인 2건, 인증된 업로드와 같은 회원의 저장 보고서 조회 120건씩, 반환 finding 경로 69건, 무인증 401, 다른 회원의 보고서 조회 404, 로그아웃 후 401을 검증합니다. 업로드 응답과 저장 보고서가 다르거나 경로·라벨·커버리지가 어긋나면 0이 아닌 코드로 종료합니다. 성공 결과는 `build/evidence/member-scanner.json`과 `member-scanner.md`에 기록됩니다. 시작할 때 예전 생성 파일을 제거하고, 삭제에 실패하면 평가를 시작하지 않습니다.
+`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 호스트에서 직접 명령을 실행하려면 같은 세 도구가 PATH에 있어야 합니다.
 
-2026-10-27 현재 실측은 매니페스트 SHA-256 `af99933a52a09d5e7a566a567382f2b13bce3d2047bafb1e597d7ea51d3dc403`, 코드 커밋 `fc6d3e4666004b4c68b738b2b63d799fe495d34c`, 규칙 `2026.10.4`에서 120/120 스캔·저장 보고서 대조, TP=69, FP=0, FN=0, 정상 사례 오경보 0/55였습니다. 로컬 경로의 사례별 라벨·커버리지·규칙별 점수와 일치했습니다. [확장 실측 기록](evidence/expanded-scanner-2026-10-27.md)에 결과 파일의 해시와 해석 범위를 보존하고, [이전 53건 회원 평가](evidence/authenticated-scanner-2026-10-27.md)는 역사적 결과로 유지했습니다. 두 경로는 동일한 규칙과 합성 코퍼스를 사용하므로 별개의 일반화 성능 측정은 아닙니다.
+## 2. 독립 라벨 코퍼스
 
-## 2. 키 없는 오프라인 RAG 근거
+공식 [OWASP BenchmarkPython](https://github.com/OWASP-Benchmark/BenchmarkPython) v0.1의 고정 리비전 `f1291485808b66e20ddb6b01b10dc71b3df8c8ba`에서 CWE-78·89·502 사례 90개를 별도로 평가했습니다. Opengrep 1.32.0은 90/90 파일을 확인했고 **TP 27, FP 19, FN 9, TN 35**였습니다(정밀도 0.587, 재현율 0.750; 전체 번들 10,706 ms). Flask 헤더를 입력으로 모델링한 뒤 CWE-89 양성 5건 중 2건을 잡았고 정상 11건에는 해당 범위의 오경보가 없었습니다. 각 CWE와 18개 규칙의 분리 실행 시간·라벨 CSV 해시·명령은 [외부 평가 증거](evidence/multiengine-external-2026-10-27.md)에 있습니다. 공식 CSV는 CWE별 **사례 전체**의 라벨이므로 규칙별 FN은 해당 규칙이 다루지 않는 sink까지 포함할 수 있습니다. 작성자 자료의 줄 단위 점수와 합산하거나 직접 비교하지 않습니다. 외부 사례 소스는 실행하지 않았습니다.
 
-다음 명령은 동봉한 [보안 지침](../data/knowledge/secragraph-security-guidelines.md)을 기존 Markdown 청커로 읽고, 메모리 내 Qdrant와 실제 지식 LangGraph를 실행합니다. Docker·PostgreSQL·모델 키는 필요하지 않습니다. `build/evidence/rag.json`과 `build/evidence/rag.md`는 생성 파일이므로 Git에서 무시됩니다.
+## 3. 실제 저장소 실행 관찰
 
-```powershell
-uv run python -m scripts.run_rag_evidence
-```
+고정 리비전 `8aa828ceaff764a2e57932fb42fdf105a47c4c83`의 [Starlette](https://github.com/encode/starlette) 저장소를 한 번 측정했습니다. Opengrep은 84개 제출·49개 확인 파일에 finding 78건, `partial`이었고 Gitleaks는 94개 제출 파일에 finding 0건, `completed`였습니다. Checkov는 8개 제출·4개 확인 파일로 `partial`이었습니다. 총 경과 28,690 ms입니다. 나머지 미확인 파일 때문에 무탐을 안전 판정으로 해석할 수 없고, 78건은 사람이 판정하지 않았으므로 TP/FP가 아닙니다. [파일 범위·도구 시간·재현 절차](evidence/multiengine-external-2026-10-27.md)를 참고하세요.
 
-2026-10-09 이 명령의 고정 사례 4건은 모두 기대 경로와 결과에 일치했습니다(`RAG evidence: PASS (4/4 cases)`). 예를 들어 실제 질문 **“How do parameterized queries bind application values safely?”**에 대해 `classify_intent → vector_search → evaluate_vector_results → generate_grounded_answer`가 실행됐습니다. `Injection-resistant data access` 섹션의 검색 조각 `92f1598e-aff4-56a7-b054-b9300740eedf`를 인용했으며, 증거의 짧은 원문 발췌는 “Use parameterized queries whenever application data influences a database statement.”로 시작합니다. 이 ID는 답변의 `[source:92f1598e-aff4-56a7-b054-b9300740eedf]`와 연결됩니다. Markdown에는 인용된 조각의 최대 240자 발췌만 표시하고, 검색만 된 다른 조각은 제목·섹션·점수 같은 메타데이터로만 표시합니다.
+## 4. 회원 API 경로
 
-근거가 없는 질문 **“How do we tune asteroid orbit telemetry for lunar mining?”**은 두 번 검색한 뒤 `insufficient_evidence` 경고와 함께 보류했고, 인용·출처를 내지 않았습니다. 별도 사례에서는 결정적 응답 어댑터에 `adapter_fault=forged_citation`을 주입해 가짜 ID를 만들고, 그래프가 `invalid_source_citation`으로 거부하는지 확인했습니다. 이 결함 주입은 기대 라벨과 독립적이므로 실패를 정상 답변으로 바꾸지 않습니다.
+[PostgreSQL 통합 테스트](../tests/integration/api/test_member_isolation_live.py)는 회원 두 명을 생성·로그인한 뒤 ZIP을 업로드해 보고서를 저장하고, 소유자가 JSON·Markdown·SARIF을 읽을 수 있는지와 타 회원이 404를 받는지 확인합니다. 다중 엔진 finding과 실행 범위도 저장 후 대조합니다. API 동작 검증은 위 회귀 평가의 TP/FP/FN에 중복 합산하지 않습니다.
 
-고정 사례의 집계는 경로 일치 4/4, 관련 섹션 검색 hit@k 3/3(근거 부족 사례 1건 미적용), 인용 섹션 정합성·인용 ID 유효성·반환 `sources` 정합성 각각 2/2(정상 답변 2건만 적용, 나머지 2건 미적용), 근거 부족 보류 1/1(나머지 3건 미적용)입니다. 분모는 해당 검사가 적용되는 사례 수이며, 외부 질문 분포의 정확도나 LLM 답변 품질이 아닙니다. JSON과 Markdown의 `manifest_sha256`은 매니페스트 바이트, `corpus_sha256`/`corpus_digest_kind=indexed-chunks-v1`은 원본 파일 바이트가 아닌 **실제로 인덱싱한 정규화 chunk 레코드**, `embedding_algorithm_version`은 토큰 해시 구현 버전을 식별합니다. `git_revision`, `git_dirty`, `source_fingerprint`는 실행 코드 상태 확인용입니다.
+## 5. RAG와 자료 출처
 
-이 어댑터는 검색 결과에서 첫 문장을 골라 인용하는 결정적 테스트 더블이며 실제 모델 호출이나 의미 임베딩 성능을 측정하지 않습니다. 실제 제공자 경로와 자료 전송의 신뢰 경계는 [위협 모델](threat-model.md)에 있습니다.
+`uv run --frozen python -m scripts.run_rag_evidence`는 [질문 manifest](../data/evaluation/rag_cases.json)로 지식 LangGraph의 분류·검색·인용 경로를 평가하고 `build/evidence/rag.json` 및 `rag.md`를 생성합니다. 이는 워크플로·출처 계약의 반복 시험이며 제공자 모델 답변의 사실성을 자동 채점하지 않습니다. 실제 finding과 새 모델 기반 질문이 요구하는 CWE는 공식 MITRE 항목을 검증해 필요할 때 추가합니다. PDF는 자동 탐색·다운로드하지 않으며 [별도 관리 절차](official-corpus.md)를 사용합니다.
 
-### 2.1 선택적 실제 제공자 관찰
+## 6. 코드 흐름 검증
 
-실제 모델·임베딩 동작을 보고 싶다면 본인이 제공자 키를 설정한 뒤에만 다음 명령을 실행합니다. CI나 기본 데모는 이를 실행하지 않습니다. 지침 문서와 평가 질문이 외부 제공자로 전송되고 비용이 발생할 수 있습니다. 출력은 `build/evidence/rag-live.json`이며 원문 답변 대신 해시, 모델 ID, 경로·검색·인용·보류 판정의 분자/분모, 지연 시간, 실패 건수를 기록합니다. 사실성은 자동 채점하지 않고 사람의 원문 대조가 필요하다고 명시합니다. 키가 없으면 제공자를 만들기 전에 중단합니다.
-
-```powershell
-# First set SECRAGRAPH_OPENAI_API_KEY in this session using your own secret manager.
-uv run python -m scripts.run_live_rag_evidence
-Remove-Item Env:SECRAGRAPH_OPENAI_API_KEY
-```
-
-### 2.2 외부 스캐너 코퍼스 도전
-
-[OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython)은 이 저장소에 포함하지 않았습니다. 사용자가 별도 체크아웃을 확보하고 해당 라이선스를 확인한 뒤, 정확한 커밋 SHA와 `expectedresults-0.1.csv`의 SHA-256을 고정해 실행합니다. 예를 들어 로컬 체크아웃을 `C:\benchmarks\BenchmarkPython`에 두었다면 다음과 같습니다. 자리 표시자는 직접 확인한 실제 값으로 바꿔야 합니다.
-
-```powershell
-$benchmarkRoot = 'C:\benchmarks\BenchmarkPython'
-$revision = (git -C $benchmarkRoot rev-parse HEAD).Trim()
-$expectedHash = (Get-FileHash -Algorithm SHA256 (Join-Path $benchmarkRoot 'expectedresults-0.1.csv')).Hash.ToLowerInvariant()
-uv run python -m scripts.run_external_scanner_benchmark --root $benchmarkRoot --revision $revision --expected-sha256 $expectedHash
-```
-
-이 도구는 대상 Python 코드를 실행/import하지 않고 읽기만 합니다. CWE-78→`PY002`, CWE-89→`PY005`, CWE-502→`PY004`/`PY006`의 **넓은 CWE 단위 사례 평가**이며 해당 CWE의 모든 sink를 탐지한다는 뜻이 아닙니다. case는 기대 규칙군과 실제 일치 규칙 ID를 기록하고 관련 없는 규칙 finding은 매치로 세지 않습니다. TP/FP/FN/TN과 전체 라벨·지원 범위·누락/중복/파싱 실패 분모를 분리합니다. 동적으로 조립한 `sh -c` 인수, 다른 SQL API 및 pickle 이외 역직렬화 API는 미지원 sink이며, CWE 단위 범위가 낮은 재현율로 이어질 수 있습니다. 누락·불완전 사례가 있으면 0이 아닌 종료 코드를 반환합니다.
-
-2026-10-27 로컬 도전 실행은 BenchmarkPython revision `f1291485808b66e20ddb6b01b10dc71b3df8c8ba`와 라벨 CSV SHA-256 `0c5ae0f9a8cdcb49549c459a25651cc058c7b17d621fc064ade2bd942dad80b8`을 검증했습니다. 총 1,230개 라벨 중 지원 CWE 78/89/502 사례 90개, 스캔 완료 82개(불완전 Python 사례 8개)는 TP=27, FP=18, FN=6, TN=31이었습니다(precision 27/45=0.600, recall 27/33=0.818). 좁은 local def-use 추적으로 전체 TP가 22에서 27로 늘고 FN이 11에서 6으로 줄었습니다. 나머지 1,140개 지원 밖 CWE 사례는 점수에서 제외했습니다: CWE-22 168, CWE-328 151, CWE-330 326, CWE-501 37, CWE-601 34, CWE-611 28, CWE-614 39, CWE-643 186, CWE-79 89, CWE-90 29, CWE-94 53. 이는 범위가 제한된 도전 결과이며 전체 BenchmarkPython 성능을 나타내지 않습니다.
-
-오류 유형을 확인하기 위해 사례 소스는 실행하지 않고 AST 구조만 읽었습니다. 예를 들어 `BenchmarkTest00349`는 benign 라벨이어도 `pickle.loads` 호출이 있어 입력 신뢰도를 구별하지 못하는 `PY006` 오경보였고, `BenchmarkTest00350`은 benign 라벨의 `subprocess.run(shell=True)`가 `PY002` 오경보가 됐습니다. `BenchmarkTest00099`처럼 SQL f-string을 변수에 저장한 뒤 `execute`에 전달하는 사례는 좁은 local def-use 추적으로 잡혔습니다. 남은 `BenchmarkTest00165` FN은 목록에 명령 인수를 나중에 추가하는 방식이어서 현재 PY002 규칙의 범위 밖입니다. 리터럴 `sh -c`·`cmd /c` 목록에 동적 명령 문자열이 직접 들어간 경우는 탐지합니다. 점수는 넓은 CWE 범위와 8개 불완전 파일의 한계를 포함하며 일반적인 재현율을 뜻하지 않습니다.
-
-## 3. 로컬 회원 로그인과 루프백 API
-
-[README 시작 및 구동](../README.md#시작-및-구동)의 단일 명령을 실행해 회원을 만드세요. 웹 UI(`http://127.0.0.1:8501`)가 기본 클라이언트이며, 직접 API 호출은 다음처럼 회원 Session을 사용합니다. `Get-Credential`은 비밀번호를 입력 기록에 남기지 않습니다. 기존 PostgreSQL 볼륨의 비밀번호 파일이 없으면 [운영 문서](operations.md)의 복구 절차를 따르며 볼륨을 지우지 않습니다.
-
-```powershell
-$credential = Get-Credential -UserName alice -Message 'SecRAGraph member login'
-$secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
-try {
-    $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer)
-    $loginBody = @{username = $credential.UserName; password = $plainPassword} | ConvertTo-Json -Compress
-    $session = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/auth/login -ContentType 'application/json' -Body $loginBody
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)
-    Remove-Variable plainPassword, loginBody -ErrorAction SilentlyContinue
-}
-$authHeader = "Authorization: Session $($session.token)"
-$headers = @{Authorization = "Session $($session.token)"}
-$scan = curl.exe -sS -H $authHeader -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
-$scan.scan_id
-Invoke-RestMethod "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)" -Headers $headers
-curl.exe -sS -H $authHeader "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)/report?format=markdown"
-```
-
-ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크·크기 제한을 검사합니다. 보고서는 `GET /v1/scans/{scan_id}`에서 JSON, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`에서 렌더링된 표현으로 조회하며 회원은 자신의 보고서만 볼 수 있습니다. Session 또는 설정된 운영 Bearer 자격 증명 없이 보호된 `/v1/*` 경로를 호출하면 401입니다. `GET /health/live`는 프로세스 생존, `GET /health/ready`는 PostgreSQL과 Qdrant 준비 상태를 확인합니다. 요청·응답 스키마는 `/docs`의 OpenAPI에서 볼 수 있습니다. 회원 로그인·세션 동작은 [회원 문서](membership.md)를 참고하세요.
-
-## 4. 선택적 지식 질의
-
-동봉된 [CVE/CWE CSV](../data/samples/README.md)는 합성 데이터입니다. [단일 시작 명령](../README.md#시작-및-구동)이 새 데이터베이스에만 이를 적재하므로 실제 취약점 피드로 해석하지 마세요.
-
-실제 RAG와 Text2SQL 답변에는 유효한 모델·임베딩 제공자 키가 필요합니다. 키를 현재 셸의 `SECRAGRAPH_OPENAI_API_KEY`에 안전하게 설정한 뒤 같은 단일 시작 명령을 다시 실행하면, 공식 수집 또는 검증된 캐시가 있을 때 사례별 CWE 코퍼스를 전용 Qdrant 컬렉션에 동기화합니다. 키가 없거나 검증된 공식 코퍼스가 없으면 앞의 키 없는 평가 증거만 생성됩니다. 별도 PDF를 추가할 때는 [공식 PDF 코퍼스 절차](official-corpus.md)를 따르세요.
-
-앞 절의 회원 로그인으로 얻은 `$headers`를 이용해 질의합니다.
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/knowledge/query -Headers $headers -ContentType application/json -Body '{"question":"CWE 데이터는 몇 건인가요?"}'
-```
-
-분류 결과는 모델에 따라 달라질 수 있습니다. 응답의 `intent`, `sources`, `warnings`를 확인하고 RAG 인용을 원문과 대조하세요. 근거가 부족하면 보류할 수 있으며, 외부 제공자 호출에는 비용과 데이터 처리 정책이 적용됩니다.
-## 5. 검증과 증거 보관
-
-[CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)은 `v0.1.0` 태그 대상 커밋에서 테스트·품질·의존성 감사·컨테이너 빌드가 모두 통과했습니다. 같은 커밋의 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 SARIF 생성·검증·업로드에 성공했고, [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 결과가 반영되었습니다. 2026-10-09 확인 당시 열린 경고는 0건이지만, 이는 취약점이 없다는 보증이 아닙니다. [v0.1.0 릴리스](https://github.com/taehyeon-git/SecRAGraph/releases/tag/v0.1.0)도 공개했습니다.
-
-위 링크는 **과거 v0.1.0 커밋**의 증거입니다. 현재 `main`에 추가한 토큰·코퍼스 동기화·선택 평가·Compose 스모크는 [최신 CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml)에서 별도로 확인해야 합니다. `quality` 작업의 `rag`/`scanner` JSON·Markdown 아티팩트는 신뢰된 `main` push에서만 보관하고 PR에서는 실행·검증만 합니다. 이 아티팩트는 합성/결정적 평가 결과이지 실제 LLM 성능이나 외부 벤치마크 점수가 아닙니다.
-
-2026-10-09 로컬 검증에서는 기존 볼륨을 건드리지 않고 별도 Compose 프로젝트와 포트로 PostgreSQL/Qdrant 통합 테스트 스택 및 API/웹 데모 스택을 실행했습니다. API `/health/ready`는 PostgreSQL과 Qdrant가 모두 준비됐다고 응답했고, Streamlit 헬스 엔드포인트도 HTTP 200을 반환했습니다. 합성 예제를 다시 스캔한 결과는 `PY001`, `PY002`, `SEC001` 세 건이었으며 `SEC001` 증거는 가려져 있었습니다. 전체 pytest는 602건 통과, Windows에서 심볼릭 링크 생성이 불가능해 4건 건너뜀, `security_review` 커버리지 90%였고, 통합·E2E만 별도로 실행한 47건도 통과했습니다. CI용 API 시작·준비 확인·종료 코드를 별도 로컬 포트에서 실행했을 때 실제 API 통합 테스트 2건이 통과했고 종료 뒤 포트가 해제됐습니다. `src` 셀프 스캔 SARIF는 `scripts/validate_sarif.py` 검증을 통과했습니다. 이 결과는 로컬 실행에만 해당합니다.
-
-2026-10-10 커밋 `c3aaa17`에서 수행한 통합 로컬 검증에서는 전체 pytest 818건 통과·8건 건너뜀, `security_review` 커버리지 89%였습니다. 키 없는 RAG 근거 사례는 4/4, 합성 스캐너 사례는 39/39였고 스캐너 집계는 TP 18건·FP 0건·FN 0건이며 생성된 증거 파일은 바이트 단위로 재현됐습니다. Ruff·mypy·Bandit 검사, SARIF 생성·검증, 의존성 감사(`audit_clean`), 로컬 런타임 이미지 빌드도 통과했습니다. 이 수치는 해당 커밋의 로컬 결과이며, 합성 사례 집계는 임의 저장소의 정확도나 실제 취약점 존재를 보증하지 않습니다.
+공개 저장소의 [CodeQL 워크플로](../.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 로컬 [교차 파일 검증 기록](evidence/codeql-cross-file-smoke.md)에서 내장 `py/command-line-injection` 쿼리는 FastAPI 입력→다른 파일의 명령 실행 경로를 확인했지만 사용자 정의 허용 목록을 거친 안전 경로에도 경고를 냈습니다. [FastAPI 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 여러 파일을 거치는 합성 source→sink와 명시적 차단 함수를 검증하기 위한 테스트 자료이며 제품 경고 규칙은 아닙니다. 회원의 비공개 업로드는 CodeQL 라이선스 범위 밖이므로 Opengrep의 파일 내부 taint 분석을 사용합니다.

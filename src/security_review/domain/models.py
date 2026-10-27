@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import (
@@ -59,6 +59,79 @@ class SourceReference(BaseModel):
     score: float | None = Field(default=None, ge=0, le=1)
 
 
+def _relative_report_path(value: str) -> str:
+    normalized = value.replace("\\", "/")
+    path = PurePosixPath(normalized)
+    if not value or not path.parts or path.as_posix() == ".":
+        raise ValueError("file_path must be relative")
+    if path.is_absolute() or ".." in path.parts or ":" in path.parts[0]:
+        raise ValueError("file_path must be relative")
+    if any(ord(character) < 32 or ord(character) == 127 for character in normalized):
+        raise ValueError("file_path must not contain control characters")
+    return path.as_posix()
+
+
+class TraceLocation(BaseModel):
+    """Source-free location in an optional cross-file source-to-sink flow."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    file_path: str
+    line_start: int = Field(ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+    role: Literal["source", "step", "sink"]
+
+    @field_validator("file_path")
+    @classmethod
+    def require_relative_path(cls, value: str) -> str:
+        return _relative_report_path(value)
+
+    @model_validator(mode="after")
+    def validate_line_range(self) -> Self:
+        if self.line_end is not None and self.line_end < self.line_start:
+            raise ValueError("line_end must be greater than or equal to line_start")
+        return self
+
+
+class ScanExecution(BaseModel):
+    """Bounded, source-free coverage for one scanner engine invocation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    engine: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    kind: Literal["sast", "dependency", "secret", "configuration"]
+    status: Literal["completed", "partial", "not_run", "error", "skipped"]
+    version: str | None = Field(default=None, max_length=128)
+    elapsed_ms: int = Field(ge=0)
+    eligible_files: tuple[str, ...] = ()
+    scanned_files: tuple[str, ...] = ()
+    languages: tuple[str, ...] = ()
+    checks: tuple[str, ...] = ()
+    reason: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
+
+    @field_validator("eligible_files", "scanned_files")
+    @classmethod
+    def require_relative_files(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > 10_000:
+            raise ValueError("too many coverage files")
+        normalized = tuple(_relative_report_path(path) for path in value)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("coverage files must be unique")
+        return normalized
+
+    @field_validator("languages", "checks")
+    @classmethod
+    def require_bounded_labels(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > 1_000 or any(
+            not item
+            or len(item) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in item)
+            for item in value
+        ):
+            raise ValueError("coverage labels must be bounded printable text")
+        return value
+
+
 class Finding(BaseModel):
     """One normalized security issue with already-redacted evidence."""
 
@@ -77,22 +150,20 @@ class Finding(BaseModel):
     cwe_ids: tuple[str, ...] = ()
     remediation: str
     references: tuple[SourceReference, ...] = ()
+    engine: str = Field(default="secragraph", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    trace: tuple[TraceLocation, ...] = ()
 
     @field_validator("file_path")
     @classmethod
     def require_relative_path(cls, value: str) -> str:
-        normalized = value.replace("\\", "/")
-        path = PurePosixPath(normalized)
-        if not value or not path.parts or path.as_posix() == ".":
-            raise ValueError("file_path must be relative")
-        if path.is_absolute() or ".." in path.parts or ":" in path.parts[0]:
-            raise ValueError("file_path must be relative")
-        return path.as_posix()
+        return _relative_report_path(value)
 
     @model_validator(mode="after")
     def validate_line_range(self) -> Self:
         if self.line_end is not None and self.line_end < self.line_start:
             raise ValueError("line_end must be greater than or equal to line_start")
+        if len(self.trace) > 64:
+            raise ValueError("trace must contain at most 64 locations")
         return self
 
 
@@ -168,3 +239,4 @@ class ScanReport(BaseModel):
     warnings: tuple[str, ...] = ()
     tool_version: str
     rule_set_version: str
+    executions: tuple[ScanExecution, ...] = ()

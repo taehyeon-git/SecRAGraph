@@ -103,6 +103,11 @@ class DependencyAuditResult:
 
     findings: tuple[Finding, ...] = ()
     warnings: tuple[str, ...] = ()
+    status: Literal["completed", "partial", "not_run", "error", "skipped"] = "completed"
+    eligible_files: tuple[str, ...] = ()
+    scanned_files: tuple[str, ...] = ()
+    elapsed_ms: int = 0
+    version: str = "OSV.dev/v1"
 
 
 class DependencyQueryError(RuntimeError):
@@ -341,8 +346,32 @@ def audit_dependencies(
 ) -> DependencyAuditResult:
     """Discover supported locks, query exact public coordinates, and build INFO findings."""
 
+    started = monotonic()
     candidates, discovery_warnings = _discover_lockfiles(target, limits)
+    eligible_files = tuple(relative_path for _, relative_path in candidates)
+    parsed_files: list[str] = []
     warnings = list(discovery_warnings)
+
+    def finish(
+        status: Literal["completed", "partial", "not_run", "error", "skipped"],
+        *,
+        findings: tuple[Finding, ...] = (),
+        scanned_files: tuple[str, ...] = (),
+    ) -> DependencyAuditResult:
+        return DependencyAuditResult(
+            findings=findings,
+            warnings=_unique_warnings(warnings),
+            status=status,
+            eligible_files=eligible_files,
+            scanned_files=scanned_files,
+            elapsed_ms=max(0, round((monotonic() - started) * 1000)),
+        )
+
+    if not candidates:
+        if "dependency_inventory_unavailable" in warnings:
+            return finish("error")
+        return finish("partial" if warnings else "skipped")
+
     coordinates: dict[DependencyCoordinate, DependencyCoordinate] = {}
     occurrences: dict[tuple[str, str, str, str, int], DependencyCoordinate] = {}
     for candidate, relative_path in candidates:
@@ -357,6 +386,7 @@ def audit_dependencies(
         if invalid:
             warnings.append("dependency_lockfile_invalid")
             continue
+        parsed_files.append(relative_path)
         if partial:
             warnings.append("dependency_inventory_partial")
         for coordinate in parsed:
@@ -393,15 +423,15 @@ def audit_dependencies(
         )
     )
     if not ordered_queries:
-        return DependencyAuditResult(warnings=_unique_warnings(warnings))
+        return finish("partial" if warnings else "completed", scanned_files=tuple(parsed_files))
     try:
         queried = queryer.query_batch(ordered_queries)
     except DependencyQueryError:
         warnings.append("dependency_osv_unavailable")
-        return DependencyAuditResult(warnings=_unique_warnings(warnings))
+        return finish("not_run")
     if not isinstance(queried, Mapping):
         warnings.append("dependency_osv_unavailable")
-        return DependencyAuditResult(warnings=_unique_warnings(warnings))
+        return finish("not_run")
     findings: dict[str, Finding] = {}
     for coordinate in ordered_occurrences:
         advisories = queried.get(coordinate)
@@ -423,9 +453,10 @@ def audit_dependencies(
             key=lambda item: (item.file_path, item.line_start, item.rule_id, item.id),
         )
     )
-    return DependencyAuditResult(
+    return finish(
+        "partial" if warnings else "completed",
         findings=ordered_findings,
-        warnings=_unique_warnings(warnings),
+        scanned_files=tuple(parsed_files),
     )
 
 
@@ -745,6 +776,7 @@ def _advisory_finding(
         confidence=Confidence.HIGH,
         cwe_ids=(),
         remediation="Review the linked OSV advisory and upgrade to a confirmed fixed version.",
+        engine="osv",
         references=(
             SourceReference(
                 id=f"osv:{identifier}",

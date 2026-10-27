@@ -1,0 +1,4 @@
+# Deliberately vulnerable examples and CodeQL test fixtures are evidence, not product code.
+paths-ignore:
+  - examples/insecure/**
+  - tests/fixtures/**

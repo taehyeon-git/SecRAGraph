@@ -6,7 +6,7 @@ import html
 import re
 from urllib.parse import urlparse
 
-from security_review.domain.models import Finding, ScanReport, SourceReference
+from security_review.domain.models import Finding, ScanExecution, ScanReport, SourceReference
 
 _MARKDOWN_CONTROL = re.compile(r"([\\`*\[\]#|>])")
 
@@ -43,18 +43,60 @@ def _render_finding(finding: Finding) -> list[str]:
         f"### {_escape(finding.id)}",
         "",
         f"- Rule: {_escape(finding.rule_id)}",
+        f"- Engine: {_escape(finding.engine)}",
         f"- Severity: {_escape(finding.severity.value.upper())}",
         f"- Location: {_escape(finding.file_path)}:{finding.line_start}",
         f"- CWE: {_escape(', '.join(finding.cwe_ids) or 'Not mapped')}",
         f"- Message: {_escape(finding.message)}",
         f"- Evidence: {_escape(finding.redacted_evidence)}",
         f"- Remediation: {_escape(finding.remediation)}",
-        "- Evidence references:",
     ]
+    if finding.trace:
+        lines.append("- Source-to-sink trace:")
+        lines.extend(
+            f"  - {_escape(location.role)}: {_escape(location.file_path)}:{location.line_start}"
+            for location in finding.trace
+        )
+    lines.append("- Evidence references:")
     if finding.references:
         lines.extend(f"  - {_render_reference(reference)}" for reference in finding.references)
     else:
         lines.append("  - No evidence references available.")
+    lines.append("")
+    return lines
+
+
+def _render_execution(execution: ScanExecution) -> list[str]:
+    files = ", ".join(_escape(path) for path in execution.scanned_files) or "None"
+    languages = ", ".join(_escape(language) for language in execution.languages) or "None"
+    checks = ", ".join(_escape(check) for check in execution.checks) or "None"
+    lines = [
+        f"### {_escape(execution.engine)} ({_escape(execution.kind)})",
+        "",
+        f"- Status: {_escape(execution.status)}",
+        f"- Version: {_escape(execution.version or 'Unknown')}",
+        f"- Elapsed: {execution.elapsed_ms} ms",
+    ]
+    if execution.engine == "gitleaks":
+        lines.extend(
+            [
+                f"- Submitted files: {len(execution.eligible_files)}",
+                f"- Confirmed finding paths: {len(execution.scanned_files)}",
+                f"- Finding paths: {files}",
+                "- Gitleaks does not provide an inspected-file inventory.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"- Eligible files: {len(execution.eligible_files)}",
+                f"- Scanned files: {len(execution.scanned_files)}",
+                f"- Files checked: {files}",
+            ]
+        )
+    lines.extend([f"- Languages: {languages}", f"- Checks: {checks}"])
+    if execution.reason is not None:
+        lines.append(f"- Reason: {_escape(execution.reason)}")
     lines.append("")
     return lines
 
@@ -77,6 +119,10 @@ def render_markdown(report: ScanReport) -> str:
         f"- Findings: {report.summary.total}",
         "",
     ]
+    if report.executions:
+        lines.extend(["## Scan coverage", ""])
+        for execution in report.executions:
+            lines.extend(_render_execution(execution))
     if report.warnings:
         lines.extend(["## Warnings", ""])
         lines.extend(f"- {_escape(warning)}" for warning in report.warnings)

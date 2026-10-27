@@ -116,11 +116,12 @@ services:
     user: "10001:10001"
     read_only: true
     tmpfs:
-      - /tmp/secragraph:rw,nosuid,nodev,mode=1777,size=64m
+      - /tmp/secragraph:rw,exec,nosuid,nodev,mode=1777,size=256m
+      - /tmp/secragraph-snapshots:rw,noexec,nosuid,nodev,mode=1777,size=64m
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    mem_limit: 1g
-    cpus: "1.0"
+    mem_limit: 2g
+    cpus: "2.0"
     pids_limit: 256
     init: true
     stop_grace_period: 20s

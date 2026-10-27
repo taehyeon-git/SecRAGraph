@@ -5,19 +5,21 @@ import pytest
 from security_review.domain.models import Confidence, Finding, ScanStatus, Severity
 from security_review.reporting.builder import build_report
 from security_review.reporting.sarif import render_sarif
-from security_review.scanner.engine import scan_text
 
 
 def make_finding(
     *,
-    identifier: str = "PY001:stable",
+    identifier: str = "opengrep:stable",
     path: str = "src/app.py",
     line: int = 4,
-    message: str = "Dynamic evaluation detected.",
+    message: str = "Untrusted input reaches a dangerous operation.",
+    rule_id: str = "OPENGREP001",
+    cwe_ids: tuple[str, ...] = ("CWE-95",),
+    engine: str = "opengrep",
 ) -> Finding:
     return Finding(
         id=identifier,
-        rule_id="PY001",
+        rule_id=rule_id,
         category="code_pattern",
         severity=Severity.HIGH,
         file_path=path,
@@ -25,18 +27,19 @@ def make_finding(
         message=message,
         redacted_evidence="API_KEY = ***REDACTED***",
         confidence=Confidence.HIGH,
-        cwe_ids=("CWE-95",),
+        cwe_ids=cwe_ids,
         remediation="Use an explicit parser.",
+        engine=engine,
     )
 
 
 def test_report_deduplicates_and_orders_findings() -> None:
-    later = make_finding(identifier="PY001:later", path="z.py", line=8)
-    earlier = make_finding(identifier="PY001:earlier", path="a.py", line=2)
+    later = make_finding(identifier="opengrep:later", path="z.py", line=8)
+    earlier = make_finding(identifier="opengrep:earlier", path="a.py", line=2)
 
     report = build_report("sample", [later, earlier, earlier])
 
-    assert [item.id for item in report.findings] == ["PY001:earlier", "PY001:later"]
+    assert [item.id for item in report.findings] == ["opengrep:earlier", "opengrep:later"]
     assert report.summary.total == 2
 
 
@@ -57,22 +60,49 @@ def test_warnings_set_completed_with_warnings_status() -> None:
     assert report.risk.level == Severity.LOW
 
 
-def test_report_version_and_new_rules_cwe_mappings_reach_outputs() -> None:
+def test_incomplete_engine_sets_warning_status_without_text_warning() -> None:
+    from security_review.domain.models import ScanExecution
+
+    execution = ScanExecution(
+        engine="codeql",
+        kind="sast",
+        status="partial",
+        elapsed_ms=250,
+        reason="analysis_timeout",
+    )
+
+    report = build_report("sample", [], executions=(execution,))
+
+    assert report.status is ScanStatus.COMPLETED_WITH_WARNINGS
+    assert report.warnings == ()
+
+
+def test_report_version_and_multiengine_cwe_mappings_reach_outputs() -> None:
     findings = (
-        *scan_text("sample.py", "import yaml\nvalue = yaml.unsafe_load(data)\n"),
-        *scan_text(".env", "NODE_TLS_REJECT_UNAUTHORIZED=0\n"),
+        make_finding(
+            identifier="opengrep:unsafe-deserialization",
+            rule_id="OPENGREP001",
+            cwe_ids=("CWE-502",),
+        ),
+        make_finding(
+            identifier="checkov:tls-verification",
+            rule_id="CHECKOV001",
+            cwe_ids=("CWE-295",),
+            engine="checkov",
+            path="config.yaml",
+        ),
     )
     report = build_report("sample", findings)
 
-    assert report.rule_set_version == "2026.10.4"
+    assert report.rule_set_version
     run = json.loads(render_sarif(report))["runs"][0]
     assert {result["ruleId"]: result["properties"]["cweIds"] for result in run["results"]} == {
-        "JS001": ["CWE-295"],
-        "PY004": ["CWE-502"],
+        "CHECKOV001": ["CWE-295"],
+        "OPENGREP001": ["CWE-502"],
     }
     assert {rule["id"]: rule["properties"]["tags"] for rule in run["tool"]["driver"]["rules"]} == {
-        "JS001": ["security", "CWE-295"],
-        "PY004": ["security", "CWE-502"],
+        "CHECKOV001": ["security", "CWE-295"],
+        "OPENGREP001": ["security", "CWE-502"],
     }
 
 

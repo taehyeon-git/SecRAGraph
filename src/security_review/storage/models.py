@@ -55,6 +55,7 @@ class ScanReportRow(Base):
     summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     risk: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    executions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     tool_version: Mapped[str] = mapped_column(String(64), nullable=False)
     rule_set_version: Mapped[str] = mapped_column(String(64), nullable=False)
     findings: Mapped[list[FindingRow]] = relationship(
@@ -74,6 +75,7 @@ class ScanReportRow(Base):
             summary=report.summary.model_dump(mode="json"),
             risk=report.risk.model_dump(mode="json"),
             warnings=list(report.warnings),
+            executions=[item.model_dump(mode="json") for item in report.executions],
             tool_version=report.tool_version,
             rule_set_version=report.rule_set_version,
         )
@@ -95,6 +97,7 @@ class ScanReportRow(Base):
                 "risk": self.risk,
                 "findings": ordered,
                 "warnings": self.warnings,
+                "executions": self.executions,
                 "tool_version": self.tool_version,
                 "rule_set_version": self.rule_set_version,
             }
@@ -156,6 +159,8 @@ class FindingRow(Base):
     cwe_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     remediation: Mapped[str] = mapped_column(Text, nullable=False)
     references: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    engine: Mapped[str] = mapped_column(String(64), nullable=False, default="secragraph")
+    trace: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
     report: Mapped[ScanReportRow] = relationship(back_populates="findings")
 
     @classmethod
@@ -175,6 +180,8 @@ class FindingRow(Base):
             cwe_ids=list(finding.cwe_ids),
             remediation=finding.remediation,
             references=[item.model_dump(mode="json") for item in finding.references],
+            engine=finding.engine,
+            trace=[item.model_dump(mode="json") for item in finding.trace],
         )
 
     def to_domain(self) -> Finding:
@@ -193,6 +200,8 @@ class FindingRow(Base):
                 "cwe_ids": self.cwe_ids,
                 "remediation": self.remediation,
                 "references": self.references,
+                "engine": self.engine,
+                "trace": self.trace,
             }
         )
 

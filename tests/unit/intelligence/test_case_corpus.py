@@ -13,16 +13,24 @@ from security_review.intelligence import case_corpus
 from security_review.intelligence.manifest import load_verified_corpus
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-EXPECTED_IDS = [
-    "CWE-78",
-    "CWE-89",
-    "CWE-95",
-    "CWE-200",
-    "CWE-295",
-    "CWE-347",
-    "CWE-502",
-    "CWE-798",
-]
+
+
+def _sort_cwe_ids(ids: set[str]) -> list[str]:
+    return sorted(ids, key=lambda item: int(item.removeprefix("CWE-")))
+
+
+def _expected_ids_from_manifests() -> list[str]:
+    scanner = json.loads(
+        (REPO_ROOT / "data/evaluation/multiengine_cases.json").read_text(encoding="utf-8")
+    )
+    rag = json.loads((REPO_ROOT / "data/evaluation/rag_cases.json").read_text(encoding="utf-8"))
+    ids = {cwe for case in scanner["cases"] for cwe in case["cwe_ids"]}
+    ids.update(cwe for case in rag["cases"] for cwe in case["knowledge_cwe_ids"])
+    assert {"CWE-78", "CWE-89", "CWE-95", "CWE-502"} <= ids
+    return _sort_cwe_ids(ids)
+
+
+EXPECTED_IDS = _expected_ids_from_manifests()
 
 
 @pytest.fixture
@@ -82,6 +90,12 @@ def _mitre_client(requests: list[str], *, wrong_id: bool = False) -> httpx.Clien
     )
 
 
+def _copy_scanner_manifest(evaluation: Path) -> None:
+    (evaluation / "multiengine_cases.json").write_bytes(
+        (REPO_ROOT / "data/evaluation/multiengine_cases.json").read_bytes()
+    )
+
+
 def test_official_download_uses_only_labeled_cwes_and_writes_verified_manifest(
     corpus_cache: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -91,13 +105,13 @@ def test_official_download_uses_only_labeled_cwes_and_writes_verified_manifest(
     result = case_corpus.prepare_case_corpus(REPO_ROOT, corpus_cache)
 
     assert result.status == "official"
-    assert result.document_count == 8
+    assert result.document_count == len(EXPECTED_IDS)
     assert requests == [
         "https://cwe-api.mitre.org/api/v1/cwe/version",
         *(f"https://cwe-api.mitre.org/api/v1/cwe/weakness/{item[4:]}" for item in EXPECTED_IDS),
     ]
     corpus = load_verified_corpus(result.root, result.manifest_path)
-    assert len(corpus.documents) == 8
+    assert len(corpus.documents) == len(EXPECTED_IDS)
     assert {entry.source_url for entry in corpus.entries} == {
         f"https://cwe-api.mitre.org/api/v1/cwe/weakness/{item[4:]}" for item in EXPECTED_IDS
     }
@@ -111,13 +125,13 @@ def test_official_download_uses_only_labeled_cwes_and_writes_verified_manifest(
     assert coverage["requested_cwe_ids"] == EXPECTED_IDS
     assert coverage["covered_cwe_ids"] == EXPECTED_IDS
     assert coverage["missing_cwe_ids"] == []
-    assert coverage["scanner_cases"]["py001-direct-negative"] == []
-    assert coverage["scanner_cases"]["py001-direct-positive"] == ["CWE-95"]
+    assert coverage["scanner_cases"]["terraform-s3"] == []
+    assert coverage["scanner_cases"]["python-eval"] == ["CWE-95"]
     assert coverage["rag_cases"]["direct_parameterized_queries"] == ["CWE-89"]
     assert coverage["rag_cases"]["abstain_without_evidence"] == []
 
 
-def test_ninth_valid_case_cwe_is_selected_and_downloaded(
+def test_additional_valid_case_cwe_is_selected_and_downloaded(
     corpus_cache: Path,
     tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,11 +139,12 @@ def test_ninth_valid_case_cwe_is_selected_and_downloaded(
     repo_root = tmp_path_factory.mktemp("r")
     evaluation = repo_root / "data" / "evaluation"
     evaluation.mkdir(parents=True)
-    (evaluation / "scanner_cases.json").write_bytes(
-        (REPO_ROOT / "data/evaluation/scanner_cases.json").read_bytes()
-    )
+    _copy_scanner_manifest(evaluation)
     rag_cases = json.loads((REPO_ROOT / "data/evaluation/rag_cases.json").read_text("utf-8"))
-    rag_cases["cases"][0]["knowledge_cwe_ids"].append("CWE-22")
+    extra_id = next(
+        f"CWE-{number}" for number in range(22, 1_000) if f"CWE-{number}" not in EXPECTED_IDS
+    )
+    rag_cases["cases"][0]["knowledge_cwe_ids"].append(extra_id)
     (evaluation / "rag_cases.json").write_text(json.dumps(rag_cases), encoding="utf-8")
     requests: list[str] = []
     monkeypatch.setattr(case_corpus, "_make_client", lambda: _mitre_client(requests))
@@ -137,12 +152,17 @@ def test_ninth_valid_case_cwe_is_selected_and_downloaded(
     result = case_corpus.prepare_case_corpus(repo_root, corpus_cache)
 
     assert result.status == "official"
-    assert result.document_count == 9
-    assert len(load_verified_corpus(result.root, result.manifest_path).documents) == 9
-    assert "https://cwe-api.mitre.org/api/v1/cwe/weakness/22" in requests
+    assert result.document_count == len(EXPECTED_IDS) + 1
+    assert (
+        len(load_verified_corpus(result.root, result.manifest_path).documents)
+        == len(EXPECTED_IDS) + 1
+    )
+    assert f"https://cwe-api.mitre.org/api/v1/cwe/weakness/{extra_id[4:]}" in requests
     coverage = json.loads(result.coverage_path.read_text(encoding="utf-8"))
-    assert coverage["requested_cwe_ids"] == ["CWE-22", *EXPECTED_IDS]
-    assert coverage["rag_cases"]["direct_parameterized_queries"] == ["CWE-22", "CWE-89"]
+    assert coverage["requested_cwe_ids"] == _sort_cwe_ids({extra_id, *EXPECTED_IDS})
+    assert coverage["rag_cases"]["direct_parameterized_queries"] == _sort_cwe_ids(
+        {extra_id, "CWE-89"}
+    )
 
 
 def test_total_official_response_budget_degrades_before_unbounded_download(
@@ -153,9 +173,7 @@ def test_total_official_response_budget_degrades_before_unbounded_download(
     repo_root = tmp_path_factory.mktemp("r")
     evaluation = repo_root / "data" / "evaluation"
     evaluation.mkdir(parents=True)
-    (evaluation / "scanner_cases.json").write_bytes(
-        (REPO_ROOT / "data/evaluation/scanner_cases.json").read_bytes()
-    )
+    _copy_scanner_manifest(evaluation)
     rag_cases = json.loads((REPO_ROOT / "data/evaluation/rag_cases.json").read_text("utf-8"))
     # 84 additional small, valid CWE IDs exceed the 16 MB aggregate response
     # budget while remaining within the 128-ID startup selection cap.
@@ -243,7 +261,7 @@ def test_offline_reuses_only_verified_official_cache(
     assert initial.status == "official"
     assert cached.status == "cached"
     assert cached.root == initial.root
-    assert cached.document_count == 8
+    assert cached.document_count == len(EXPECTED_IDS)
     assert json.loads(cached.coverage_path.read_text(encoding="utf-8"))["status"] == "cached"
 
 

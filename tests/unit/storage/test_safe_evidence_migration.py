@@ -19,7 +19,7 @@ def test_legacy_evidence_is_replaced_without_changing_finding_identity(monkeypat
                 "VALUES (:id, :evidence, :message)"
             ),
             {
-                "id": "PY001:stable",
+                "id": "OG:stable",
                 "evidence": "eval(value) # opaque-canary-12345",
                 "message": "Static message",
             },
@@ -30,6 +30,6 @@ def test_legacy_evidence_is_replaced_without_changing_finding_identity(monkeypat
             text("SELECT finding_id, redacted_evidence, message FROM app.findings")
         ).one()
 
-    assert row.finding_id == "PY001:stable"
+    assert row.finding_id == "OG:stable"
     assert "opaque-canary-12345" not in row.redacted_evidence
     assert row.message == "Static message"

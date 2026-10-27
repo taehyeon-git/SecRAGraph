@@ -157,10 +157,20 @@ def test_compose_uses_saved_secrets_without_argv_or_output_leak(
     assert [command[-2:] for command, _ in calls] == [
         ["config", "--quiet"],
         ["--wait-timeout", "240"],
+        ["-c", calls[2][0][-1]],
     ]
     assert all(command[:4] == ["docker", "compose", "-p", "secragraph"] for command, _ in calls)
     assert all(command[4:6] == ["--env-file", str(runtime.path)] for command, _ in calls)
     assert calls[1][0][6:] == ["up", "--build", "--detach", "--wait", "--wait-timeout", "240"]
+    assert calls[2][0][6:12] == [
+        "exec",
+        "-T",
+        "api",
+        "/app/.venv/bin/python",
+        "-c",
+        calls[2][0][-1],
+    ]
+    assert all(name in calls[2][0][-1] for name in ("opengrep", "gitleaks", "checkov"))
     assert all("A" * 43 not in " ".join(command) for command, _ in calls)
     assert all("B" * 43 not in " ".join(command) for command, _ in calls)
     assert all(kwargs["shell"] is False for _, kwargs in calls)
@@ -279,7 +289,7 @@ def test_legacy_secret_state_can_be_upgraded_without_replacing_passwords(
     assert "SECRAGRAPH_QDRANT_COLLECTION=secragraph-auto-cwe\n" in path.read_text(encoding="utf-8")
 
 
-def test_offline_evaluations_run_both_existing_evidence_commands(
+def test_offline_evaluations_run_fixed_guide_rag_evidence(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[tuple[list[str], dict[str, object]]] = []
@@ -291,10 +301,7 @@ def test_offline_evaluations_run_both_existing_evidence_commands(
     monkeypatch.setattr(local_up.subprocess, "run", fake_run)
     local_up._run_evaluations(tmp_path)
 
-    assert [command[2] for command, _ in calls] == [
-        "scripts.run_scanner_benchmark",
-        "scripts.run_rag_evidence",
-    ]
+    assert [command[2] for command, _ in calls] == ["scripts.run_rag_evidence"]
     assert all(command[1] == "-m" for command, _ in calls)
     assert all(
         command[-2:] == ["--output-dir", str(tmp_path / "build/evidence")] for command, _ in calls

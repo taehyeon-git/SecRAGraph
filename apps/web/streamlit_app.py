@@ -202,7 +202,7 @@ def main() -> None:
     st.set_page_config(page_title="SecRAGraph", page_icon="🛡️", layout="wide")
     st.title("SecRAGraph")
     st.caption("RAG- and LangGraph-powered security review platform; local demo only")
-    timeout = httpx.Timeout(45.0, connect=5.0, write=5.0, pool=5.0)
+    timeout = httpx.Timeout(150.0, connect=5.0, write=5.0, pool=5.0)
     with httpx.Client(timeout=timeout, follow_redirects=False) as http:
         try:
             api = _member_client(http)

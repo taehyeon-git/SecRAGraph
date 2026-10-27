@@ -115,6 +115,31 @@ def test_dotenv_is_a_supported_source_file(tmp_path: Path) -> None:
     assert [item.relative_path for item in result.files] == [".env"]
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env.local",
+        ".env.production",
+        ".npmrc",
+        ".pypirc",
+        ".netrc",
+        ".git-credentials",
+        "id_rsa",
+        "id_ed25519",
+        "credentials",
+        "private.pem",
+        "server.key",
+    ],
+)
+def test_common_text_secret_files_reach_secret_scanner(tmp_path: Path, name: str) -> None:
+    target = tmp_path / name
+    target.write_text("SYNTHETIC_TEST_VALUE", encoding="utf-8")
+
+    result = discover_files(target, ScanLimits())
+
+    assert [item.relative_path for item in result.files] == [name]
+
+
 def test_extension_matching_is_case_insensitive(tmp_path: Path) -> None:
     target = tmp_path / "APP.PY"
     target.write_text("message = '안전'", encoding="utf-8")
@@ -130,6 +155,16 @@ def test_read_rechecks_size_after_discovery(tmp_path: Path) -> None:
     limits = ScanLimits(max_file_bytes=10)
     discovered = discover_files(target, limits).files[0]
     target.write_text("x" * 11, encoding="utf-8")
+
+    assert read_scannable_text(discovered, limits) is None
+
+
+def test_read_rejects_same_size_content_replacement(tmp_path: Path) -> None:
+    target = tmp_path / "changing.py"
+    target.write_text("safe = 1\n", encoding="utf-8")
+    limits = ScanLimits()
+    discovered = discover_files(target, limits).files[0]
+    target.write_text("evil = 1\n", encoding="utf-8")
 
     assert read_scannable_text(discovered, limits) is None
 

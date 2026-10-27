@@ -13,7 +13,6 @@ import pytest
 from security_review.domain.models import Severity
 from security_review.intelligence import dependency_osv
 from security_review.intelligence.dependency_osv import (
-    DependencyAuditResult,
     DependencyCoordinate,
     DependencyQueryError,
     LiveDependencyAuditor,
@@ -130,6 +129,34 @@ source = { editable = "." }
     assert finding.references[0].source_url == "https://osv.dev/vulnerability/GHSA-test-0001"
     assert "CVE-2099-0001" in finding.message
     assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
+    assert result.eligible_files == ("uv.lock",)
+    assert result.scanned_files == ("uv.lock",)
+    assert result.version == "OSV.dev/v1"
+    assert result.elapsed_ms >= 0
+
+
+def test_no_supported_lockfile_is_skipped_not_clean_scan(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("pass\n", encoding="utf-8")
+    result = audit_dependencies(tmp_path, ScanLimits(), RecordingQueryer())
+    assert result.status == "skipped"
+    assert result.eligible_files == ()
+    assert result.scanned_files == ()
+
+
+def test_osv_query_failure_records_not_run_coverage(tmp_path: Path) -> None:
+    (tmp_path / "uv.lock").write_text(
+        'version = 1\n[[package]]\nname = "requests"\nversion = "2.32.3"\n'
+        'source = { registry = "https://pypi.org/simple" }\n',
+        encoding="utf-8",
+    )
+    result = audit_dependencies(
+        tmp_path, ScanLimits(), RecordingQueryer(error=DependencyQueryError("offline"))
+    )
+    assert result.status == "not_run"
+    assert result.eligible_files == ("uv.lock",)
+    assert result.scanned_files == ()
+    assert result.warnings == ("dependency_osv_unavailable",)
 
 
 def test_package_lock_v3_queries_transitive_public_npm_and_skips_unsafe_sources(
@@ -168,7 +195,8 @@ def test_package_lock_v3_queries_transitive_public_npm_and_skips_unsafe_sources(
     assert [
         [(item.ecosystem, item.name, item.version) for item in call] for call in queryer.calls
     ] == [[("npm", "@scope/pkg", "2.0.0"), ("npm", "lodash", "4.17.20")]]
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_npm_alias_and_resolved_package_mismatch_are_not_queried(tmp_path: Path) -> None:
@@ -199,7 +227,8 @@ def test_npm_alias_and_resolved_package_mismatch_are_not_queried(tmp_path: Path)
     assert [
         [(item.ecosystem, item.name, item.version) for item in call] for call in queryer.calls
     ] == [[("npm", "normal", "3.0.0")]]
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_range_versions_are_never_guessed_as_exact_coordinates(tmp_path: Path) -> None:
@@ -228,7 +257,8 @@ def test_range_versions_are_never_guessed_as_exact_coordinates(tmp_path: Path) -
     result = audit_dependencies(tmp_path, ScanLimits(), queryer)
 
     assert queryer.calls == []
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_registry_tags_are_excluded_while_exact_pep440_and_semver_are_kept(
@@ -281,7 +311,8 @@ source = { registry = "https://pypi.org/simple" }
             ("npm", "exact-node", "2.3.4-rc.1+build.5"),
         ]
     ]
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_duplicate_exact_coordinates_are_queried_once_and_reported_at_each_lockfile(
@@ -371,7 +402,8 @@ def test_lockfile_has_a_dedicated_two_megabyte_read_limit(tmp_path: Path) -> Non
     assert [[(item.name, item.version) for item in call] for call in queryer.calls] == [
         [("demo", "1.0")]
     ]
-    assert result == DependencyAuditResult()
+    assert result.warnings == ()
+    assert result.status == "completed"
 
 
 def test_symlinked_lockfile_is_not_read_or_queried(tmp_path: Path) -> None:
@@ -415,7 +447,8 @@ def test_walk_error_marks_dependency_inventory_partial(
 
     result = audit_dependencies(tmp_path, ScanLimits(), RecordingQueryer())
 
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_link_like_directory_is_not_followed_and_marks_inventory_partial(
@@ -440,7 +473,8 @@ def test_link_like_directory_is_not_followed_and_marks_inventory_partial(
     result = audit_dependencies(tmp_path, ScanLimits(), queryer)
 
     assert queryer.calls == []
-    assert result == DependencyAuditResult(warnings=("dependency_inventory_partial",))
+    assert result.warnings == ("dependency_inventory_partial",)
+    assert result.status == "partial"
 
 
 def test_live_queryer_screens_at_fixed_batch_endpoint_and_expands_only_matches() -> None:
@@ -597,7 +631,8 @@ def test_later_batch_failure_preserves_completed_results_as_partial(tmp_path: Pa
     result = audit_dependencies(tmp_path, ScanLimits(), queryer)
 
     assert request_count == 2
-    assert result == DependencyAuditResult(warnings=("dependency_osv_partial",))
+    assert result.warnings == ("dependency_osv_partial",)
+    assert result.status == "partial"
     http_client.close()
 
 
@@ -663,4 +698,5 @@ def test_live_dependency_auditor_is_the_graph_callable(tmp_path: Path) -> None:
 
     result = LiveDependencyAuditor(queryer)(tmp_path, ScanLimits())
 
-    assert result == DependencyAuditResult()
+    assert result.warnings == ()
+    assert result.status == "completed"

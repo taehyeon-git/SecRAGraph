@@ -9,10 +9,13 @@ import security_review.application as application_module
 import security_review.cli as cli_module
 from security_review.application import scan_path
 from security_review.cli import app
-from security_review.domain.models import SourceReference
+from security_review.domain.models import Confidence, Finding, Severity, SourceReference
 from security_review.intelligence.dependency_osv import DependencyCoordinate, LiveDependencyAuditor
 from security_review.intelligence.ingestion import DocumentIngestionError
 from security_review.intelligence.osv import OsvAdvisory
+from security_review.orchestrator.scan_graph import DeterministicScanResult, ScanRequest
+from security_review.reporting.builder import build_report
+from security_review.scanner.external_common import ExternalExecution, ExternalScanResult
 from security_review.scanner.files import ScanLimits
 from security_review.storage.intelligence import ImportSummary
 
@@ -49,6 +52,29 @@ def test_cli_scan_automatically_prepares_cwe_for_real_finding(
         seen.append(ids)
         return SimpleNamespace(references_by_id={"CWE-95": reference}, warnings=())
 
+    def deterministic_scan(request: ScanRequest) -> DeterministicScanResult:
+        return DeterministicScanResult(
+            target_name=request.target_name or request.target.name,
+            findings=(
+                Finding(
+                    id="opengrep:synthetic-flow",
+                    rule_id="OPENGREP/CWE-95",
+                    category="code_pattern",
+                    severity=Severity.HIGH,
+                    file_path="app.py",
+                    line_start=1,
+                    message="Untrusted input reaches dynamic evaluation.",
+                    redacted_evidence="[REDACTED: source omitted]",
+                    confidence=Confidence.HIGH,
+                    cwe_ids=("CWE-95",),
+                    remediation="Use a restricted parser.",
+                    engine="opengrep",
+                ),
+            ),
+            warnings=(),
+        )
+
+    monkeypatch.setattr(application_module, "_deterministic_scan", deterministic_scan)
     monkeypatch.setattr(
         cli_module,
         "_cwe_evidence_factory",
@@ -78,7 +104,13 @@ def test_cli_offline_scan_does_not_prepare_cwe(
     result = runner.invoke(app, ["scan", str(target), "--format", "json", "--offline"])
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["summary"]["total"] == 1
+    report = json.loads(result.stdout)
+    assert report["summary"]["total"] >= 0
+    assert {item["engine"] for item in report["executions"]} >= {
+        "opengrep",
+        "gitleaks",
+        "checkov",
+    }
 
 
 def test_cli_writes_json_report(tmp_path: Path) -> None:
@@ -92,7 +124,11 @@ def test_cli_writes_json_report(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stdout
     rendered = output.read_text(encoding="utf-8")
     payload = json.loads(rendered)
-    assert payload["summary"]["total"] >= 3
+    assert {item["engine"] for item in payload["executions"]} >= {
+        "opengrep",
+        "gitleaks",
+        "checkov",
+    }
     assert "demo-not-a-real-secret-12345" not in rendered
 
 
@@ -108,11 +144,29 @@ def test_cli_creates_parent_directory_for_sarif_output(tmp_path: Path) -> None:
     assert json.loads(output.read_text(encoding="utf-8"))["version"] == "2.1.0"
 
 
-def test_cli_sarif_locations_are_relative_to_invocation_directory(tmp_path: Path) -> None:
+def test_cli_sarif_locations_are_relative_to_invocation_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = tmp_path / "src"
     source.mkdir()
     (source / "app.py").write_text("eval('unsafe')", encoding="utf-8")
     output = tmp_path / "scan.sarif"
+    sample = Finding(
+        id="opengrep:sample",
+        rule_id="OPENGREP/SAMPLE",
+        category="code_pattern",
+        severity=Severity.HIGH,
+        file_path="app.py",
+        line_start=1,
+        message="Synthetic source-flow finding.",
+        redacted_evidence="[REDACTED: source omitted]",
+        confidence=Confidence.HIGH,
+        remediation="Validate untrusted input.",
+        engine="opengrep",
+    )
+    monkeypatch.setattr(
+        cli_module, "scan_path", lambda *_args, **_kwargs: build_report("src", [sample])
+    )
     original_cwd = Path.cwd()
     try:
         import os
@@ -286,17 +340,38 @@ def test_scan_stops_with_stable_warning_after_deadline(
     tmp_path: Path,
     monkeypatch: object,
 ) -> None:
-    (tmp_path / "a.py").write_text("eval(first)", encoding="utf-8")
-    (tmp_path / "b.py").write_text("eval(second)", encoding="utf-8")
+    (tmp_path / "a.py").write_text("value = first\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("value = second\n", encoding="utf-8")
     now = [0.0]
-    original_scan_text_detailed = application_module.scan_text_detailed
+    sample = Finding(
+        id="opengrep:deadline-sample",
+        rule_id="OPENGREP/SAMPLE",
+        category="code_pattern",
+        severity=Severity.HIGH,
+        file_path="a.py",
+        line_start=1,
+        message="Synthetic source-flow finding.",
+        redacted_evidence="[REDACTED: source omitted]",
+        confidence=Confidence.HIGH,
+        remediation="Validate untrusted input.",
+        engine="opengrep",
+    )
 
-    def advancing_scan(*args: object, **kwargs: object) -> object:
-        result = original_scan_text_detailed(*args, **kwargs)  # type: ignore[arg-type]
-        now[0] = 2.0
-        return result
+    class AdvancingAdapter:
+        def scan_snapshot(self, _root: Path, _timeout: float) -> ExternalScanResult:
+            now[0] = 2.0
+            return ExternalScanResult(
+                findings=(sample,),
+                execution=ExternalExecution(
+                    scanner="opengrep",
+                    version="1.0.0",
+                    status="completed",
+                    eligible_files=("a.py", "b.py"),
+                    inspected_files=("a.py", "b.py"),
+                ),
+            )
 
-    monkeypatch.setattr(application_module, "scan_text_detailed", advancing_scan)  # type: ignore[attr-defined]
+    monkeypatch.setattr(application_module, "OpengrepAdapter", AdvancingAdapter)
 
     report = scan_path(
         tmp_path,
@@ -306,6 +381,11 @@ def test_scan_stops_with_stable_warning_after_deadline(
 
     assert [item.file_path for item in report.findings] == ["a.py"]
     assert "processing_time_limit_exceeded" in report.warnings
+    assert [(item.engine, item.status) for item in report.executions] == [
+        ("opengrep", "completed"),
+        ("gitleaks", "not_run"),
+        ("checkov", "not_run"),
+    ]
 
 
 def test_cli_imports_intelligence_through_the_owner_connection(

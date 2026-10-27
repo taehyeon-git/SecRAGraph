@@ -1,0 +1,215 @@
+{
+  "ground_truth_path": "expectedresults-0.1.csv",
+  "ground_truth_sha256": "0c5ae0f9a8cdcb49549c459a25651cc058c7b17d621fc064ade2bd942dad80b8",
+  "license": "GPL-3.0-only",
+  "rules": [
+    {
+      "config_path": "secragraph-taint/python.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python-web-command-taint",
+      "sha256": "2441b6ae2c9ea158def4ee4d94db19ae6754192df37c8c4866f1bea781058c3a"
+    },
+    {
+      "config_path": "secragraph-taint/python.yml",
+      "cwe_id": "CWE-89",
+      "rule_id": "OG/python-web-sql-taint",
+      "sha256": "2441b6ae2c9ea158def4ee4d94db19ae6754192df37c8c4866f1bea781058c3a"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-cpickle.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-cpickle",
+      "sha256": "349fdb8b8b7b542e456743d46b37d209f6aced6e4bb2a1d84183cc873e14ab98"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-dill.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-dill",
+      "sha256": "2cd171c82aa8567838f34bdf3bcf57b33f60b0ae15edca04ba46b982594c9117"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-marshal.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-marshal",
+      "sha256": "d2bd91ea26345b90a88a44da0fa9fbd426c7bed764a0c011474ee6fd8aa8736b"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-pickle.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-pickle",
+      "sha256": "9562fe83a2c909fea2a76b3258dcee707d816d80a2a1048d9be94cb35fc2ab6a"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-shelve.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-shelve",
+      "sha256": "3028ab27835cacae9933b87a58b7401514e77853abb7424f1ab75f6e51fe9b53"
+    },
+    {
+      "config_path": "opengrep/python/deserialization/rule-yaml-load.yml",
+      "cwe_id": "CWE-502",
+      "rule_id": "OG/python_deserialization_rule-yaml-load",
+      "sha256": "837e25e2a3c458a190751515ddf80f7cc5ebb50e3fc56191436a3982059d4fdf"
+    },
+    {
+      "config_path": "opengrep/python/django/rule-django-extra-used.yml",
+      "cwe_id": "CWE-89",
+      "rule_id": "OG/python_django_rule-django-extra-used",
+      "sha256": "8a302df0f194fb1db32fbf6a30fb75e3c5a0006a99b85874b2b19365a95c68b8"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-exec-used.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-exec-used",
+      "sha256": "85d26b27733092dbcb727a413cc44fb1fa1c5b2514dd17de4dd639c6a87e6363"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-os-path.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-os-path",
+      "sha256": "8427ee31bcabf2dd3c837c20d28dc3af6e8b11af8c6b9823500da1ca1e3c27d9"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-os-popen2.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-os-popen2",
+      "sha256": "582a790aa14bba4ab4eca50eb96c399e3ca4ee944593ebc3a4cb5c8ca9bd1fa7"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-paramiko-calls.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-paramiko-calls",
+      "sha256": "3c5d2ab0660c3064d5ed9f5c6bd1bdd4aa282610b634d94f2b38e61ef1af759d"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-start-process-with-no-shell.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-start-process-with-no-shell",
+      "sha256": "0455df6b021756e2990fdce1cff5adb22586b12a75777669eabc7d3ed6246901"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-subprocess-call.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-subprocess-call",
+      "sha256": "dba975e7109f792251b6bcb1cf778633d6552d7647d797c2cf53ec5b79d6fbd2"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-subprocess-popen-shell-true.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true",
+      "sha256": "11dc4ebcb4c0df1d5b9f3e5d461e641fa4098511afd7ab9a5356c97f9051f92b"
+    },
+    {
+      "config_path": "opengrep/python/exec/rule-subprocess-shell-TRUE.yml",
+      "cwe_id": "CWE-78",
+      "rule_id": "OG/python_exec_rule-subprocess-shell-TRUE",
+      "sha256": "42ab1d70193b8aef7659fc48ba86674030694841c6b8798f08e5ce8e2a59c0ce"
+    },
+    {
+      "config_path": "opengrep/python/sql/rule-hardcoded-sql-expression.yml",
+      "cwe_id": "CWE-89",
+      "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
+      "sha256": "f054dce5ef49e24a0b1faa12f3787ea657f539f2b9c733498313c78681271559"
+    }
+  ],
+  "schema_version": 1,
+  "selected_cwes": [
+    "CWE-502",
+    "CWE-78",
+    "CWE-89"
+  ],
+  "source_hashes": {
+    "BenchmarkTest00011": "9ce4b6b1b25feac4b6962005a6dbc196b2ee55605a21d514b72494b1fcb40b82",
+    "BenchmarkTest00012": "2adaafe71ed014550e3f9e4e773fa6471f809f4248e8b01ca86f5eae51c8b0a3",
+    "BenchmarkTest00078": "ef00a7e0292da0df28949c47c48b4bef0fcc7017cb93b64a6dbcedf5d9759518",
+    "BenchmarkTest00079": "7db8d6f940d9c06de9da0dfe5d4900af875c18d732df3340bbcf1dbc14a9a548",
+    "BenchmarkTest00080": "a09e5a1ce5bedffd8f8fa92463217e92e91e880d83fd1354a70b0b1df780b2e9",
+    "BenchmarkTest00081": "6efcaa6db12362dee1e21a3a90d9ee1a7531ad9da14289132e08382775ae6b6c",
+    "BenchmarkTest00099": "0fa2cbf6b1aefcf0def528284cbd86667d208909a03c6ac56ff605981075cf4d",
+    "BenchmarkTest00100": "3131a02c2ac80b058a8ffbf367cb1088ef7566fc90394dc01327caee214298fe",
+    "BenchmarkTest00164": "2e42122c9af30b0036ff620bd1b1cf814388d47632bce26e6a122e5268384b25",
+    "BenchmarkTest00165": "836f2b2320ff61d155fab699b59c2132740086cb1fcb94f641f63c2c0554e231",
+    "BenchmarkTest00166": "5e17f325eff9b21eea62e797f7f0d7b35fde69e7b24ec3038e234cf7544cbf7a",
+    "BenchmarkTest00167": "34400d4029f6cad2b476d05950279987a60fd07f72198b81251fabccd908b723",
+    "BenchmarkTest00168": "640d1bdb7d3bcc0a1ae62f9deeedec06081491d1dfcbf37e0c51b438d8c14bcb",
+    "BenchmarkTest00192": "256fc39787a70b13eb36160bff89ed7c0ff4203154f95373ea8e64562bb8be49",
+    "BenchmarkTest00267": "b26c3120c2de9f6d57de001810369064640b5c3dd0d5de5c4a4f23b67b33628d",
+    "BenchmarkTest00268": "193e4ea12fd1e1753c0dc432e1c457e8436d4dcfb138e9ba5e6901f75cef7527",
+    "BenchmarkTest00269": "f0ff6cb0cff1312bf45c5de0419f81f695218f5f8331b3752e4ef4ae83e90e3d",
+    "BenchmarkTest00270": "5d5c57964bc1902d39f302c503a67ff1e2661e9f5689e68016beda467bae12a5",
+    "BenchmarkTest00271": "06293603ad4ad99f8134100eb3c7716cf18ab37da4fe599e8738424701dad545",
+    "BenchmarkTest00283": "965f8fd008e0822192fbb74677d1d4b7cd48f4c2b13cc27d8a6ca6e4bc17f8ba",
+    "BenchmarkTest00284": "ceb61fbd37233e7a2a50cb755514de70f15b359a7ac100f84bf663ae93ba58f4",
+    "BenchmarkTest00285": "d302ebf483cb8fcf6dac7c769d76ae96c9b5e2264207cc21ac1de15cd838db22",
+    "BenchmarkTest00286": "dfd076a95421238f7b3b9d9429a343335fad84fe22a0be17103f53dad8f0d93b",
+    "BenchmarkTest00287": "1d1aaa6188c8bdfd23ee87967658b8ad8aa86af90aab944a8eeed9be612c4525",
+    "BenchmarkTest00349": "148ce2a5d2b1530ba7c998614755bc6a14c3165dfb666f48714eaef8062e48f4",
+    "BenchmarkTest00350": "dc8aab467c971d2ad4470b5157d85f08026ec0e994fb83e7f06243d179ada237",
+    "BenchmarkTest00431": "3c906f742bdc9e347188c09c490c1adb73e456b4cb175def906df72b0abcb1d8",
+    "BenchmarkTest00432": "d635392ceba9389d5c24b9526fd26842c6803fa3bd768e928e7e1f0fce604ea2",
+    "BenchmarkTest00433": "4300b8a3823d73ebab128566418f1fe9eac43011ae1ab6ec0af050b92f942243",
+    "BenchmarkTest00434": "bfba0118d03d860d897adee512807e02ad71aed3646816a845f07500c3bcd5c3",
+    "BenchmarkTest00435": "1388b0e4d4064a39fcb63f61ca2e34e3cdca6141ea0e9283c3138a54ede4c03e",
+    "BenchmarkTest00454": "078f13a108d9f685e8b4641393dd21178450666642d93c41f99e1ae271f39310",
+    "BenchmarkTest00455": "d86a48e7969d42c79447b9fe042784478a1700098f4d1075fe9b0f5a902142e2",
+    "BenchmarkTest00507": "ff6d58af0bb64ce90d9022748055d5568414809906eebcb0b34ff18c8c12378e",
+    "BenchmarkTest00508": "205097e2a648b27229ad531004284d15f21063fb70723dde9a8bf7885ac86e4b",
+    "BenchmarkTest00509": "131cb9be6d05fed3a5391be3be269ded59818c93acf7bdff8db8bd31a24c4c7f",
+    "BenchmarkTest00510": "5ab0752b7bd3616aa2e1e2847588b9a40840821f27e7ca04d9f393928fdb77ad",
+    "BenchmarkTest00511": "7b1c8f1e8638847600ed07dae04f67df49c92d451d245d2cf83ccc755397ac13",
+    "BenchmarkTest00512": "db7ec350472ba8a4b6808321eacd8c7d6f39c8511cc5a7ce7a5cd8e63f8883dd",
+    "BenchmarkTest00513": "6c01dec48c2df1f5ed7cd60175ff08087229fe9dd7e19672567b73b53c9caa2e",
+    "BenchmarkTest00514": "3d37baaf9dfb0c3b2b7e99fb95a9d1d7a6efe6a698280e8bf0b957fce482210c",
+    "BenchmarkTest00605": "31b9ee402ea6eb59b46736b853b14d27ea381c3660740d15a35bc20c3c570119",
+    "BenchmarkTest00606": "ca52d90b222e0f9c0363cc1b033158a1e1b573aa888451f58432686b71e7fc71",
+    "BenchmarkTest00607": "2f88d13640f7f9e159709e4905818731fa582757db2c7e3e9e5bf15447ca059a",
+    "BenchmarkTest00608": "963756024147b2cb0e1537dac83dfc31adbae7c701e60bcb0171fda332adc414",
+    "BenchmarkTest00609": "82b4fe69d16b3432b3436850405b20460232c64df982ae54464a4508cfb3f54b",
+    "BenchmarkTest00657": "f4cd6f58cde952bd96cb7299a58b7fb37ce56c92d9722953ab4ac1cec89ab868",
+    "BenchmarkTest00658": "5bd4b02c0c3177d8884f8b9d15ecd1d4136b25593ac7c9e089d2ccbc3ad90486",
+    "BenchmarkTest00659": "9bc1813c8f2dab6a77913f5a0b87589ef99e6c797ca8c7eb3cd0b2fa2acd926a",
+    "BenchmarkTest00660": "91de3a80d65d497cdcb716ccd3368e3d278a6f002e897c1fefc29aa8dd218194",
+    "BenchmarkTest00734": "98f39e4ba3160597b4a7fabb194794ee315dc295075ddb623efcd02ebf254770",
+    "BenchmarkTest00735": "81004c87feedd9c86fec68994c8ad0af466dfd51db57ac49d2441cee836299b8",
+    "BenchmarkTest00736": "ab867704dcbe258ab6950f1f22844f34b5caab3b95d53a43eb2636ea5e30517e",
+    "BenchmarkTest00755": "eafe879134c4baf102ab37d23b934348ac912bf82f31b77b864dc0e4cd984d4f",
+    "BenchmarkTest00825": "8a225d23595c361861fddced4d04e4d428ff8c319243b429fb2b4b12efa528b7",
+    "BenchmarkTest00826": "f3eb9e00f33e04012b2b2def616d8cce7b1947ec09fc77af54d3ef114408cc02",
+    "BenchmarkTest00827": "352c98678d686c79c7c358bf63b9cc6fea1157e049c98227de930407a7e74ed6",
+    "BenchmarkTest00828": "8ec7c7cee4041f06bf47cbb73cc1c1f1a0a1cf96ef12c10b604761a97d6c5b8c",
+    "BenchmarkTest00898": "05ef3656a5e599ad482f7f6f97ca3a755e7cfcdb1ea4dba50fab1365f90fe570",
+    "BenchmarkTest00899": "1c7d07d4c9405153458e8e4888725dfa36c05d7717ba5b2dda066c09d87ee6ec",
+    "BenchmarkTest00900": "24500776d2be6672be219a461e843f3726f80f67224d48fe0ccbb08099a19e97",
+    "BenchmarkTest00901": "dd0ebd23f114998bf01b58be2de8fbc782f307bc1b27fd57365c077689b5e185",
+    "BenchmarkTest00902": "fb71e40fffff05b64283b6de33fb863450872b9dc22e1153a1d3d1d7cf696c54",
+    "BenchmarkTest00903": "f6fc5883e359cf7d1a833fd5e1b25cb7cce5792d38048e04ad7ccea9f7c9b119",
+    "BenchmarkTest00904": "cb7b91663452af4b3cbc0923ee045a11365c088c9a7cad6404ae69ab52a1c494",
+    "BenchmarkTest00992": "f597460658fc658a5c1b25d10d9e289b7fe5ea2bc9052af13dce7edb467433c9",
+    "BenchmarkTest00993": "f882c48c4e43c7ed814f6e1fb806b858105a373cb949666d8fa8cf822610a63a",
+    "BenchmarkTest00994": "eed9e66b2dee4d154c1336fe63f74a14b074dbcbdee092d2ae9494f167242e7e",
+    "BenchmarkTest00995": "8012c9af2fad6f2386407e9c98a3018b1c172f3b8308d014071fd2235c75f501",
+    "BenchmarkTest00996": "de1e12a3805d376a275558cdf30cffca581fd0b6fb67bd5af1dda7998aaf5555",
+    "BenchmarkTest00997": "c1e8c9b1dae74fe32a176d5e2181e5cbe3e0314d9b014d9327f176a126feaa5d",
+    "BenchmarkTest00998": "5ccc3aaa038e4bd2cccd71a289e7a84e8bea331ca606447b492963ded130f8be",
+    "BenchmarkTest00999": "8bf65de61c0fe773e228f13b0d5054b24110265f4132efeb7ed5fb826b64a2b5",
+    "BenchmarkTest01021": "cd6c697c1aa5adced8bb01b16a1e445381d1d05fbf80aa9f9b510f356f740fd1",
+    "BenchmarkTest01096": "de48fae12f1d32d978b9398020a5951d5d4b2d4f9e51370840d67f38ccb70cdb",
+    "BenchmarkTest01097": "186aca687f5b4271bb582165dba60d0705e307da38c9bcac213fb6a872aaae07",
+    "BenchmarkTest01098": "fa942d1e553cb9c2393e9b725667f3254498916334ca7c39395a0e470371a274",
+    "BenchmarkTest01099": "135b45c108b77cb450b69a10912837f5fb9daa2c7b8e59368e9f7fa916f1fca7",
+    "BenchmarkTest01100": "2729393b2a0eea306db1da4aba1e7ff3125ff9d242fba84dc0d081dfd5869054",
+    "BenchmarkTest01101": "6a70345ea9dba030d95dd360e49726347d46f0b75489ee82cdd2a39eff2a553e",
+    "BenchmarkTest01102": "26bc3093d4a15d74e93138fd16fe930965c8ef6583ce87ffcba064c6e1b05628",
+    "BenchmarkTest01172": "9bdb15fd1466ef3713deee88cac45cc2f63f83bb9d1284aa143353af55a14289",
+    "BenchmarkTest01173": "9b434fe259c0b946abf674e74608317b5f42d2974c12d299037f4bddfb406137",
+    "BenchmarkTest01174": "b733bab8e195d5ca2aa1ff5f66b1164b424f3d2622d1fa6e1208b637777cf93f",
+    "BenchmarkTest01191": "a2f79060646b5dbe5de71491fa8b6c484a98cb107c0bb6b0ee06abe97be37e46",
+    "BenchmarkTest01203": "8de48beb88fde0228c66b9bdede413aaabca3368d4cd9650477c704b7ccf6b22",
+    "BenchmarkTest01216": "1cace193e2869822e60cf753f3d674357e79deb56f20e25b65c35a3505dc7b17",
+    "BenchmarkTest01228": "dfa0f58d58d9cea3f0e8d967626acbf18ffa59109b9a8797633ffa8c3926aa68",
+    "BenchmarkTest01229": "b4cc092a786f9a7223536ce31f7b95b7cff6e46f278bfe8adc4e21b0c67ff0fc",
+    "BenchmarkTest01230": "a3d8518ec3a60f8a8ed5e4f540588a2019aa812ab0941825566256e888794bce"
+  },
+  "source_revision": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba",
+  "source_url": "https://github.com/OWASP-Benchmark/BenchmarkPython"
+}

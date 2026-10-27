@@ -3,14 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from security_review.application import scan_path
 from security_review.domain.models import Confidence, Finding, ScanReport, Severity, SourceReference
 from security_review.reporting.builder import build_report
 from security_review.reporting.json_report import render_json
 from security_review.reporting.sarif import render_sarif
 from security_review.reporting.types import ReportFormat, render_report
-from security_review.scanner.engine import scan_text
-from security_review.scanner.files import ScanLimits
+from security_review.scanner.external_detectors import _parse_gitleaks
 
 
 @pytest.fixture
@@ -35,6 +33,41 @@ def finding(identifier: str, severity: Severity, rule_id: str = "TEST001") -> Fi
     )
 
 
+def secret_finding(identifier: str = "gitleaks:stable", line: int = 2) -> Finding:
+    return Finding(
+        id=identifier,
+        rule_id="gitleaks:generic-api-key",
+        category="secret",
+        severity=Severity.HIGH,
+        file_path="settings.py",
+        line_start=line,
+        message="A secret-like value was found.",
+        redacted_evidence="API_KEY = ***REDACTED***",
+        confidence=Confidence.HIGH,
+        cwe_ids=("CWE-798",),
+        remediation="Replace the credential and load it from a secret store.",
+        engine="gitleaks",
+    )
+
+
+def parsed_secret_finding(root: Path, secret: str) -> Finding:
+    return _parse_gitleaks(
+        [
+            {
+                "RuleID": "generic-api-key",
+                "File": "settings.py",
+                "StartLine": 2,
+                "EndLine": 2,
+                "StartColumn": 1,
+                "Secret": secret,
+                "Match": f"API_KEY={secret}",
+            }
+        ],
+        root,
+        frozenset({"settings.py"}),
+    )[0]
+
+
 def test_sarif_contains_consistent_results(report: ScanReport) -> None:
     payload = json.loads(render_sarif(report))
 
@@ -49,17 +82,23 @@ def test_sarif_contains_consistent_results(report: ScanReport) -> None:
     assert "uriBaseId" not in location["artifactLocation"]
 
 
-def test_unsafe_yaml_finding_has_same_identity_in_json_and_sarif(tmp_path: Path) -> None:
-    target = tmp_path / "config.py"
-    target.write_text("import yaml\nvalue = yaml.unsafe_load(data)\n", encoding="utf-8")
-
-    report = scan_path(target, ScanLimits())
+def test_external_sast_finding_has_same_identity_in_json_and_sarif() -> None:
+    external_finding = finding(
+        "opengrep:unsafe-load", Severity.HIGH, "opengrep:unsafe-yaml-load"
+    ).model_copy(
+        update={
+            "engine": "opengrep",
+            "cwe_ids": ("CWE-502",),
+            "confidence": Confidence.MEDIUM,
+        }
+    )
+    report = build_report("config.py", [external_finding])
     assert len(report.findings) == 1
     json_finding = json.loads(render_json(report))["findings"][0]
     run = json.loads(render_sarif(report))["runs"][0]
     sarif_result = run["results"][0]
 
-    assert json_finding["rule_id"] == sarif_result["ruleId"] == "PY004"
+    assert json_finding["rule_id"] == sarif_result["ruleId"] == "opengrep:unsafe-yaml-load"
     assert json_finding["id"] == sarif_result["properties"]["findingId"]
     assert json_finding["cwe_ids"] == sarif_result["properties"]["cweIds"] == ["CWE-502"]
     assert run["tool"]["driver"]["rules"][0]["properties"]["tags"] == ["security", "CWE-502"]
@@ -82,33 +121,33 @@ def test_sarif_path_prefix_does_not_change_finding_identity(report: ScanReport) 
 
 
 def test_sarif_fingerprint_survives_another_finding_on_earlier_line() -> None:
-    source = 'answer = 42\nAPI_KEY = "sk-test-example-value"\n'
-    before = build_report("sample", scan_text("settings.py", source))
+    secret = secret_finding()
+    before = build_report("sample", [secret])
     after = build_report(
-        "sample", scan_text("settings.py", source.replace("answer = 42", "eval(value)"))
+        "sample",
+        [secret, finding("opengrep:earlier", Severity.HIGH).model_copy(update={"line_start": 1})],
     )
     before_result = next(
         item
         for item in json.loads(render_sarif(before))["runs"][0]["results"]
-        if item["ruleId"] == "SEC001"
+        if item["ruleId"] == "gitleaks:generic-api-key"
     )
     after_result = next(
         item
         for item in json.loads(render_sarif(after))["runs"][0]["results"]
-        if item["ruleId"] == "SEC001"
+        if item["ruleId"] == "gitleaks:generic-api-key"
     )
 
     assert before.findings[0].id == next(
-        item.id for item in after.findings if item.rule_id == "SEC001"
+        item.id for item in after.findings if item.rule_id == "gitleaks:generic-api-key"
     )
     assert before_result["partialFingerprints"] == after_result["partialFingerprints"]
     assert "sk-test-example-value" not in json.dumps(before_result)
 
 
 def test_sarif_fingerprint_changes_when_source_line_moves() -> None:
-    source = 'API_KEY = "sk-test-example-value"\n'
-    before = build_report("sample", scan_text("settings.py", source))
-    after = build_report("sample", scan_text("settings.py", "answer = 42\n" + source))
+    before = build_report("sample", [secret_finding(line=1)])
+    after = build_report("sample", [secret_finding(line=2)])
     before_result = json.loads(render_sarif(before))["runs"][0]["results"][0]
     after_result = json.loads(render_sarif(after))["runs"][0]["results"][0]
 
@@ -116,8 +155,9 @@ def test_sarif_fingerprint_changes_when_source_line_moves() -> None:
 
 
 def test_sarif_fingerprints_distinguish_identical_matches_in_one_file() -> None:
-    source = 'API_KEY = "sk-test-example-value"\n' * 2
-    report = build_report("sample", scan_text("settings.py", source))
+    report = build_report(
+        "sample", [secret_finding("gitleaks:first", 1), secret_finding("gitleaks:second", 2)]
+    )
     results = json.loads(render_sarif(report))["runs"][0]["results"]
 
     assert len(results) == 2
@@ -194,13 +234,17 @@ def test_sarif_osv_result_links_only_a_validated_public_advisory() -> None:
     assert "example.test" not in json.dumps(result)
 
 
-def test_sarif_fingerprint_does_not_hash_raw_secret_value() -> None:
-    first = build_report("sample", scan_text("settings.py", 'API_KEY = "sk-test-example-value"'))
-    second = build_report("sample", scan_text("settings.py", 'API_KEY = "sk-test-another-value"'))
+def test_sarif_fingerprint_does_not_hash_raw_secret_value(tmp_path: Path) -> None:
+    first_secret = "sk-test-example-value"
+    second_secret = "sk-test-another-value"
+    first = build_report("sample", [parsed_secret_finding(tmp_path, first_secret)])
+    second = build_report("sample", [parsed_secret_finding(tmp_path, second_secret)])
 
     first_result = json.loads(render_sarif(first))["runs"][0]["results"][0]
     second_result = json.loads(render_sarif(second))["runs"][0]["results"][0]
     assert first_result["partialFingerprints"] == second_result["partialFingerprints"]
+    assert first_secret not in json.dumps(first_result)
+    assert second_secret not in json.dumps(second_result)
 
 
 @pytest.mark.parametrize(
@@ -251,11 +295,109 @@ def test_sarif_dispatch_and_serialization_are_stable(report: ScanReport) -> None
     )
 
 
-def test_raw_secret_never_reaches_sarif() -> None:
+def test_raw_secret_never_reaches_sarif(tmp_path: Path) -> None:
     token = "sk-test-never-render-this"
-    report = build_report("sample", scan_text("settings.py", f'API_KEY="{token}"'))
+    report = build_report("sample", [parsed_secret_finding(tmp_path, token)])
 
     rendered = render_sarif(report)
 
     assert token not in rendered
-    assert "***REDACTED***" in rendered
+    assert "[REDACTED: secret value omitted]" in rendered
+
+
+def test_sarif_emits_location_only_cross_file_flow() -> None:
+    from security_review.domain.models import TraceLocation
+
+    codeql_finding = finding("codeql:flow-one", Severity.HIGH).model_copy(
+        update={
+            "engine": "codeql",
+            "trace": (
+                TraceLocation(file_path="src/input file.py", line_start=2, role="source"),
+                TraceLocation(file_path="src/app.py", line_start=2, role="sink"),
+            ),
+        }
+    )
+    result = json.loads(
+        render_sarif(build_report("sample", [codeql_finding]), path_prefix="checkout")
+    )["runs"][0]["results"][0]
+
+    flow = result["codeFlows"][0]["threadFlows"][0]["locations"]
+    assert [item["location"]["physicalLocation"]["artifactLocation"]["uri"] for item in flow] == [
+        "checkout/src/input%20file.py",
+        "checkout/src/app.py",
+    ]
+    assert [item["location"]["physicalLocation"]["region"]["startLine"] for item in flow] == [
+        2,
+        2,
+    ]
+    assert "snippet" not in json.dumps(flow)
+
+
+def test_sarif_distinguishes_flows_sharing_one_sink_location() -> None:
+    from security_review.domain.models import TraceLocation
+
+    common = finding("codeql:flow-one", Severity.HIGH).model_copy(
+        update={
+            "engine": "codeql",
+            "trace": (
+                TraceLocation(file_path="src/input_a.py", line_start=1, role="source"),
+                TraceLocation(file_path="src/app.py", line_start=2, role="sink"),
+            ),
+        }
+    )
+    other = common.model_copy(
+        update={
+            "id": "codeql:flow-two",
+            "trace": (
+                TraceLocation(file_path="src/input_b.py", line_start=1, role="source"),
+                TraceLocation(file_path="src/app.py", line_start=2, role="sink"),
+            ),
+        }
+    )
+
+    results = json.loads(render_sarif(build_report("sample", [common, other])))["runs"][0][
+        "results"
+    ]
+
+    assert len({item["partialFingerprints"]["primaryLocationLineHash"] for item in results}) == 2
+
+
+def test_sarif_marks_incomplete_engine_execution_unsuccessful() -> None:
+    from security_review.domain.models import ScanExecution
+
+    execution = ScanExecution(
+        engine="codeql",
+        kind="sast",
+        status="error",
+        version=None,
+        elapsed_ms=123,
+        eligible_files=("src/app.py",),
+        scanned_files=(),
+        languages=("python",),
+        checks=("security-extended",),
+        reason="codeql_unavailable",
+    )
+    run = json.loads(render_sarif(build_report("sample", [], executions=(execution,))))["runs"][0]
+
+    assert run["invocations"][0]["executionSuccessful"] is False
+    assert run["properties"]["scannerExecutions"][0]["reason"] == "codeql_unavailable"
+    assert any(
+        "codeql_unavailable" in item["message"]["text"]
+        for item in run["invocations"][0]["toolExecutionNotifications"]
+    )
+
+
+def test_sarif_treats_inapplicable_engine_as_skipped() -> None:
+    from security_review.domain.models import ScanExecution
+
+    execution = ScanExecution(
+        engine="codeql",
+        kind="sast",
+        status="skipped",
+        elapsed_ms=0,
+        reason="no_eligible_files",
+    )
+    run = json.loads(render_sarif(build_report("sample", [], executions=(execution,))))["runs"][0]
+
+    assert run["invocations"][0]["executionSuccessful"] is True
+    assert run["properties"]["scannerExecutions"][0]["status"] == "skipped"

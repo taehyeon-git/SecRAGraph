@@ -1,0 +1,26 @@
+rules:
+  - id: javascript-web-command-taint
+    languages: [javascript, typescript]
+    mode: taint
+    severity: ERROR
+    message: Untrusted web request data reaches command execution.
+    metadata:
+      cwe: CWE-78
+      shortDescription: Web input reaches process execution
+    pattern-sources:
+      - pattern: $REQ.query.$FIELD
+      - pattern: $REQ.query[$FIELD]
+      - pattern: $REQ.body.$FIELD
+      - pattern: $REQ.body[$FIELD]
+      - pattern: $REQ.params.$FIELD
+      - pattern: $REQ.params[$FIELD]
+    pattern-sinks:
+      - patterns:
+          - pattern: child_process.exec($COMMAND, ...)
+          - focus-metavariable: $COMMAND
+      - patterns:
+          - pattern: child_process.execSync($COMMAND, ...)
+          - focus-metavariable: $COMMAND
+    pattern-sanitizers:
+      - pattern: Number.parseInt(...)
+      - pattern: parseInt(...)

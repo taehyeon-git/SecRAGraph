@@ -123,8 +123,19 @@ def _smoke_endpoints(api_port: int, web_port: int, username: str, password: str)
             raise ValueError("synthetic_scan_failed")
         payload = upload.json()
         scan_id = str(UUID(payload["scan_id"]))
-        if not any(finding.get("rule_id") == "PY001" for finding in payload["findings"]):
+        if not any(
+            finding.get("engine") == "opengrep"
+            and str(finding.get("rule_id", "")).startswith("OG/")
+            for finding in payload["findings"]
+        ):
             raise ValueError("synthetic_finding_missing")
+        if not any(
+            execution.get("engine") == "opengrep"
+            and execution.get("status") == "completed"
+            and "synthetic.py" in execution.get("scanned_files", [])
+            for execution in payload.get("executions", [])
+        ):
+            raise ValueError("sast_coverage_missing")
         if client.get(f"{api}/v1/scans/{scan_id}", headers=headers).status_code != 200:
             raise ValueError("synthetic_report_unavailable")
         if client.get(f"{api}/v1/scans/{scan_id}").status_code != 401:

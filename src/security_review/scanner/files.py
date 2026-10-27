@@ -6,6 +6,7 @@ import os
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 from time import monotonic
 from typing import Literal
@@ -27,12 +28,39 @@ class ScanLimits:
     """Resource limits applied before any source is inspected."""
 
     max_file_bytes: int = 1_000_000
+    max_total_bytes: int = 20_000_000
     max_files: int = 500
     max_candidates: int = 10_000
-    max_processing_seconds: float = 30.0
+    max_processing_seconds: float = 120.0
     allowed_extensions: frozenset[str] = field(
         default_factory=lambda: frozenset(
-            {".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".env", ".ini"}
+            {
+                ".py",
+                ".js",
+                ".jsx",
+                ".ts",
+                ".tsx",
+                ".json",
+                ".yaml",
+                ".yml",
+                ".toml",
+                ".env",
+                ".ini",
+                ".tf",
+                ".tfvars",
+                ".hcl",
+                ".dockerfile",
+                ".sh",
+                ".xml",
+                ".properties",
+                ".conf",
+                ".pem",
+                ".key",
+                ".secretfile",
+                ".go",
+                ".java",
+                ".rb",
+            }
         )
     )
     excluded_directories: frozenset[str] = field(
@@ -44,6 +72,8 @@ class ScanLimits:
     def __post_init__(self) -> None:
         if self.max_file_bytes < 1:
             raise ValueError("max_file_bytes must be positive")
+        if self.max_total_bytes < 1:
+            raise ValueError("max_total_bytes must be positive")
         if self.max_files < 1:
             raise ValueError("max_files must be positive")
         if self.max_candidates < 1:
@@ -60,6 +90,7 @@ class ScannableFile:
     root: Path = field(repr=False)
     relative_path: str
     size_bytes: int
+    content_sha256: str = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,8 +134,21 @@ def _is_link_like(path: Path) -> bool:
 
 
 def _extension(path: Path) -> str:
-    if path.name.lower() == ".env":
+    name = path.name.lower()
+    if name == ".env" or name.startswith(".env."):
         return ".env"
+    if name in {"dockerfile", "containerfile"}:
+        return ".dockerfile"
+    if name in {
+        ".npmrc",
+        ".pypirc",
+        ".netrc",
+        ".git-credentials",
+        "id_rsa",
+        "id_ed25519",
+        "credentials",
+    }:
+        return ".secretfile"
     return path.suffix.lower()
 
 
@@ -256,12 +300,14 @@ def discover_files(
         if text is None:
             skipped.append(SkippedFile(path=relative_path, reason=reason or "unreadable"))
             continue
+        content = text.encode("utf-8")
         files.append(
             ScannableFile(
                 path=candidate,
                 root=scan_root,
                 relative_path=relative_path,
-                size_bytes=size_bytes,
+                size_bytes=len(content),
+                content_sha256=sha256(content).hexdigest(),
             )
         )
     return DiscoveryResult(files=tuple(files), skipped=tuple(skipped), warnings=warnings)
@@ -273,6 +319,11 @@ def read_scannable_text(file: ScannableFile, limits: ScanLimits) -> str | None:
     if _is_link_like(file.path) or not _inside_root(file.path, file.root):
         return None
     text, _ = _read_text(file.path, limits.max_file_bytes)
-    if text is None or _is_link_like(file.path) or not _inside_root(file.path, file.root):
+    if (
+        text is None
+        or sha256(text.encode("utf-8")).hexdigest() != file.content_sha256
+        or _is_link_like(file.path)
+        or not _inside_root(file.path, file.root)
+    ):
         return None
     return text
