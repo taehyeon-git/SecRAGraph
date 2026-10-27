@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from collections.abc import Sequence
-from dataclasses import replace
 from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from security_review.evaluation.scanner_models import load_scanner_cases
 from security_review.intelligence import case_corpus
 from security_review.intelligence.dynamic_cwe import (
     RUNTIME_CWE_CORPUS_ID,
@@ -266,46 +265,37 @@ def test_runtime_fetches_more_than_32_distinct_small_cwe_records(cache_dir: Path
     assert len(urls) == len(ids) + 1  # one version request, then each selected CWE
 
 
-def test_current_rules_are_preloaded_even_without_positive_case(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    extra_rule = replace(case_corpus.DEFAULT_RULES[0], rule_id="NEW001", cwe_ids=("CWE-22",))
-    monkeypatch.setattr(case_corpus, "DEFAULT_RULES", (*case_corpus.DEFAULT_RULES, extra_rule))
+def _case_repo(tmp_path: Path, cases: list[dict[str, object]]) -> Path:
+    directory = tmp_path / "data" / "evaluation"
+    directory.mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / "data/evaluation/rag_cases.json", directory / "rag_cases.json")
+    (directory / "multiengine_cases.json").write_text(
+        json.dumps({"schema_version": 1, "provenance": {"kind": "test"}, "cases": cases}),
+        encoding="utf-8",
+    )
+    return tmp_path
 
-    selected = case_corpus._select_case_cwes(REPO_ROOT)
+
+def test_explicit_case_cwes_are_preloaded_without_rule_registry(tmp_path: Path) -> None:
+    root = _case_repo(tmp_path, [{"case_id": "new-case", "cwe_ids": ["CWE-22"]}])
+
+    selected = case_corpus._select_case_cwes(root)
 
     assert "CWE-22" in selected.cwe_ids
-    assert len(selected.scanner_cases) == len(
-        load_scanner_cases(REPO_ROOT / "data/evaluation/scanner_cases.json")
-    )
+    assert selected.scanner_cases == {"new-case": ["CWE-22"]}
     assert len(selected.rag_cases) == 4
-    assert all("CWE-22" not in ids for ids in selected.scanner_cases.values())
 
 
-def test_startup_selection_accepts_more_than_32_current_rule_cwes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    additional_rules = tuple(
-        replace(
-            case_corpus.DEFAULT_RULES[0],
-            rule_id=f"EXTRA-{number}",
-            cwe_ids=(f"CWE-{number}",),
-        )
-        for number in range(1000, 1040)
-    )
-    monkeypatch.setattr(
-        case_corpus,
-        "DEFAULT_RULES",
-        (*case_corpus.DEFAULT_RULES, *additional_rules),
-    )
+def test_startup_selection_accepts_more_than_32_case_cwes(tmp_path: Path) -> None:
+    cases = [
+        {"case_id": f"case-{number}", "cwe_ids": [f"CWE-{number}"]} for number in range(1000, 1040)
+    ]
+    root = _case_repo(tmp_path, cases)
 
-    selected = case_corpus._select_case_cwes(REPO_ROOT)
+    selected = case_corpus._select_case_cwes(root)
 
     assert set(f"CWE-{number}" for number in range(1000, 1040)).issubset(selected.cwe_ids)
-    assert len(selected.cwe_ids) == 48
-    assert len(selected.scanner_cases) == len(
-        load_scanner_cases(REPO_ROOT / "data/evaluation/scanner_cases.json")
-    )
+    assert len(selected.scanner_cases) == 40
     assert len(selected.rag_cases) == 4
 
 

@@ -6,3 +6,8 @@ data/knowledge/*.json text eol=lf
 data/knowledge/**/*.md text eol=lf
 data/knowledge/**/*.markdown text eol=lf
 data/knowledge/**/*.json text eol=lf
+data/engines/** text eol=lf
+data/engines/opengrep/** -text -eol -whitespace
+data/evaluation/** text eol=lf
+docs/evidence/multiengine-scanner-2026-10-27.json text eol=lf
+infra/scanners/*.txt text eol=lf

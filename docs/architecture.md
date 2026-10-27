@@ -11,7 +11,11 @@ flowchart TB
   AUTH --> TEMP[Validated temporary workspace]
   TEMP --> SCAN
   SCAN --> SGRAPH[Scan LangGraph]
-  SGRAPH --> DET[Text-only deterministic scanner]
+  SGRAPH --> SNAP[Bounded text snapshot]
+  SNAP --> SAST[Opengrep SAST]
+  SNAP --> SECRET[Gitleaks secrets]
+  SNAP --> CONFIG[Checkov configuration]
+  SGRAPH --> OSV[Lockfile coordinates to OSV.dev]
   SGRAPH --> CWE[Finding CWE IDs]
   CWE --> MITRE[(Official MITRE CWE API)]
   SGRAPH -. optional source references .-> QDRANT[(Qdrant documents)]
@@ -45,7 +49,7 @@ validate_input → deterministic_scan → normalize_findings
 
 `retrieve_finding_evidence`는 규칙 결과의 `references`에 Qdrant 문서 출처를 합칩니다. finding ID, 탐지 위치, 심각도, CWE 매핑, 수정 권고는 결정적 결과를 유지합니다. 이 노드는 ChatModel 또는 PostgreSQL Text2SQL을 호출하지 않습니다. 검색 불가·시간 한도 초과 시 확인된 finding을 보존하고 `completed_with_warnings` 보고서를 만들 수 있습니다. 스캔 경로의 기본 수정 권고는 LLM 생성 문장이 아닙니다.
 
-`audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 정보 등급 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 정적 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
+`deterministic_scan`은 제한된 UTF-8 스냅샷을 만들고 Opengrep·Gitleaks·Checkov를 별도 프로세스로 실행합니다. 각 엔진의 상태·버전·대상과 확인된 파일·시간·경고를 `ScanExecution`에 정규화합니다. 대상 파일을 import하거나 실행하지 않습니다. `audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 의존성 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 이미 확인한 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
 
 `prepare_cwe_evidence`는 실제 스캔 결과의 CWE ID를 중복 제거하고 항목별 검증 캐시를 확인합니다. 없는 항목만 고정된 MITRE HTTPS API로 조회합니다. 응답의 CWE ID·형식·크기와 로컬 manifest SHA-256을 검사한 뒤 공식 출처를 finding에 연결합니다. 인덱서가 있으면 같은 Qdrant 컬렉션의 별도 런타임 코퍼스 ID로 문서를 추가합니다. 초기 사례 코퍼스 재동기화가 이 코퍼스를 제거하지 않습니다. 취득 실패·시간 초과·상한 도달 시 결정적 finding을 보존하고 범위 경고를 남깁니다. MITRE에는 업로드 코드나 질문 전문이 아닌 CWE ID만 보냅니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_CWE_ENABLED=false`로 자동 조회를 끌 수 있습니다.
 
@@ -71,13 +75,13 @@ classify_intent ─┬→ general_answer → END
 | 위치 | 책임 / 외부 경계 |
 | --- | --- |
 | `src/security_review/domain/models.py`, `risk.py` | 검증된 `Finding`, `SourceReference`, `ScanReport`와 결정적 위험 점수. FastAPI·DB·모델 SDK에 의존하지 않습니다. |
-| `scanner/files.py`, `rules.py`, `engine.py`, `redaction.py` | 지원 파일 탐색·한도, 텍스트 규칙, 결과 생성, 소스 줄을 복사하지 않는 규칙별 고정 증거 문구. 제출 코드를 import하거나 실행하지 않습니다. |
+| `scanner/files.py`, `snapshot.py`, `opengrep_adapter.py`, `external_detectors.py` | 지원 파일 탐색·한도, 별도 비실행 스냅샷, 신뢰된 검사기 호출과 결과 정규화. 소스 줄이나 비밀 원문을 보고서에 복사하지 않습니다. |
 | `uploads/service.py`, `archive.py` | 파일명·MIME·크기 검증, ZIP 경로·링크·개수·압축 해제량 검사 후 임시 디렉터리 사용. |
 | `application.py` | CLI의 `scan_path`와 API의 `ScanService`; 같은 스캔 그래프를 조립하고 API 경로에서는 보고서를 저장합니다. |
 | `orchestrator/scan_graph.py`, `knowledge_graph.py`, `state.py` | 각 LangGraph의 상태, 노드, 조건부 분기와 결과 계약. |
 | `ports.py` | `ReportRepository`, `SecurityKnowledgeRepository`, `SecurityDocumentRetriever`, `ChatModel`, `EmbeddingModel` 프로토콜. 구현을 도메인 밖에 둡니다. |
 | `intelligence/ingestion.py`, `manifest.py`, `models.py` | 사용자 소유 UTF-8 Markdown 문서 탐색·chunk, 버전별 출처/권리/해시 검증, 코퍼스 식별자 및 지식 데이터 모델. |
-| `intelligence/case_corpus.py`, `dynamic_cwe.py` | 평가 사례와 규칙의 초기 CWE 코퍼스 준비, 실제 스캔·질문에서 발생한 CWE ID별 공식 자료 검증·캐시·선택적 인덱싱. |
+| `intelligence/case_corpus.py`, `dynamic_cwe.py` | 평가 사례와 질문의 초기 CWE 코퍼스 준비, 실제 스캔·질문에서 발생한 CWE ID별 공식 자료 검증·캐시·선택적 인덱싱. |
 | `intelligence/qdrant_retriever.py`, `openai_adapters.py` | 컬렉션/차원 확인, bounded 검색·임베딩·모델 제공자 어댑터, 선택 관리 코퍼스의 미리보기/동기화. |
 | `intelligence/text2sql.py`, `sql_guard.py` | 모델 SQL 생성·재시도·답변 합성 및 SQLGlot AST 검증. |
 | `storage/database.py`, `reports.py`, `memory.py`, `models.py` | SQLAlchemy 연결·스캔 보고서 영속화·테스트용 메모리 저장소·테이블. |
@@ -86,9 +90,7 @@ classify_intent ─┬→ general_answer → END
 | `evaluation/offline_rag.py`, `rag_models.py`, `rag_render.py` | 고정 매니페스트·인덱싱된 chunk digest·실제 RAG 그래프 경로를 평가하고 제한된 증거를 렌더링. |
 | `scripts/run_rag_evidence.py` | 키 없는 RAG 평가를 실행하고 JSON/Markdown 파일을 원자적으로 기록하며 라벨 불일치를 실패로 반환. |
 | `evaluation/live_rag.py`, `scripts/run_live_rag_evidence.py` | 명시적 모델 키가 있을 때만 동일 지식 그래프의 제공자 경로를 관찰하고 지표 분모·모델 ID·해시·사람 검토 필요성을 로컬에 기록. |
-| `evaluation/scanner_benchmark.py`, `scanner_models.py` | 합성 스캐너 사례를 공개 스캔 경로로 평가하고 정확 일치 지표와 커버리지를 계산. |
-| `scripts/run_scanner_benchmark.py` | 엄격한 오프라인 스캐너 벤치마크를 실행하고 JSON/Markdown 증거를 기록. |
-| `evaluation/external_benchmark.py`, `scripts/run_external_scanner_benchmark.py` | 별도 사용자 보유 OWASP Python 코퍼스의 고정된 리비전·라벨 digest를 검증하고 소스 실행 없이 넓은 CWE 사례 점수를 분모와 함께 계산. |
+| `evaluation/multiengine_benchmark.py`, `scripts/run_multiengine_benchmark.py` | 현재 검사기를 공개 스캔 경로로 평가하고 엔진·규칙·파일·줄의 라벨, 범위와 시간을 JSON/Markdown으로 기록. |
 | `api/app.py`, `member_auth.py`, `dependencies.py`, `schemas.py`, `middleware.py`, `errors.py`, `routes/members.py` | FastAPI 조립, 회원 Session 및 선택적 운영 Bearer 인증 경계, 의존성 주입, 검증 요청, 상관 ID와 안전한 오류 응답. |
 | `api/routes/scans.py`, `reports.py`, `knowledge.py`, `health.py` | 파일·ZIP 업로드, 영속 보고서 조회/렌더링, 지식 질의, 생존/준비 상태 HTTP 경로. |
 | `cli.py`, `apps/api/`, `apps/web/` | Typer CLI, Uvicorn 진입점, Streamlit 데모. |
@@ -98,13 +100,13 @@ classify_intent ─┬→ general_answer → END
 
 HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `POST /v1/auth/logout`, `POST /v1/scans/file`, `POST /v1/scans/archive`, `GET /v1/scans/{scan_id}`, `GET /v1/scans/{scan_id}/report?format=markdown|sarif`, `POST /v1/knowledge/query`, `POST /v1/vulnerabilities/query`입니다. `/v1/auth/register`는 개발 환경에서 명시적으로 허용한 경우에만 사용할 수 있습니다. JSON 보고서는 저장된 canonical report이고 Markdown/SARIF은 같은 보고서에서 렌더링합니다.
 
-## 스캐너 규칙과 측정 경계
+## 검사 엔진과 측정 경계
 
-스캐너는 Python 파일의 `eval`, `subprocess`/`os.system`, `requests` TLS 설정, 명시적 위험 PyYAML 로더 호출을 실행 없이 AST로 읽습니다. `SEC001`은 지원 텍스트 파일의 비밀 유사 값을 마스킹하고, `JS001`은 JavaScript/TypeScript 또는 `.env`의 명시적 Node TLS 검증 해제 할당을 제한된 어휘 검사로 찾습니다. JS 템플릿 문자열 안의 보간 코드는 평가하지 않습니다. Python 구문 분석이 실패하면 텍스트 규칙은 계속 검사하고 `python_syntax_error` 경고를 보고하며, 이 사례를 정상 사례 오경보율 분모에 넣지 않습니다.
+회원 업로드의 SAST는 Opengrep 1.32.0과 [MIT 라이선스·커밋·파일 해시를 고정한 79개 규칙](../data/engines/opengrep/README.md), [프로젝트 작성 taint 규칙 3개](../data/engines/secragraph-taint/README.md)를 사용합니다. 웹 프레임워크 입력에서 명령 실행이나 SQL 쿼리 문자열까지의 흐름을 `--taint-intrafile`로 같은 파일의 함수 사이까지 추적하고, source·step·sink 경로/줄을 소스 내용 없이 기록합니다. 임의의 여러 파일을 지나는 데이터 흐름은 증명하지 않습니다. 비밀정보는 Gitleaks 8.30.1, Terraform 등 설정 오류는 Checkov 3.3.30, 정확한 잠금 파일 패키지 권고는 OSV.dev가 담당합니다. 과거 자체 제작 8개 규칙은 현재 경로에서 제거했습니다.
 
-`scripts.run_scanner_benchmark`는 저장소가 작성한 현재 120개 합성 사례를 임시 파일로 분리해 공개 `scan_path`로 검사합니다. 정확한 `(사례 ID, 규칙 ID, 시작 줄)` 집합으로 TP·FP·FN을 계산하고, 읽지 못한 사례·파싱 경고·진단을 별도 커버리지로 남깁니다. 기본 실행은 불일치와 커버리지 실패 시 비정상 종료하며, `build/evidence/`의 JSON/Markdown에는 재현 가능한 필드만 기록합니다. 코드 커밋 `fc6d3e4666004b4c68b738b2b63d799fe495d34c`, 평가 manifest SHA-256 `af99933a52a09d5e7a566a567382f2b13bce3d2047bafb1e597d7ea51d3dc403`의 2026-10-27 실행에서는 120/120 사례를 읽고 TP=69, FP=0, FN=0, 적격 정상 사례 오경보 0/55, 예상된 Python 구문 경고 2건이었습니다. 이 수치는 작성자가 만든 회귀 평가 스냅샷에만 적용되며 임의 저장소 탐지율이나 실제 취약점 여부를 나타내지 않습니다. 120개는 실행 중 스캔할 파일이나 수집할 CWE의 고정 상한이 아닙니다. [변경 전 측정](evidence/scanner-baseline.md)과 [현재 수치 및 재현 명령](demo.md#11-합성-스캐너-벤치마크)을 참고하세요.
+공개 SecRAGraph 소스 자체는 [CodeQL `security-extended`](../.github/workflows/security-scan.yml)를 GitHub Actions에서 실행합니다. CodeQL의 무료 허용 범위에 맞춰 공개 소스에만 적용하며 비공개 회원 업로드에는 사용하지 않습니다. [별도 FastAPI 흐름 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 `tests/fixtures/codeql_flow`에서 여러 파일 흐름과 차단 함수를 검증하는 테스트 자료입니다. 공개 코드에 대한 실제 경고는 `security-extended`에서 생성합니다. 이 규칙군은 기본 쿼리보다 낮은 정밀도의 쿼리도 포함하므로 결과를 사람이 검토해야 합니다.
 
-선택적 외부 평가는 사용자 제공 [OWASP Benchmark for Python](https://github.com/OWASP-Benchmark/BenchmarkPython) 체크아웃에서 리비전과 기대 라벨 CSV 해시를 확인한 뒤 CWE-78/89/502 사례를 소스 실행 없이 읽습니다. 매핑은 `PY002`, `PY005`, `PY004`/`PY006`이며, `sh -c`, 다른 SQL API, pickle 이외 역직렬화 sink는 미지원으로 공개합니다. 제한된 로컬 도전 결과와 분모는 [데모 문서](demo.md#22-외부-스캐너-코퍼스-도전)에 기록했으며 합성 벤치마크와 합산하지 않습니다. 선택적 실제 제공자 RAG 평가는 키가 있을 때만 실행하고 사실성을 자동 채점하지 않습니다.
+`ScanExecution`은 엔진별 성공·부분·건너뜀·미실행·오류, 도구 버전, 입력 후보, 확인된 검사 파일과 소요 시간을 보존합니다. Gitleaks JSON은 파일별 전체 검사 목록을 주지 않으므로 확인 파일은 finding이 발생한 경로만 표시합니다. 입력 파일 제한·지원 언어·시간 초과로 제외된 부분을 성공으로 취급하지 않습니다. [평가 문서](demo.md)는 작성자 회귀 자료, 독립 라벨 코퍼스, 라벨 없는 실제 저장소를 분리해 설명합니다. 과거 자체 규칙의 수치는 [역사적 기록](evidence/expanded-scanner-2026-10-27.md)에만 보존합니다.
 
 ## 회원 인증과 취약점 조회
 
@@ -116,6 +118,6 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 
 ## 실패와 신뢰 경계
 
-정적 규칙은 키 없이 동작합니다. 기본 로컬 API는 회원 Session으로 인증하며 `SECRAGRAPH_API_TOKEN`은 선택적 운영 Bearer 자격 증명입니다. 회원 로그인에는 IP별/전역 속도 제한이 없으므로 API와 웹은 루프백에 바인딩된 로컬 배포로만 사용해야 합니다. API 스캔 영속화는 PostgreSQL이 필요합니다. `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 별도의 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다. 검증된 `sync-corpus`도 Qdrant에는 비원자적으로 적용되며 실패 후 동일 manifest로 재시도해야 합니다.
+로컬 검사기는 모델 키 없이 동작하지만 설치되어 있어야 합니다. 기본 로컬 API는 회원 Session으로 인증하며 `SECRAGRAPH_API_TOKEN`은 선택적 운영 Bearer 자격 증명입니다. 회원 로그인에는 IP별/전역 속도 제한이 없으므로 API와 웹은 루프백에 바인딩된 로컬 배포로만 사용해야 합니다. API 스캔 영속화는 PostgreSQL이 필요합니다. `/health/ready`는 PostgreSQL과 Qdrant 상태를 확인합니다. 임베딩·모델 기능에는 별도의 런타임 `SECRAGRAPH_OPENAI_API_KEY`, 맞는 Qdrant 컬렉션, 수집된 문서 또는 `intel` 데이터가 필요합니다. 구성되지 않은 지식 API는 503을 반환합니다. Text2SQL SQL이 안전 기준을 통과하지 못하면 DB를 조회하지 않습니다. 검증된 `sync-corpus`도 Qdrant에는 비원자적으로 적용되며 실패 후 동일 manifest로 재시도해야 합니다. 외부 검사기 프로세스는 현재 API 컨테이너와 네트워크 네임스페이스를 공유하므로 다운로드 금지 플래그를 완전한 네트워크 격리로 설명하지 않습니다.
 
 업로드·검색 문서·DB 행·모델 결과는 모두 신뢰하지 않는 데이터입니다. 입력 크기, SQL 권한, 결과 길이, 출처 식별자를 각 경계에서 제한합니다. 남은 위험과 운영 전제는 [위협 모델](threat-model.md)과 [운영 문서](operations.md)에 있습니다.

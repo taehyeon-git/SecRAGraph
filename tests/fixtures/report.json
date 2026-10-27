@@ -29,8 +29,8 @@
   },
   "findings": [
     {
-      "id": "SEC001:stable",
-      "rule_id": "SEC001",
+      "id": "GITLEAKS:stable",
+      "rule_id": "GITLEAKS/generic-api-key",
       "category": "secret",
       "severity": "high",
       "file_path": "src/config file#1%.py",
@@ -41,10 +41,11 @@
       "confidence": "high",
       "cwe_ids": ["CWE-798"],
       "remediation": "Load the replacement from a secret store.",
-      "references": []
+      "references": [],
+      "engine": "gitleaks"
     }
   ],
   "warnings": [],
   "tool_version": "0.1.0",
-  "rule_set_version": "2026.10.1"
+  "rule_set_version": "2026.10.27-multiengine.1"
 }

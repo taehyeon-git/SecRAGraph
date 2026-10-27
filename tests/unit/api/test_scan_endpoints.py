@@ -12,8 +12,14 @@ from fastapi.testclient import TestClient
 
 from security_review.api.app import create_app
 from security_review.api.dependencies import get_scan_service, get_temp_factory
+from security_review.application import ScanService
 from security_review.config import Settings
 from security_review.domain.models import Confidence, Finding, Severity, SourceReference
+from security_review.orchestrator.scan_graph import (
+    DeterministicScanResult,
+    ScanGraphServices,
+    ScanRequest,
+)
 from security_review.scanner.files import ScanLimits
 
 
@@ -42,6 +48,49 @@ def zip_payload(entries: dict[str, bytes]) -> bytes:
     return payload.getvalue()
 
 
+def app_with_synthetic_finding(
+    settings: Settings,
+    *,
+    cwe_evidence: SimpleNamespace | None = None,
+) -> FastAPI:
+    """Exercise API upload and enrichment with a normalized external-engine result."""
+
+    app = create_app(settings, cwe_evidence=cwe_evidence)
+
+    def scanner(request: ScanRequest) -> DeterministicScanResult:
+        relative_path = "src/app.py" if request.target.is_dir() else request.target.name
+        source = request.target / relative_path if request.target.is_dir() else request.target
+        assert source.is_file()
+        return DeterministicScanResult(
+            target_name=request.target_name or request.target.name,
+            findings=(
+                Finding(
+                    id="opengrep:synthetic-flow",
+                    rule_id="OPENGREP/CWE-95",
+                    category="code_pattern",
+                    severity=Severity.HIGH,
+                    file_path=relative_path,
+                    line_start=1,
+                    message="Untrusted input reaches dynamic evaluation.",
+                    redacted_evidence="[REDACTED: source omitted]",
+                    confidence=Confidence.HIGH,
+                    cwe_ids=("CWE-95",),
+                    remediation="Use a restricted parser.",
+                    engine="opengrep",
+                ),
+            ),
+        )
+
+    app.state.scan_service = ScanService(
+        app.state.report_repository,
+        graph_services=ScanGraphServices(
+            deterministic_scanner=scanner,
+            cwe_evidence=cwe_evidence if settings.auto_cwe_enabled else None,
+        ),
+    )
+    return app
+
+
 @pytest.fixture
 def app() -> FastAPI:
     return create_app(Settings(testing=True))
@@ -52,9 +101,9 @@ def client(app: FastAPI) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_file_scan_returns_redacted_report(client: TestClient) -> None:
+def test_file_scan_returns_redacted_report() -> None:
     token = "sk-test-1234567890abcdef"
-
+    client = TestClient(app_with_synthetic_finding(Settings(testing=True)))
     response = client.post(
         "/v1/scans/file",
         files={"file": ("settings.py", f'OPENAI_API_KEY="{token}"\n', "text/x-python")},
@@ -62,11 +111,12 @@ def test_file_scan_returns_redacted_report(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["target_name"] == "settings.py"
-    assert response.json()["findings"][0]["rule_id"] == "SEC001"
+    assert response.json()["findings"][0]["rule_id"] == "OPENGREP/CWE-95"
     assert token not in response.text
 
 
-def test_archive_scan_preserves_original_name_and_relative_paths(client: TestClient) -> None:
+def test_archive_scan_preserves_original_name_and_relative_paths() -> None:
+    client = TestClient(app_with_synthetic_finding(Settings(testing=True)))
     response = client.post(
         "/v1/scans/archive",
         files={
@@ -165,7 +215,9 @@ def test_api_scan_prepares_official_cwe_for_detected_finding() -> None:
         seen.append(ids)
         return SimpleNamespace(references_by_id={"CWE-95": reference}, warnings=())
 
-    app = create_app(Settings(testing=True), cwe_evidence=SimpleNamespace(ensure=ensure))
+    app = app_with_synthetic_finding(
+        Settings(testing=True), cwe_evidence=SimpleNamespace(ensure=ensure)
+    )
     response = TestClient(app).post(
         "/v1/scans/file",
         files={"file": ("app.py", b"eval(user_input)\n", "text/x-python")},
@@ -183,7 +235,7 @@ def test_api_setting_disables_automatic_cwe_evidence() -> None:
     def forbidden(_ids: tuple[str, ...], **_kwargs: object) -> SimpleNamespace:
         pytest.fail("disabled API must not request official CWE evidence")
 
-    app = create_app(
+    app = app_with_synthetic_finding(
         Settings(testing=True, auto_cwe_enabled=False),
         cwe_evidence=SimpleNamespace(ensure=forbidden),
     )
@@ -193,7 +245,7 @@ def test_api_setting_disables_automatic_cwe_evidence() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["findings"][0]["rule_id"] == "PY001"
+    assert response.json()["findings"][0]["rule_id"] == "OPENGREP/CWE-95"
 
 
 @pytest.mark.parametrize(

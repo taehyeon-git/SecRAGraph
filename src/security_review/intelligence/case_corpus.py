@@ -1,8 +1,8 @@
-"""Select bounded official CWE evidence from evaluation cases and scanner rules.
+"""Select bounded official CWE evidence from explicit evaluation labels.
 
 Downloaded CWE fields are external evidence, never instructions. No source code,
 question text, or secret is sent to MITRE; the only variable URL component is a
-validated CWE number from checked-in labels or rule metadata.
+validated CWE number from checked-in case labels.
 """
 
 from __future__ import annotations
@@ -23,10 +23,8 @@ from typing import Literal
 import httpx
 
 from security_review.evaluation.offline_rag import load_rag_cases
-from security_review.evaluation.scanner_models import load_scanner_cases
 from security_review.intelligence.ingestion import _has_link_like_component
 from security_review.intelligence.manifest import ManifestError, load_verified_corpus
-from security_review.scanner.rules import DEFAULT_RULES
 
 CorpusStatus = Literal["official", "cached", "fallback"]
 
@@ -43,6 +41,7 @@ _MAX_TOTAL_DOCUMENT_BYTES = 8_000_000
 _STARTUP_DEADLINE_SECONDS = 90.0
 _MAX_CACHE_JSON_BYTES = 32_000
 _ID_PATTERN = re.compile(r"CWE-([1-9][0-9]{0,5})\Z")
+_CASE_ID_PATTERN = re.compile(r"[a-z][a-z0-9-]{0,100}\Z")
 _HEX_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _SNAPSHOT_PATTERN = re.compile(r"[0-9a-f]{12}\Z")
 _VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){1,2}\Z")
@@ -99,24 +98,40 @@ def _cwe_sort_key(cwe_id: str) -> int:
 
 
 def _select_case_cwes(repo_root: Path) -> _Selection:
-    rules = {rule.rule_id: rule for rule in DEFAULT_RULES}
+    case_path = repo_root / "data/evaluation/multiengine_cases.json"
+    with case_path.open("rb") as source:
+        body = source.read(5_000_001)
+    if len(body) > 5_000_000:
+        raise ValueError("case_manifest_too_large")
+    manifest = json.loads(body.decode("utf-8"))
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 1
+        or not isinstance(manifest.get("cases"), list)
+    ):
+        raise ValueError("invalid_case_manifest")
     scanner_cases: dict[str, list[str]] = {}
-    for case in load_scanner_cases(repo_root / "data/evaluation/scanner_cases.json"):
-        ids: set[str] = set()
-        for rule_id, _line in case.expected:
-            rule = rules.get(rule_id)
-            if rule is None:
-                raise ValueError("unknown_case_rule_id")
-            ids.update(rule.cwe_ids)
-        scanner_cases[case.case_id] = sorted(ids, key=_cwe_sort_key)
+    for case in manifest["cases"]:
+        if not isinstance(case, dict):
+            raise ValueError("invalid_case")
+        case_id = case.get("case_id")
+        raw_ids = case.get("cwe_ids")
+        if (
+            not isinstance(case_id, str)
+            or not _CASE_ID_PATTERN.fullmatch(case_id)
+            or case_id in scanner_cases
+            or not isinstance(raw_ids, list)
+            or any(not isinstance(item, str) for item in raw_ids)
+        ):
+            raise ValueError("invalid_case_cwe_labels")
+        scanner_cases[case_id] = sorted(set(raw_ids), key=_cwe_sort_key)
 
     rag_cases: dict[str, list[str]] = {}
     for rag_case in load_rag_cases(repo_root / "data/evaluation/rag_cases.json"):
         rag_cases[rag_case.case_id] = sorted(set(rag_case.knowledge_cwe_ids), key=_cwe_sort_key)
 
     selected_ids = sorted(
-        {cwe_id for labels in (*scanner_cases.values(), *rag_cases.values()) for cwe_id in labels}
-        | {cwe_id for rule in DEFAULT_RULES for cwe_id in rule.cwe_ids},
+        {cwe_id for labels in (*scanner_cases.values(), *rag_cases.values()) for cwe_id in labels},
         key=_cwe_sort_key,
     )
     if not selected_ids or len(selected_ids) > _MAX_CWE_IDS:

@@ -61,8 +61,8 @@ def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_push() -> 
     assert set(uploads[0]["with"]["path"].splitlines()) == {
         "build/evidence/rag.json",
         "build/evidence/rag.md",
-        "build/evidence/scanner.json",
-        "build/evidence/scanner.md",
+        "build/evidence/multiengine-scanner.json",
+        "build/evidence/multiengine-scanner.md",
     }
     assert uploads[0]["with"]["if-no-files-found"] == "error"
 

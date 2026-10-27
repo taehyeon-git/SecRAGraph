@@ -37,23 +37,24 @@ from security_review.storage.memory import InMemoryReportRepository
 
 def _finding(
     *,
-    identifier: str = "PY001:stable",
+    identifier: str = "OG:stable",
     path: str = "src/app.py",
     severity: Severity = Severity.HIGH,
 ) -> Finding:
     return Finding(
         id=identifier,
-        rule_id="PY001",
-        category="code_pattern",
+        rule_id="OG/python-eval-flow",
+        category="sast",
         severity=severity,
         file_path=path,
         line_start=4,
         line_end=4,
-        message="Dynamic evaluation detected.",
-        redacted_evidence="eval(***REDACTED***)",
+        message="Untrusted input reaches dynamic evaluation.",
+        redacted_evidence="[source omitted]",
         confidence=Confidence.HIGH,
         cwe_ids=("CWE-95",),
         remediation="Use an explicit parser.",
+        engine="opengrep",
     )
 
 
@@ -632,7 +633,7 @@ def test_empty_retrieval_never_calls_the_model_or_adds_a_warning() -> None:
 
 def test_enrichment_calls_are_hard_capped_and_remaining_findings_survive() -> None:
     findings = tuple(
-        _finding(identifier=f"PY001:{index}", path=f"src/{index}.py") for index in range(3)
+        _finding(identifier=f"OG:{index}", path=f"src/{index}.py") for index in range(3)
     )
     retriever = FakeDocumentRetriever(results=(_chunk(),))
 
@@ -828,7 +829,7 @@ def test_cross_phase_provider_capabilities_expose_adapter_bugs(
 
 def test_first_known_failure_stops_followup_provider_calls() -> None:
     findings = tuple(
-        _finding(identifier=f"PY001:{index}", path=f"src/{index}.py") for index in range(3)
+        _finding(identifier=f"OG:{index}", path=f"src/{index}.py") for index in range(3)
     )
     retriever = FakeDocumentRetriever(
         failure=IntelligenceUnavailableError("qdrant", "search_failed")
@@ -899,8 +900,10 @@ def test_injected_report_builder_cannot_replace_graph_findings() -> None:
         target_name: str,
         findings: Sequence[Finding],
         warnings: Sequence[str] = (),
+        *,
+        executions: Sequence[object] = (),
     ) -> object:
-        report = build_report(target_name, findings, warnings)
+        report = build_report(target_name, findings, warnings, executions=executions)
         return report.model_copy(update={"findings": (_finding(identifier="forged"),)})
 
     with pytest.raises(ScanWorkflowError, match="invalid_report"):

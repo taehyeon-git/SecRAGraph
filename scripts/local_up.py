@@ -197,6 +197,18 @@ def _start_compose(
         env=environment,
         timeout=900,
     )
+    tool_check = (
+        "import shutil, sys; "
+        "required = ('opengrep', 'gitleaks', 'checkov'); "
+        "sys.exit(0 if all(shutil.which(name) for name in required) else 2)"
+    )
+    _checked_run(
+        [*prefix, "exec", "-T", "api", "/app/.venv/bin/python", "-c", tool_check],
+        stage="Scanner tool availability",
+        cwd=repo_root,
+        env=environment,
+        timeout=30,
+    )
 
 
 def _stop_api_web(
@@ -293,7 +305,7 @@ def _prepare_corpus(repo_root: Path, *, offline: bool) -> PreparedCorpus:
 
 
 def _run_evaluations(repo_root: Path) -> None:
-    """Publish scanner and fixed-guide RAG evidence before starting the stack."""
+    """Publish fixed-guide RAG evidence before starting the stack."""
 
     output_dir = repo_root / "build" / "evidence"
     temporary = repo_root / "build" / "local" / "tmp"
@@ -302,17 +314,13 @@ def _run_evaluations(repo_root: Path) -> None:
         temporary.chmod(0o700)
     environment = os.environ.copy()
     environment.update({name: str(temporary) for name in ("TMPDIR", "TEMP", "TMP")})
-    for module, stage in (
-        ("scripts.run_scanner_benchmark", "Offline scanner evaluation"),
-        ("scripts.run_rag_evidence", "Fixed-guide offline RAG evaluation"),
-    ):
-        _checked_run(
-            [sys.executable, "-m", module, "--output-dir", str(output_dir)],
-            stage=stage,
-            cwd=repo_root,
-            env=environment,
-            timeout=180,
-        )
+    _checked_run(
+        [sys.executable, "-m", "scripts.run_rag_evidence", "--output-dir", str(output_dir)],
+        stage="Fixed-guide offline RAG evaluation",
+        cwd=repo_root,
+        env=environment,
+        timeout=180,
+    )
 
 
 def _port(environment: Mapping[str, str], name: str, default: int) -> int:
@@ -537,7 +545,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(f"Corpus provenance: {corpus.status} ({corpus.document_count} documents).")
         print(f"Case coverage: {corpus.coverage_path}")
-        print("Offline scanner evidence and fixed-guide RAG evidence: build/evidence/")
+        print("Fixed-guide RAG evidence: build/evidence/")
         print(f"API: http://127.0.0.1:{_port(environment, 'API_PORT', 8000)}")
         print(f"Web: http://127.0.0.1:{_port(environment, 'WEB_PORT', 8501)}")
         return 0

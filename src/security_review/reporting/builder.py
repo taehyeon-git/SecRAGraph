@@ -8,10 +8,16 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from security_review import __version__
-from security_review.domain.models import Finding, ReportSummary, ScanReport, ScanStatus
+from security_review.domain.models import (
+    Finding,
+    ReportSummary,
+    ScanExecution,
+    ScanReport,
+    ScanStatus,
+)
 from security_review.domain.risk import calculate_risk
 
-RULE_SET_VERSION = "2026.10.4"
+RULE_SET_VERSION = "2026.10.27-multiengine.1"
 
 
 def _finding_key(finding: Finding) -> tuple[str, int, str, str]:
@@ -55,15 +61,25 @@ def build_report(
     target_name: str,
     findings: Sequence[Finding],
     warnings: Sequence[str] = (),
+    *,
+    executions: Sequence[ScanExecution] = (),
 ) -> ScanReport:
     """Build the single report model consumed by every output adapter."""
 
     ordered = normalize_findings(findings)
     ordered_warnings = normalize_warnings(warnings)
+    ordered_executions = tuple(executions)
+    incomplete_execution = any(
+        execution.status not in {"completed", "skipped"} for execution in ordered_executions
+    )
     return ScanReport(
         scan_id=uuid4(),
         created_at=datetime.now(UTC),
-        status=(ScanStatus.COMPLETED_WITH_WARNINGS if ordered_warnings else ScanStatus.COMPLETED),
+        status=(
+            ScanStatus.COMPLETED_WITH_WARNINGS
+            if ordered_warnings or incomplete_execution
+            else ScanStatus.COMPLETED
+        ),
         target_name=normalize_target_name(target_name),
         summary=ReportSummary.from_findings(ordered),
         risk=calculate_risk(ordered),
@@ -71,4 +87,5 @@ def build_report(
         warnings=ordered_warnings,
         tool_version=__version__,
         rule_set_version=RULE_SET_VERSION,
+        executions=ordered_executions,
     )

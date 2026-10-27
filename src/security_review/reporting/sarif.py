@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from security_review.domain.models import Finding, ScanReport, Severity
+from security_review.domain.models import Finding, ScanReport, Severity, TraceLocation
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 LEVELS: dict[Severity, str] = {
@@ -54,11 +54,27 @@ def _fingerprint(finding: Finding) -> str:
     # A source-free location identity avoids both evidence-derived hashes and
     # occurrence shifts when another finding is added earlier in the file.
     payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}"
-    if finding.rule_id == "OSV001":
-        # A lockfile has many coordinates and advisories but one stable location.
+    if finding.rule_id == "OSV001" or finding.engine != "secragraph" or finding.trace:
+        # Distinct advisories or flows can share a sink location.
         payload += f"\0{finding.id}"
     encoded = payload.encode()
     return sha256(encoded).hexdigest()
+
+
+def _flow_location(location: TraceLocation, path_prefix: str) -> dict[str, Any]:
+    source_path = (PurePosixPath(path_prefix) / location.file_path).as_posix()
+    region = {"startLine": location.line_start}
+    if location.line_end is not None:
+        region["endLine"] = location.line_end
+    return {
+        "location": {
+            "physicalLocation": {
+                "artifactLocation": {"uri": quote(source_path, safe="/-._~")},
+                "region": region,
+            }
+        },
+        "properties": {"role": location.role},
+    }
 
 
 def _osv_advisory_url(finding: Finding) -> str | None:
@@ -95,6 +111,7 @@ def _result(
     message = {"text": finding.message}
     properties = {
         "findingId": finding.id,
+        "engine": finding.engine,
         "category": finding.category,
         "confidence": finding.confidence.value,
         "cweIds": list(finding.cwe_ids),
@@ -107,7 +124,7 @@ def _result(
             f"{_escaped_markdown_text(finding.message)} [Open OSV advisory]({osv_url})"
         )
         properties["osvAdvisoryUrl"] = osv_url
-    return {
+    result = {
         "ruleId": finding.rule_id,
         "ruleIndex": rule_index,
         "level": LEVELS[finding.severity],
@@ -125,6 +142,19 @@ def _result(
         "partialFingerprints": {"primaryLocationLineHash": fingerprint},
         "properties": properties,
     }
+    if finding.trace:
+        result["codeFlows"] = [
+            {
+                "threadFlows": [
+                    {
+                        "locations": [
+                            _flow_location(location, path_prefix) for location in finding.trace
+                        ]
+                    }
+                ]
+            }
+        ]
+    return result
 
 
 def render_sarif(report: ScanReport, *, path_prefix: str = "") -> str:
@@ -152,6 +182,17 @@ def render_sarif(report: ScanReport, *, path_prefix: str = "") -> str:
     notifications = [
         {"level": "warning", "message": {"text": warning}} for warning in report.warnings
     ]
+    for execution in report.executions:
+        if execution.status not in {"completed", "skipped"}:
+            notification = f"{execution.engine} ({execution.kind}): {execution.status}"
+            if execution.reason is not None:
+                notification += f" ({execution.reason})"
+            notifications.append(
+                {
+                    "level": "error" if execution.status == "error" else "warning",
+                    "message": {"text": notification},
+                }
+            )
     payload = {
         "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
@@ -167,10 +208,18 @@ def render_sarif(report: ScanReport, *, path_prefix: str = "") -> str:
                 "results": results,
                 "invocations": [
                     {
-                        "executionSuccessful": True,
+                        "executionSuccessful": all(
+                            execution.status in {"completed", "skipped"}
+                            for execution in report.executions
+                        ),
                         "toolExecutionNotifications": notifications,
                     }
                 ],
+                "properties": {
+                    "scannerExecutions": [
+                        execution.model_dump(mode="json") for execution in report.executions
+                    ]
+                },
             }
         ],
     }

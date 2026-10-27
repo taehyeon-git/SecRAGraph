@@ -1,0 +1,55 @@
+rules:
+  - id: python-web-command-taint
+    languages: [python]
+    mode: taint
+    severity: ERROR
+    message: Untrusted web request data reaches a shell command.
+    metadata:
+      cwe: CWE-78
+      shortDescription: Web input reaches shell execution
+    pattern-sources:
+      - pattern: $REQUEST.query_params.get(...)
+      - pattern: $REQUEST.query_params[...]
+      - pattern: $REQUEST.args.get(...)
+      - pattern: $REQUEST.form.get(...)
+      - pattern: request.headers.get(...)
+      - pattern: $REQUEST.GET.get(...)
+      - pattern: $REQUEST.POST.get(...)
+    pattern-sinks:
+      - patterns:
+          - pattern: subprocess.run($COMMAND, ..., shell=True, ...)
+          - focus-metavariable: $COMMAND
+      - patterns:
+          - pattern: subprocess.Popen($COMMAND, ..., shell=True, ...)
+          - focus-metavariable: $COMMAND
+      - patterns:
+          - pattern: os.system($COMMAND)
+          - focus-metavariable: $COMMAND
+    pattern-sanitizers:
+      - pattern: int(...)
+
+  - id: python-web-sql-taint
+    languages: [python]
+    mode: taint
+    severity: ERROR
+    message: Untrusted web request data reaches a SQL query string.
+    metadata:
+      cwe: CWE-89
+      shortDescription: Web input reaches SQL query text
+    pattern-sources:
+      - pattern: $REQUEST.query_params.get(...)
+      - pattern: $REQUEST.query_params[...]
+      - pattern: $REQUEST.args.get(...)
+      - pattern: $REQUEST.form.get(...)
+      - pattern: request.headers.get(...)
+      - pattern: $REQUEST.GET.get(...)
+      - pattern: $REQUEST.POST.get(...)
+    pattern-sinks:
+      - patterns:
+          - pattern: $CURSOR.execute($QUERY, ...)
+          - focus-metavariable: $QUERY
+      - patterns:
+          - pattern: $CURSOR.executemany($QUERY, ...)
+          - focus-metavariable: $QUERY
+    pattern-sanitizers:
+      - pattern: int(...)

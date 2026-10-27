@@ -10,7 +10,7 @@ from scripts.validate_sarif import validate_sarif
 
 
 def make_sarif(
-    uri: str = "src/app.py", fingerprint: str = "PY001:stable", line: int = 3
+    uri: str = "src/app.py", fingerprint: str = "OG:stable", line: int = 3
 ) -> dict[str, object]:
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -20,7 +20,7 @@ def make_sarif(
                 "tool": {"driver": {"name": "SecRAGraph"}},
                 "results": [
                     {
-                        "ruleId": "PY001",
+                        "ruleId": "OG/python-eval-flow",
                         "partialFingerprints": {"primaryLocationLineHash": fingerprint},
                         "locations": [
                             {
@@ -121,13 +121,13 @@ def test_validator_rejects_duplicate_fingerprints(tmp_path: Path) -> None:
     payload = make_sarif()
     result = payload["runs"][0]["results"][0]  # type: ignore[index]
     payload["runs"][0]["results"].append(result)  # type: ignore[index]
-    assert check(tmp_path, payload) == ("duplicate primaryLocationLineHash: PY001:stable",)
+    assert check(tmp_path, payload) == ("duplicate primaryLocationLineHash: OG:stable",)
 
 
 def test_validator_requires_recognized_fingerprint(tmp_path: Path) -> None:
     payload = make_sarif()
     result = payload["runs"][0]["results"][0]  # type: ignore[index]
-    result["partialFingerprints"] = {"findingId": "PY001:stable"}
+    result["partialFingerprints"] = {"findingId": "OG:stable"}
     assert check(tmp_path, payload) == ("result 0 missing primaryLocationLineHash",)
 
 

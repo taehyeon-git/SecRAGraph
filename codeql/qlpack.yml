@@ -1,0 +1,4 @@
+name: secragraph/codeql-flow-demo
+version: 0.0.1
+dependencies:
+  codeql/python-all: "*"

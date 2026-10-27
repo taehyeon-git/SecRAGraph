@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from alembic import command
@@ -10,13 +11,19 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from security_review.domain.models import Confidence, Finding, Severity
+from security_review.domain.models import (
+    Confidence,
+    Finding,
+    ScanExecution,
+    Severity,
+    TraceLocation,
+)
 from security_review.ports import ReportRepositoryError
 from security_review.reporting.builder import build_report
 from security_review.reporting.json_report import render_json
 from security_review.reporting.markdown import render_markdown
 from security_review.reporting.sarif import render_sarif
-from security_review.scanner.engine import scan_text
+from security_review.scanner.external_detectors import _parse_gitleaks
 from security_review.storage.database import create_session_factory
 from security_review.storage.reports import SqlAlchemyReportRepository
 
@@ -32,9 +39,9 @@ def database_url() -> str:
 
 def sample_finding() -> Finding:
     return Finding(
-        id="PY001:stable",
-        rule_id="PY001",
-        category="code_pattern",
+        id="OG:stable",
+        rule_id="OG/python-eval-flow",
+        category="sast",
         severity=Severity.HIGH,
         file_path="src/app.py",
         line_start=4,
@@ -43,6 +50,7 @@ def sample_finding() -> Finding:
         confidence=Confidence.HIGH,
         cwe_ids=("CWE-95",),
         remediation="Use an explicit parser.",
+        engine="opengrep",
     )
 
 
@@ -76,11 +84,60 @@ def test_postgres_repository_round_trips_canonical_report(
     assert repository.get(report.scan_id) == report
 
 
-def test_persisted_scan_never_restores_unrecognized_source_line_content(
+def test_postgres_repository_round_trips_execution_coverage_and_trace(
     session_factory: sessionmaker[Session],
 ) -> None:
+    finding = sample_finding().model_copy(
+        update={
+            "engine": "opengrep",
+            "trace": (
+                TraceLocation(file_path="src/route.py", line_start=2, role="source"),
+                TraceLocation(file_path="src/app.py", line_start=4, role="sink"),
+            ),
+        }
+    )
+    execution = ScanExecution(
+        engine="opengrep",
+        kind="sast",
+        status="partial",
+        version="1.32.0",
+        elapsed_ms=123,
+        eligible_files=("src/route.py", "src/app.py"),
+        scanned_files=("src/app.py",),
+        languages=("python",),
+        checks=("OG/taint",),
+        reason="scan_partial",
+    )
+    report = build_report("repo", [finding], executions=(execution,))
+    repository = SqlAlchemyReportRepository(session_factory)
+
+    repository.save(report)
+
+    assert repository.get(report.scan_id) == report
+
+
+def test_persisted_scan_never_restores_unrecognized_source_line_content(
+    session_factory: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
     canary = "opaque-canary-12345"
-    report = build_report("app.py", scan_text("app.py", f"eval(value) # {canary}"))
+    (tmp_path / "app.py").write_text(f"API_KEY={canary}\n", encoding="utf-8")
+    findings = _parse_gitleaks(
+        [
+            {
+                "RuleID": "generic-api-key",
+                "File": "app.py",
+                "StartLine": 1,
+                "EndLine": 1,
+                "StartColumn": 1,
+                "Secret": canary,
+                "Match": f"API_KEY={canary}",
+            }
+        ],
+        tmp_path,
+        frozenset({"app.py"}),
+    )
+    report = build_report("app.py", findings)
     repository = SqlAlchemyReportRepository(session_factory)
 
     repository.save(report)

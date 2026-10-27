@@ -18,23 +18,34 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
+COPY infra/scanners/checkov-requirements.txt /tmp/checkov-requirements.txt
+RUN uv venv /opt/checkov-venv \
+    && uv pip sync --python /opt/checkov-venv/bin/python --require-hashes --strict /tmp/checkov-requirements.txt
+
+ARG TARGETARCH
+COPY infra/scanners/install_tools.py /tmp/install_scanner_tools.py
+RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
+
 
 FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS runtime
 
-ENV PATH="/app/.venv/bin:${PATH}" \
+ENV PATH="/opt/scanners:/opt/checkov-venv/bin:/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TMPDIR=/tmp/secragraph \
+    SECRAGRAPH_SNAPSHOT_TMPDIR=/tmp/secragraph-snapshots \
     HOME=/tmp/secragraph \
     XDG_CACHE_HOME=/tmp/secragraph/.cache
 WORKDIR /app
 
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /tmp/secragraph \
-    && chown app:app /tmp/secragraph
+    && mkdir -p /tmp/secragraph /tmp/secragraph-snapshots \
+    && chown app:app /tmp/secragraph /tmp/secragraph-snapshots
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
+COPY --from=builder --chown=app:app /opt/checkov-venv /opt/checkov-venv
+COPY --from=builder --chown=app:app /opt/scanners /opt/scanners
 COPY --chown=app:app apps ./apps
 COPY --chown=app:app data ./data
 COPY --chown=app:app migrations ./migrations

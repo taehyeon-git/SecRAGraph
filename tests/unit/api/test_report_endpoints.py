@@ -8,8 +8,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from security_review.api.app import create_app
+from security_review.application import ScanService
 from security_review.config import Settings
-from security_review.domain.models import ScanReport
+from security_review.domain.models import Confidence, Finding, ScanReport, Severity
+from security_review.orchestrator.scan_graph import (
+    DeterministicScanResult,
+    ScanGraphServices,
+    ScanRequest,
+)
 from security_review.ports import ReportRepositoryError
 
 
@@ -41,7 +47,33 @@ def repository() -> FakeReportRepository:
 
 @pytest.fixture
 def app(repository: FakeReportRepository) -> FastAPI:
-    return create_app(Settings(testing=True), reports=repository)
+    application = create_app(Settings(testing=True), reports=repository)
+
+    def scanner(request: ScanRequest) -> DeterministicScanResult:
+        return DeterministicScanResult(
+            target_name=request.target_name or request.target.name,
+            findings=(
+                Finding(
+                    id="opengrep:report-sample",
+                    rule_id="OPENGREP/CWE-95",
+                    category="code_pattern",
+                    severity=Severity.HIGH,
+                    file_path=request.target.name,
+                    line_start=1,
+                    message="Untrusted input reaches dynamic evaluation.",
+                    redacted_evidence="[REDACTED: source omitted]",
+                    confidence=Confidence.HIGH,
+                    cwe_ids=("CWE-95",),
+                    remediation="Use a restricted parser.",
+                    engine="opengrep",
+                ),
+            ),
+        )
+
+    application.state.scan_service = ScanService(
+        repository, graph_services=ScanGraphServices(deterministic_scanner=scanner)
+    )
+    return application
 
 
 @pytest.fixture
@@ -111,7 +143,7 @@ def test_markdown_and_sarif_render_the_same_persisted_report(client: TestClient)
     assert sarif.status_code == 200
     assert sarif.headers["content-type"].startswith("application/sarif+json")
     sarif_payload = json.loads(sarif.text)
-    assert sarif_payload["runs"][0]["results"][0]["ruleId"] == "PY001"
+    assert sarif_payload["runs"][0]["results"][0]["ruleId"] == "OPENGREP/CWE-95"
 
 
 def test_repository_failure_returns_typed_503_without_private_details() -> None:

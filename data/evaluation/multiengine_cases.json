@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "kind": "synthetic",
+    "name": "SecRAGraph multi-engine authored regression fixtures"
+  },
+  "cases": [
+    {
+      "case_id": "python-eval",
+      "cwe_ids": ["CWE-95"],
+      "files": [
+        {"path": "eval_positive.py", "source": "x = eval(input())\n"},
+        {"path": "eval_literal.py", "source": "x = eval(\"2+2\")\n"},
+        {"path": "eval_shadowed.py", "source": "def eval(value):\n    return value\nx = eval(input())\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python_eval_rule-eval", "file_path": "eval_positive.py", "expected_lines": [1]},
+        {"engine": "opengrep", "rule_id": "OG/python_eval_rule-eval", "file_path": "eval_literal.py", "expected_lines": []},
+        {"engine": "opengrep", "rule_id": "OG/python_eval_rule-eval", "file_path": "eval_shadowed.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-pickle",
+      "cwe_ids": ["CWE-502"],
+      "files": [
+        {"path": "pickle_positive.py", "source": "import pickle\nobj = pickle.loads(request_body)\n"},
+        {"path": "pickle_json.py", "source": "import json\nobj = json.loads(request_body)\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python_deserialization_rule-pickle", "file_path": "pickle_positive.py", "expected_lines": [2]},
+        {"engine": "opengrep", "rule_id": "OG/python_deserialization_rule-pickle", "file_path": "pickle_json.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-shell",
+      "cwe_ids": ["CWE-78"],
+      "files": [
+        {"path": "shell_positive.py", "source": "import subprocess\ncommand = input()\nsubprocess.run(command, shell=True)\n"},
+        {"path": "shell_list.py", "source": "import subprocess\nsubprocess.run(['echo', value], check=True)\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true", "file_path": "shell_positive.py", "expected_lines": [3]},
+        {"engine": "opengrep", "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true", "file_path": "shell_list.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-sql",
+      "cwe_ids": ["CWE-89"],
+      "files": [
+        {"path": "sql_concat.py", "source": "user_id = input()\ncursor.execute(\"SELECT * FROM users WHERE id = \" + user_id)\n"},
+        {"path": "sql_format.py", "source": "name = input()\ncursor.execute(\"SELECT * FROM users WHERE name = {}\".format(name))\n"},
+        {"path": "sql_fstring.py", "source": "name = input()\ncursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")\n"},
+        {"path": "sql_parameterized.py", "source": "name = input()\ncursor.execute(\"SELECT * FROM users WHERE name = ?\", (name,))\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "sql_concat.py", "expected_lines": [2]},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "sql_format.py", "expected_lines": [2]},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "sql_fstring.py", "expected_lines": [2]},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "sql_parameterized.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-yaml",
+      "cwe_ids": ["CWE-502"],
+      "files": [
+        {"path": "yaml_positive.py", "source": "import yaml\nvalue = yaml.load(request_body, Loader=yaml.Loader)\n"},
+        {"path": "yaml_safe.py", "source": "import yaml\nvalue = yaml.safe_load(request_body)\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python_deserialization_rule-yaml-load", "file_path": "yaml_positive.py", "expected_lines": [2]},
+        {"engine": "opengrep", "rule_id": "OG/python_deserialization_rule-yaml-load", "file_path": "yaml_safe.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "javascript-eval",
+      "cwe_ids": ["CWE-95"],
+      "files": [
+        {"path": "js_eval_positive.js", "source": "const value = eval(req.query.code);\n"},
+        {"path": "js_eval_json.js", "source": "const value = JSON.parse(req.query.code);\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/javascript_eval_rule-eval-with-expression", "file_path": "js_eval_positive.js", "expected_lines": [1]},
+        {"engine": "opengrep", "rule_id": "OG/javascript_eval_rule-eval-with-expression", "file_path": "js_eval_json.js", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "react-xss",
+      "cwe_ids": ["CWE-79"],
+      "files": [
+        {"path": "react_positive.jsx", "source": "export const Example = ({ value }) => <div dangerouslySetInnerHTML={{ __html: value }} />;\n"},
+        {"path": "react_escaped.jsx", "source": "export const Example = ({ value }) => <div>{value}</div>;\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/javascript_react_rule-dangerouslysetinnerhtml", "file_path": "react_positive.jsx", "expected_lines": [1]},
+        {"engine": "opengrep", "rule_id": "OG/javascript_react_rule-dangerouslysetinnerhtml", "file_path": "react_escaped.jsx", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "generic-secret",
+      "cwe_ids": ["CWE-798"],
+      "files": [
+        {"path": "secret.env", "source": "MY_API_KEY=S3cr3t-X9a2Q7b5R8c1\n"},
+        {"path": "example.env", "source": "MY_API_KEY=example-placeholder\n"}
+      ],
+      "assessments": [
+        {"engine": "gitleaks", "rule_id": "GITLEAKS/generic-api-key", "file_path": "secret.env", "expected_lines": [1]},
+        {"engine": "gitleaks", "rule_id": "GITLEAKS/generic-api-key", "file_path": "example.env", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "terraform-open-ssh",
+      "cwe_ids": [],
+      "files": [
+        {"path": "open.tf", "source": "resource \"aws_security_group\" \"web\" {\n  name = \"synthetic-web\"\n  ingress {\n    from_port = 22\n    to_port = 22\n    protocol = \"tcp\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n"},
+        {"path": "restricted.tf", "source": "resource \"aws_security_group\" \"web\" {\n  name = \"synthetic-web\"\n  ingress {\n    from_port = 22\n    to_port = 22\n    protocol = \"tcp\"\n    cidr_blocks = [\"10.0.0.0/8\"]\n  }\n}\n"}
+      ],
+      "assessments": [
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_24", "file_path": "open.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_24", "file_path": "restricted.tf", "expected_lines": []},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_23", "file_path": "open.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_23", "file_path": "restricted.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV2_AWS_5", "file_path": "open.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV2_AWS_5", "file_path": "restricted.tf", "expected_lines": [1]}
+      ]
+    },
+    {
+      "case_id": "terraform-s3",
+      "cwe_ids": [],
+      "files": [
+        {"path": "bucket.tf", "source": "resource \"aws_s3_bucket\" \"app\" {\n  bucket = \"demo-synthetic-only\"\n}\n"}
+      ],
+      "assessments": [
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV2_AWS_62", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV2_AWS_61", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_145", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_144", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_18", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV2_AWS_6", "file_path": "bucket.tf", "expected_lines": [1]},
+        {"engine": "checkov", "rule_id": "CHECKOV/CKV_AWS_21", "file_path": "bucket.tf", "expected_lines": [1]}
+      ]
+    },
+    {
+      "case_id": "python-web-command-flow",
+      "cwe_ids": ["CWE-78"],
+      "files": [
+        {"path": "python_command_positive.py", "source": "import subprocess\n\n\ndef relay(value):\n    return f\"echo {value}\"\n\n\ndef vulnerable(request):\n    command = request.query_params.get(\"cmd\")\n    subprocess.run(relay(command), shell=True)\n"},
+        {"path": "python_numeric_safe.py", "source": "import subprocess\n\ndef safe_numeric(request):\n    value = int(request.query_params.get(\"id\"))\n    subprocess.run(f\"echo {value}\", shell=True)\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python-web-command-taint", "file_path": "python_command_positive.py", "expected_lines": [10], "expected_trace": {"source_file": "python_command_positive.py", "source_line": 9, "sink_file": "python_command_positive.py", "sink_line": 10, "required_steps": [{"file": "python_command_positive.py", "line": 4}]}},
+        {"engine": "opengrep", "rule_id": "OG/python-web-command-taint", "file_path": "python_numeric_safe.py", "expected_lines": []},
+        {"engine": "opengrep", "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true", "file_path": "python_command_positive.py", "expected_lines": [10]},
+        {"engine": "opengrep", "rule_id": "OG/python_exec_rule-subprocess-popen-shell-true", "file_path": "python_numeric_safe.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-web-sql-flow",
+      "cwe_ids": ["CWE-89"],
+      "files": [
+        {"path": "python_sql_positive.py", "source": "def sql_vulnerable(request, cursor):\n    value = request.query_params.get(\"id\")\n    cursor.execute(f\"SELECT * FROM users WHERE id = '{value}'\")\n"},
+        {"path": "python_sql_safe.py", "source": "def sql_parameterized(request, cursor):\n    value = request.query_params.get(\"id\")\n    cursor.execute(\"SELECT * FROM users WHERE id = %s\", (value,))\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "python_sql_positive.py", "expected_lines": [3], "expected_trace": {"source_file": "python_sql_positive.py", "source_line": 2, "sink_file": "python_sql_positive.py", "sink_line": 3, "required_steps": [{"file": "python_sql_positive.py", "line": 2}]}},
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "python_sql_safe.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "javascript-web-command-flow",
+      "cwe_ids": ["CWE-78"],
+      "files": [
+        {"path": "javascript_command_positive.js", "source": "const child_process = require('child_process');\n\nfunction relay(value) {\n  return `echo ${value}`;\n}\n\nfunction vulnerable(req) {\n  const command = req.query.cmd;\n  child_process.exec(relay(command));\n}\n"},
+        {"path": "javascript_numeric_safe.js", "source": "const child_process = require('child_process');\n\nfunction safeNumeric(req) {\n  const value = Number.parseInt(req.query.id, 10);\n  child_process.exec(`echo ${value}`);\n}\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/javascript-web-command-taint", "file_path": "javascript_command_positive.js", "expected_lines": [9], "expected_trace": {"source_file": "javascript_command_positive.js", "source_line": 8, "sink_file": "javascript_command_positive.js", "sink_line": 9, "required_steps": [{"file": "javascript_command_positive.js", "line": 3}]}},
+        {"engine": "opengrep", "rule_id": "OG/javascript-web-command-taint", "file_path": "javascript_numeric_safe.js", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "flask-header-sql-flow",
+      "cwe_ids": ["CWE-89"],
+      "files": [
+        {"path": "flask_header_sql_positive.py", "source": "from flask import request\n\n\ndef vulnerable(cursor):\n    tenant = request.headers.get(\"X-Tenant\")\n    cursor.execute(f\"SELECT * FROM users WHERE tenant = '{tenant}'\")\n"},
+        {"path": "flask_header_sql_safe.py", "source": "from flask import request\n\n\ndef safe(cursor):\n    tenant = request.headers.get(\"X-Tenant\")\n    cursor.execute(\"SELECT * FROM users WHERE tenant = %s\", (tenant,))\n"}
+      ],
+      "assessments": [
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_positive.py", "expected_lines": [6], "expected_trace": {"source_file": "flask_header_sql_positive.py", "source_line": 5, "sink_file": "flask_header_sql_positive.py", "sink_line": 6, "required_steps": [{"file": "flask_header_sql_positive.py", "line": 5}]}},
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_safe.py", "expected_lines": []}
+      ]
+    }
+  ]
+}

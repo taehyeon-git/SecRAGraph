@@ -1,34 +1,55 @@
-name: Security self-scan
+name: CodeQL security self-scan
 
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  self-scan:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "0.12.12"
-      - run: uv python install 3.11
-      - run: uv sync --frozen
-      - run: uv run security-review scan src --format sarif --output build/secragraph.sarif
-      - run: uv run python scripts/validate_sarif.py build/secragraph.sarif
-      - name: Upload SARIF
-        if: >-
-          github.event_name != 'pull_request' ||
-          (github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.user.login != 'dependabot[bot]')
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+          persist-credentials: false
+
+      # A JS/TS CodeQL database fails when this Python-first repository has no JS/TS files.
+      - name: Detect JavaScript and TypeScript source
+        id: javascript_source
+        if: matrix.language == 'javascript-typescript'
+        shell: bash
+        run: |
+          if git ls-files -z -- '*.js' '*.jsx' '*.mjs' '*.cjs' '*.ts' '*.tsx' '*.mts' '*.cts' | grep -qz .; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'No tracked JavaScript or TypeScript source; skipping this language.'
+          fi
+
+      - name: Initialize CodeQL
+        if: matrix.language == 'python' || steps.javascript_source.outputs.present == 'true'
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          sarif_file: build/secragraph.sarif
-          category: secragraph-self-scan
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+          queries: security-extended
+
+      - name: Analyze source
+        if: matrix.language == 'python' || steps.javascript_source.outputs.present == 'true'
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}

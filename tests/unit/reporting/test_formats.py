@@ -12,8 +12,8 @@ from security_review.reporting.types import ReportFormat, render_report
 
 def sample_finding() -> Finding:
     return Finding(
-        id="SEC001:stable",
-        rule_id="SEC001",
+        id="GITLEAKS:stable",
+        rule_id="GITLEAKS/generic-api-key",
         category="secret",
         severity=Severity.HIGH,
         file_path="src/settings.py",
@@ -23,6 +23,7 @@ def sample_finding() -> Finding:
         confidence=Confidence.HIGH,
         cwe_ids=("CWE-798",),
         remediation="Load the replacement from a secret store.",
+        engine="gitleaks",
     )
 
 
@@ -76,3 +77,64 @@ def test_render_report_dispatches_explicit_formats() -> None:
     assert render_report(report, ReportFormat.MARKDOWN) == render_markdown(report)
     with pytest.raises(ValueError, match="unsupported report format"):
         render_report(report, cast(ReportFormat, "xml"))
+
+
+def test_report_json_and_markdown_show_engine_coverage_and_source_to_sink() -> None:
+    from security_review.domain.models import ScanExecution, TraceLocation
+
+    finding = sample_finding().model_copy(
+        update={
+            "engine": "codeql",
+            "trace": (
+                TraceLocation(file_path="src/routes.py", line_start=4, role="source"),
+                TraceLocation(file_path="src/settings.py", line_start=7, role="sink"),
+            ),
+        }
+    )
+    execution = ScanExecution(
+        engine="codeql",
+        kind="sast",
+        status="completed",
+        version="2.23.0",
+        elapsed_ms=321,
+        eligible_files=("src/routes.py", "src/settings.py"),
+        scanned_files=("src/routes.py", "src/settings.py"),
+        languages=("python",),
+        checks=("security-extended",),
+    )
+    report = build_report("sample", [finding], executions=(execution,))
+
+    payload = json.loads(render_json(report))
+    rendered = render_markdown(report)
+    assert payload["executions"][0]["engine"] == "codeql"
+    assert payload["executions"][0]["scanned_files"] == ["src/routes.py", "src/settings.py"]
+    assert payload["findings"][0]["trace"][0] == {
+        "file_path": "src/routes.py",
+        "line_start": 4,
+        "line_end": None,
+        "role": "source",
+    }
+    assert "Scan coverage" in rendered
+    assert "security-extended" in rendered
+    assert "src/routes.py:4" in rendered
+    assert "src/settings.py:7" in rendered
+
+
+def test_markdown_distinguishes_gitleaks_submitted_files_from_confirmed_paths() -> None:
+    from security_review.domain.models import ScanExecution
+
+    execution = ScanExecution(
+        engine="gitleaks",
+        kind="secret",
+        status="completed",
+        version="8.30.1",
+        elapsed_ms=100,
+        eligible_files=("src/app.py",),
+        scanned_files=(),
+    )
+    rendered = render_markdown(build_report("sample", [], executions=(execution,)))
+
+    assert "Submitted files: 1" in rendered
+    assert "Confirmed finding paths: 0" in rendered
+    assert "does not provide an inspected-file inventory" in rendered
+    assert "Scanned files: 0" not in rendered
