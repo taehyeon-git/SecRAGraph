@@ -233,6 +233,7 @@ def test_runtime_env_persists_compose_mode_and_ports_without_provider_key(
             "SECRAGRAPH_QDRANT_VECTOR_DIMENSION": "768",
             "SECRAGRAPH_OPENAI_API_KEY": "secret-provider-key",
             "SECRAGRAPH_AUTO_OSV_ENABLED": "false",
+            "SECRAGRAPH_AUTO_CWE_ENABLED": "false",
         },
     )
     local_up._persist_compose_config(runtime, environment)
@@ -241,6 +242,7 @@ def test_runtime_env_persists_compose_mode_and_ports_without_provider_key(
     assert environment["SECRAGRAPH_OPENAI_API_KEY"] == "secret-provider-key"
     assert "SECRAGRAPH_QDRANT_COLLECTION=secragraph-auto-cwe\n" in content
     assert "SECRAGRAPH_AUTO_OSV_ENABLED=false\n" in content
+    assert "SECRAGRAPH_AUTO_CWE_ENABLED=false\n" in content
     assert "SECRAGRAPH_OPENAI_API_KEY=\n" in content
     assert "secret-provider-key" not in content
     assert "API_PORT=18000\n" in content
@@ -251,6 +253,7 @@ def test_runtime_env_persists_compose_mode_and_ports_without_provider_key(
     new_shell = local_up._compose_environment(reopened, {})
     assert new_shell["SECRAGRAPH_QDRANT_COLLECTION"] == "secragraph-auto-cwe"
     assert new_shell["SECRAGRAPH_AUTO_OSV_ENABLED"] == "false"
+    assert new_shell["SECRAGRAPH_AUTO_CWE_ENABLED"] == "false"
     assert new_shell["SECRAGRAPH_OPENAI_API_KEY"] == ""
     assert new_shell["API_PORT"] == "18000"
     assert new_shell["POSTGRES_PORT"] == "15432"
@@ -634,13 +637,16 @@ def test_offline_option_disables_provider_and_automatic_osv_even_with_key(
     )
     monkeypatch.setenv("SECRAGRAPH_OPENAI_API_KEY", "secret-provider-key")
     monkeypatch.setenv("SECRAGRAPH_AUTO_OSV_ENABLED", "true")
+    monkeypatch.setenv("SECRAGRAPH_AUTO_CWE_ENABLED", "true")
 
     assert local_up.main(["--offline"]) == 0
     assert offline_arguments == [True]
     assert compose_environments[0]["SECRAGRAPH_OPENAI_API_KEY"] == ""
     assert compose_environments[0]["SECRAGRAPH_AUTO_OSV_ENABLED"] == "false"
+    assert compose_environments[0]["SECRAGRAPH_AUTO_CWE_ENABLED"] == "false"
     persisted = (tmp_path / "build/local/runtime.env").read_text(encoding="utf-8")
     assert "SECRAGRAPH_AUTO_OSV_ENABLED=false\n" in persisted
+    assert "SECRAGRAPH_AUTO_CWE_ENABLED=false\n" in persisted
     assert "SECRAGRAPH_QDRANT_COLLECTION=secragraph-auto-cwe\n" in persisted
     assert "SECRAGRAPH_OPENAI_API_KEY=\n" in persisted
     output = capsys.readouterr().out
@@ -664,12 +670,12 @@ def test_normal_rerun_reenables_automatic_osv_after_offline_mode(
     )
     monkeypatch.setattr(local_up, "_prepare_corpus", lambda *_args, **_kwargs: corpus)
     monkeypatch.setattr(local_up, "_run_evaluations", lambda _root: None)
-    modes: list[str] = []
+    modes: list[tuple[str, str]] = []
     monkeypatch.setattr(
         local_up,
         "_start_compose",
         lambda _docker, _runtime, env, _root, _offline: modes.append(
-            env["SECRAGRAPH_AUTO_OSV_ENABLED"]
+            (env["SECRAGRAPH_AUTO_OSV_ENABLED"], env["SECRAGRAPH_AUTO_CWE_ENABLED"])
         ),
     )
     monkeypatch.setattr(local_up, "_seed_synthetic_samples", lambda *_args: None)
@@ -677,12 +683,16 @@ def test_normal_rerun_reenables_automatic_osv_after_offline_mode(
     monkeypatch.setattr(local_up, "_check_health", lambda *_args: None)
     monkeypatch.setattr(local_up, "_apply_corpus", lambda *_args: None)
     monkeypatch.delenv("SECRAGRAPH_AUTO_OSV_ENABLED", raising=False)
+    monkeypatch.delenv("SECRAGRAPH_AUTO_CWE_ENABLED", raising=False)
     monkeypatch.delenv("SECRAGRAPH_OPENAI_API_KEY", raising=False)
 
     assert local_up.main(["--offline"]) == 0
     assert local_up.main([]) == 0
-    assert modes == ["false", "true"]
+    assert modes == [("false", "false"), ("true", "true")]
     assert "SECRAGRAPH_AUTO_OSV_ENABLED=true\n" in (tmp_path / "build/local/runtime.env").read_text(
+        encoding="utf-8"
+    )
+    assert "SECRAGRAPH_AUTO_CWE_ENABLED=true\n" in (tmp_path / "build/local/runtime.env").read_text(
         encoding="utf-8"
     )
 

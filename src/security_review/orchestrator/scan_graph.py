@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
-from typing import Protocol, TypeAlias, TypedDict, cast
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypedDict, cast
 from urllib.parse import urlsplit
 
 from langgraph.graph import END, START, StateGraph
@@ -39,9 +39,13 @@ from security_review.reporting.builder import normalize_findings as normalize_re
 from security_review.reporting.builder import normalize_target_name, normalize_warnings
 from security_review.scanner.files import ScanLimits
 
+if TYPE_CHECKING:
+    from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
+
 MAX_QUERY_CHARACTERS = 2_000
 MAX_CHUNK_BYTES = 32_000
 MAX_EVIDENCE_BYTES = 128_000
+MAX_SCAN_CWE_IDS = 64
 PROCESSING_TIME_LIMIT_EXCEEDED = "processing_time_limit_exceeded"
 
 
@@ -138,6 +142,7 @@ class ScanGraphServices:
 
     deterministic_scanner: DeterministicScanner | None = None
     dependency_auditor: DependencyAuditor | None = None
+    cwe_evidence: CweEvidenceProvider | None = None
     retriever: SecurityDocumentRetriever | None = None
     chat_model: ChatModel | None = None
     report_builder: ReportBuilder = assemble_report
@@ -250,10 +255,11 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
         if PROCESSING_TIME_LIMIT_EXCEEDED in warnings:
             return {"findings": current}
 
-        limited = baseline[: services.max_enriched_findings]
-        if len(baseline) > len(limited):
+        current_by_id = {finding.id: finding for finding in current}
+        enriched = [current_by_id.get(finding.id, finding) for finding in baseline]
+        limited = enriched[: services.max_enriched_findings]
+        if len(enriched) > len(limited):
             warnings = _append_warning(warnings, "enrichment_finding_limit_reached")
-        enriched = list(baseline)
         active_phase = "rag"
         try:
             for index, finding in enumerate(limited):
@@ -302,6 +308,88 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             "findings": tuple(enriched_by_id.get(finding.id, finding) for finding in current),
             "warnings": warnings,
         }
+
+    def prepare_cwe_evidence(state: ScanState) -> ScanState:
+        current = _required_findings(state, "findings")
+        warnings = _required_warnings(state)
+        if services.cwe_evidence is None or not current:
+            return {"findings": current}
+        if PROCESSING_TIME_LIMIT_EXCEEDED in warnings:
+            return {"findings": current}
+
+        selected = tuple(dict.fromkeys(cwe_id for finding in current for cwe_id in finding.cwe_ids))
+        if len(selected) > MAX_SCAN_CWE_IDS:
+            warnings = _append_warning(warnings, "cwe_evidence_limit_reached")
+            selected = selected[:MAX_SCAN_CWE_IDS]
+        if not selected:
+            return {"findings": current, "warnings": warnings}
+        try:
+            _require_enrichment_time(state)
+        except _EnrichmentDeadlineReached:
+            return {
+                "findings": current,
+                "warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED),
+            }
+
+        request = state.get("request")
+        provider_deadline = None
+        if request is not None and request.deadline is not None:
+            remaining = request.deadline - request.clock()
+            provider_deadline = monotonic() + max(0.0, remaining)
+        try:
+            evidence = services.cwe_evidence.ensure(selected, deadline=provider_deadline)
+        except Exception:
+            return {
+                "findings": current,
+                "warnings": _append_warning(warnings, "cwe_evidence_unavailable"),
+            }
+        try:
+            _require_enrichment_time(state)
+        except _EnrichmentDeadlineReached:
+            return {
+                "findings": current,
+                "warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED),
+            }
+
+        try:
+            references_by_id = evidence.references_by_id
+            provider_warnings = evidence.warnings
+            valid_evidence = _valid_cwe_evidence_result(
+                references_by_id, provider_warnings, selected
+            )
+        except Exception:
+            valid_evidence = False
+        if not valid_evidence:
+            return {
+                "findings": current,
+                "warnings": _append_warning(warnings, "cwe_evidence_unavailable"),
+            }
+        for warning in provider_warnings:
+            warnings = _append_warning(warnings, warning)
+        updated: list[Finding] = []
+        try:
+            for finding in current:
+                official = tuple(
+                    references_by_id[cwe_id]
+                    for cwe_id in finding.cwe_ids
+                    if cwe_id in references_by_id
+                )
+                if not official:
+                    updated.append(finding)
+                    continue
+                updated.append(
+                    _rebuild_enriched_finding(
+                        finding,
+                        references=_merge_references(finding.references, official),
+                        remediation=finding.remediation,
+                    )
+                )
+        except Exception:
+            return {
+                "findings": current,
+                "warnings": _append_warning(warnings, "cwe_evidence_unavailable"),
+            }
+        return {"findings": tuple(updated), "warnings": warnings}
 
     def calculate_risk(state: ScanState) -> ScanState:
         findings = _required_findings(state, "findings")
@@ -371,6 +459,7 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
     builder.add_node("validate_input", validate_input)
     builder.add_node("deterministic_scan", deterministic_scan)
     builder.add_node("normalize_findings", normalize_findings)
+    builder.add_node("prepare_cwe_evidence", prepare_cwe_evidence)
     builder.add_node("retrieve_finding_evidence", retrieve_finding_evidence)
     builder.add_node("audit_dependencies", audit_dependencies)
     builder.add_node("calculate_risk", calculate_risk)
@@ -379,7 +468,8 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
     builder.add_edge("validate_input", "deterministic_scan")
     builder.add_edge("deterministic_scan", "normalize_findings")
     builder.add_edge("normalize_findings", "audit_dependencies")
-    builder.add_edge("audit_dependencies", "retrieve_finding_evidence")
+    builder.add_edge("audit_dependencies", "prepare_cwe_evidence")
+    builder.add_edge("prepare_cwe_evidence", "retrieve_finding_evidence")
     builder.add_edge("retrieve_finding_evidence", "calculate_risk")
     builder.add_edge("calculate_risk", "build_report")
     builder.add_edge("build_report", END)
@@ -525,6 +615,44 @@ def _merge_references(
         by_id[reference.id] = reference
         merged.append(reference)
     return tuple(merged)
+
+
+def _valid_cwe_evidence_result(
+    references_by_id: object,
+    warnings: object,
+    requested: tuple[str, ...],
+) -> bool:
+    """Reject malformed adapter output without exposing its content in a report."""
+
+    if not isinstance(references_by_id, Mapping) or len(references_by_id) > len(requested):
+        return False
+    if not isinstance(warnings, tuple) or any(
+        not isinstance(warning, str)
+        or warning
+        not in {"cwe_evidence_partial", "cwe_evidence_limit_reached", "cwe_evidence_unavailable"}
+        for warning in warnings
+    ):
+        return False
+    requested_set = set(requested)
+    for cwe_id, reference in references_by_id.items():
+        if (
+            not isinstance(cwe_id, str)
+            or cwe_id not in requested_set
+            or not cwe_id.startswith("CWE-")
+            or not cwe_id[4:].isdigit()
+            or not isinstance(reference, SourceReference)
+            or not isinstance(reference.id, str)
+            or not isinstance(reference.title, str)
+            or not reference.id.strip()
+            or not reference.title.strip()
+            or len(reference.id) > 1_024
+            or len(reference.title) > 320
+            or _contains_control(reference.id)
+            or _contains_control(reference.title)
+            or reference.source_url != f"https://cwe-api.mitre.org/api/v1/cwe/weakness/{cwe_id[4:]}"
+        ):
+            return False
+    return True
 
 
 def _rebuild_enriched_finding(

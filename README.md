@@ -8,7 +8,7 @@ SecRAGraph는 소스 코드를 실행하지 않고 정적 규칙으로 검사하
 
 보안 검토 결과는 재현 가능한 탐지와 출처가 분명한 설명이 함께 있어야 유용합니다. 이 프로젝트는 파일·ZIP·로컬 디렉터리에서 제한된 텍스트만 읽어 규칙 기반 finding을 만들고, 소스 줄 대신 규칙별 고정 증거 문구만 담은 보고서를 JSON, Markdown, SARIF 2.1.0으로 표현합니다. API, CLI, Streamlit 데모, CI가 같은 스캔 엔진을 사용합니다.
 
-실제 [데모 파일](examples/insecure/sample.py)을 CLI로 스캔한 JSON의 일부입니다. `scan_id`와 생성 시각은 실행마다 달라집니다.
+실제 [데모 파일](examples/insecure/sample.py)을 CLI `--offline`으로 스캔한 JSON의 일부입니다. `scan_id`와 생성 시각은 실행마다 달라집니다.
 
 ```json
 {
@@ -39,6 +39,8 @@ flowchart LR
   SG --> RULES[Deterministic scanner]
   SG --> LOCK[Exact lockfile coordinates]
   LOCK --> OSV[(OSV.dev)]
+  SG --> CWE[Finding CWE IDs]
+  CWE --> MITRE[(MITRE CWE API)]
   SG -. optional evidence references .-> QD[(Qdrant)]
   APP --> REPORT[Canonical report]
   REPORT --> PG[(PostgreSQL app schema)]
@@ -47,20 +49,24 @@ flowchart LR
   KG --> T2S[Guarded Text2SQL]
   T2S --> INTEL[(PostgreSQL intel.cwe / intel.cve)]
   KG --> RAG[RAG retrieval and answer]
+  KG --> TOPICS[Question CWE topics]
+  TOPICS --> MITRE
+  MITRE -. verified runtime corpus .-> QD
   RAG --> QD
 ```
 
-스캔 그래프는 탐지·위험 점수·수정 권고를 결정적으로 계산합니다. 설정된 경우 Qdrant가 finding에 문서 출처를 추가하지만 수정 권고 문구는 바꾸지 않습니다. PostgreSQL Text2SQL은 별도의 지식 질의 그래프에만 사용됩니다. CLI의 로컬 스캔은 모델 키나 데이터베이스 없이 동작하고, Compose의 API 스캔은 보고서 영속화를 위해 PostgreSQL을 사용합니다.
+스캔 그래프는 탐지·위험 점수·수정 권고를 결정적으로 계산합니다. finding에 CWE가 있으면 공식 MITRE 항목을 필요할 때 조회해 출처를 붙입니다. 설정된 경우 Qdrant도 문서 출처를 추가하지만 수정 권고 문구는 바꾸지 않습니다. PostgreSQL Text2SQL은 별도의 지식 질의 그래프에만 사용됩니다. CLI의 로컬 스캔은 모델 키나 데이터베이스 없이 동작하고, Compose의 API 스캔은 보고서 영속화를 위해 PostgreSQL을 사용합니다.
 
 ## LangGraph 워크플로
 
-스캔 경로: `validate_input → deterministic_scan → normalize_findings → audit_dependencies → retrieve_finding_evidence → calculate_risk → build_report`. OSV 조회를 선택적 RAG보다 먼저 실행해 RAG 지연 때문에 잠금 파일 검사를 놓치지 않습니다. Qdrant, 임베딩 제공자 또는 OSV를 사용할 수 없으면 확인된 finding은 유지하고 범위 경고를 기록합니다. 스캔 경로는 ChatModel이나 PostgreSQL Text2SQL을 호출하지 않습니다.
+스캔 경로: `validate_input → deterministic_scan → normalize_findings → audit_dependencies → prepare_cwe_evidence → retrieve_finding_evidence → calculate_risk → build_report`. 실제 finding의 중복 제거한 CWE ID를 보고 공식 문서가 없는 항목만 수집합니다. OSV와 CWE 조회를 선택적 RAG보다 먼저 실행합니다. 외부 조회·Qdrant·임베딩 제공자를 사용할 수 없어도 확인된 finding은 유지하고 범위 경고를 기록합니다. 스캔 경로는 ChatModel이나 PostgreSQL Text2SQL을 호출하지 않습니다.
 
-지식 질의 경로: `classify_intent`가 `general_answer`, `text2sql`, `vector_search` 중 하나를 고릅니다. RAG 경로는 `vector_search → evaluate_vector_results → [rewrite_query/retry | generate_grounded_answer | stop]`로 진행하며, 근거가 없으면 부족하다고 답합니다. 일반 설명 경로에는 저장된 문서 인용이 없으므로 근거 기반 답변으로 해석하면 안 됩니다. 자세한 노드와 인터페이스는 [아키텍처](docs/architecture.md)를 보세요.
+지식 질의 경로: 모델이 질의 유형과 관련 CWE 후보를 함께 고릅니다. 질문에 명시된 CWE ID가 있으면 이를 우선합니다. RAG 경로는 `prepare_cwe_evidence → vector_search → evaluate_vector_results → [rewrite_query/retry | generate_grounded_answer | stop]`로 진행합니다. 후보 ID는 MITRE 기록으로 확인한 뒤 검색에 쓰며, 근거가 없으면 부족하다고 답합니다. Text2SQL과 일반 설명은 이 수집 단계를 거치지 않습니다. 자세한 노드와 인터페이스는 [아키텍처](docs/architecture.md)를 보세요.
 
 ## RAG와 Text2SQL
 
-- 시작 파이프라인은 53개 스캐너 사례와 4개 RAG 질문의 검토된 CWE 라벨을 읽어 필요한 공식 MITRE CWE 항목만 자동 수집합니다. 수집 원문은 크기·출처·ID를 검사하고 SHA-256 manifest와 57개 사례의 연결 기록을 `build/auto-corpus`에 남깁니다. 네트워크 장애 때는 검증된 캐시를 재사용하거나 [동봉된 프로젝트 지침](data/knowledge/secragraph-security-guidelines.md)만 쓰면서 공식 근거 부재를 명시합니다. 관련 패키지·버전이 없는 평가 사례에서 CVE를 추정하지 않습니다. 제공자 키가 있으면 이 관리 코퍼스를 Qdrant에 적용하고, 키가 없으면 로컬 LangGraph 평가만 실행합니다. 추가 PDF는 자동 검색하지 않으며 [공식 PDF 코퍼스 절차](docs/official-corpus.md)에 따라 별도 검증·수집할 수 있습니다.
+- 시작 파이프라인은 현재 평가 자료인 스캐너 53개 사례·RAG 4개 질문 및 규칙의 CWE 라벨로 공식 MITRE 코퍼스를 준비합니다. 이 수치는 **평가 기준선의 크기**이며 실사용 수집 대상을 고정하지 않습니다. 이후 실제 스캔 finding이나 새 RAG 질문에서 다른 CWE가 필요하면 해당 공식 항목을 추가로 확인하고 수집합니다. 원문은 크기·출처·ID를 검사하고 SHA-256 manifest에 버전·출처를 기록합니다. 확인된 문서는 별도 런타임 코퍼스 ID로 관리하며, 임베딩 키가 있으면 Qdrant 검색에도 추가합니다. 키가 없으면 스캔 보고서에 공식 출처를 붙일 수 있지만 실제 모델 기반 RAG 답변은 사용할 수 없습니다. 외부 조회가 실패하면 확인된 finding은 유지하고 경고를 남깁니다. CWE에서 CVE를 추정하지 않습니다. 추가 PDF는 자동 검색하지 않으며 [공식 PDF 코퍼스 절차](docs/official-corpus.md)에 따라 별도 검증·수집할 수 있습니다.
+- 실사용 수집에는 요청당 스캔 CWE 64개, 질문 CWE 8개, 공식 응답 총 8 MB, 수집 시간 12초, 동시 조회 4개 등의 상한이 있습니다. 반복 조회는 검증된 항목별 캐시를 재사용하며 캐시 적중 때마다 MITRE 최신 버전을 확인하지는 않습니다. MITRE에는 CWE ID만 전달하고 업로드 코드나 질문 전문은 보내지 않습니다. 한도를 넘거나 일부 항목을 받지 못하면 범위 경고가 남습니다. CLI `--offline` 및 API `SECRAGRAPH_AUTO_CWE_ENABLED=false`로 자동 조회를 끌 수 있습니다.
 - Text2SQL은 모델이 만든 SQL을 SQLGlot AST로 검증한 뒤 `intel.cwe`와 `intel.cve`의 제한된 `SELECT`만 읽기 전용 역할로 실행합니다. 행 수·시간·재시도가 제한됩니다. [세부 통제](docs/text2sql-security.md)를 참고하세요.
 - [동봉된 CVE/CWE CSV](data/samples/README.md)는 합성 데모 데이터입니다. 실제 취약점 피드나 운영 환경의 지식 범위를 대변하지 않습니다. 공식 CWE 자동 수집과 별개로 유지합니다.
 
@@ -76,9 +82,9 @@ Python 3.11 이상, `uv`, Docker Desktop Linux 엔진 또는 Linux Docker 엔진
 uv run --frozen python -m scripts.local_up
 ```
 
-이 명령은 사례별 공식 CWE 코퍼스 준비, 키 없는 스캐너·RAG 평가, Docker Compose 빌드·마이그레이션·서비스 준비, 최초 회원 생성과 상태 확인을 이어서 실행합니다. DB 비밀번호는 Git에서 제외된 로컬 파일에 처음 한 번만 만들고 재실행 때 재사용합니다. 기존 PostgreSQL 볼륨은 있는데 암호 파일이 없다면 데이터 보호를 위해 멈추고 복구 방법을 안내합니다. API와 웹 UI는 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. 화면 `http://127.0.0.1:8501`에 생성한 회원으로 로그인하세요. [운영 문서](docs/operations.md)에 상태 확인·복구·종료 절차가 있습니다.
+이 명령은 현재 평가 사례와 규칙을 위한 공식 CWE 코퍼스 준비, 키 없는 스캐너·RAG 평가, Docker Compose 빌드·마이그레이션·서비스 준비, 최초 회원 생성과 상태 확인을 이어서 실행합니다. 서비스가 구동된 뒤에는 새 스캔 결과와 RAG 질문에 따라 필요한 CWE를 추가 수집합니다. DB 비밀번호는 Git에서 제외된 로컬 파일에 처음 한 번만 만들고 재실행 때 재사용합니다. 기존 PostgreSQL 볼륨은 있는데 암호 파일이 없다면 데이터 보호를 위해 멈추고 복구 방법을 안내합니다. API와 웹 UI는 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. 화면 `http://127.0.0.1:8501`에 생성한 회원으로 로그인하세요. [운영 문서](docs/operations.md)에 상태 확인·복구·종료 절차가 있습니다.
 
-로컬 CLI 스캔에는 모델 키·PostgreSQL·Qdrant가 필요하지 않습니다. 잠금 파일이 있으면 지원되는 정확한 패키지·버전을 OSV.dev에 자동 조회해 의존성 결과를 보강합니다. 외부 조회를 끄는 방법과 전송되는 좌표는 [OSV 설명](docs/osv.md)을 참고하세요.
+로컬 CLI 스캔에는 모델 키·PostgreSQL·Qdrant가 필요하지 않습니다. 잠금 파일이 있으면 지원되는 정확한 패키지·버전을 OSV.dev에 자동 조회하고, finding에 CWE ID가 있으면 해당 MITRE 문서의 공식 출처를 보강합니다. 외부 조회를 끄는 방법과 전송되는 정보는 [운영 문서](docs/operations.md#on-demand-cwe-evidence)와 [OSV 설명](docs/osv.md)을 참고하세요.
 
 ```powershell
 uv run security-review scan examples/insecure/sample.py --format markdown

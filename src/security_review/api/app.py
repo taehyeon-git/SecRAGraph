@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
+from tempfile import gettempdir
 
 from fastapi import FastAPI, Request, Response
 from qdrant_client import QdrantClient
@@ -33,6 +35,10 @@ from security_review.api.routes.vulnerabilities import OsvQueryer
 from security_review.api.routes.vulnerabilities import router as vulnerabilities_router
 from security_review.application import ScanService
 from security_review.config import Settings
+from security_review.intelligence.dynamic_cwe import (
+    CweEvidenceProvider,
+    LiveCweEvidenceProvider,
+)
 from security_review.intelligence.openai_adapters import OpenAIChatAdapter, OpenAIEmbeddingAdapter
 from security_review.intelligence.osv import LiveOsvClient
 from security_review.intelligence.qdrant_retriever import QdrantDocumentRetriever
@@ -79,6 +85,7 @@ def create_app(
     membership: MembershipManager | None = None,
     osv_client: OsvQueryer | None = None,
     dependency_auditor: DependencyAuditor | None = None,
+    cwe_evidence: CweEvidenceProvider | None = None,
 ) -> FastAPI:
     """Create an isolated API instance for production or tests."""
 
@@ -147,6 +154,7 @@ def create_app(
     app.state.readiness_probe = readiness_probe
     app.state.report_repository = report_repository
     scan_graph_services: ScanGraphServices | None = None
+    runtime_retriever: QdrantDocumentRetriever | None = None
     if configured.intelligence_database_url and qdrant_client is not None:
         has_openai_key = bool(
             configured.openai_api_key and configured.openai_api_key.get_secret_value().strip()
@@ -174,6 +182,12 @@ def create_app(
                 min_score=configured.qdrant_min_score,
                 max_search_limit=configured.qdrant_search_limit,
             )
+            runtime_retriever = retriever
+            if configured.auto_cwe_enabled and cwe_evidence is None and not configured.testing:
+                cwe_evidence = LiveCweEvidenceProvider(
+                    Path(gettempdir()) / "secragraph-cwe-evidence",
+                    indexer=runtime_retriever,
+                )
             repository = PostgresSecurityKnowledgeRepository(
                 reader_engine.connect,
                 row_limit=configured.sql_row_limit,
@@ -193,11 +207,24 @@ def create_app(
                             chat_model=chat_model,
                             text2sql=text2sql,
                             retriever=retriever,
+                            cwe_evidence=(cwe_evidence if configured.auto_cwe_enabled else None),
                             max_rag_attempts=configured.max_rag_attempts,
                         )
                     )
                 )
             scan_graph_services = ScanGraphServices(retriever=retriever, chat_model=chat_model)
+    if configured.auto_cwe_enabled:
+        if cwe_evidence is None and not configured.testing:
+            cwe_evidence = LiveCweEvidenceProvider(
+                Path(gettempdir()) / "secragraph-cwe-evidence",
+                indexer=runtime_retriever,
+            )
+        if cwe_evidence is not None:
+            scan_graph_services = (
+                ScanGraphServices(cwe_evidence=cwe_evidence)
+                if scan_graph_services is None
+                else replace(scan_graph_services, cwe_evidence=cwe_evidence)
+            )
     if configured.auto_osv_enabled:
         if dependency_auditor is None and not configured.testing:
             from security_review.intelligence.dependency_osv import LiveDependencyAuditor

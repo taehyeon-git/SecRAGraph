@@ -10,6 +10,7 @@ from typing import cast
 from uuid import UUID
 
 from security_review.domain.models import Finding, ScanReport
+from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
 from security_review.observability import log_scan_completed, request_context_bound
 from security_review.orchestrator.scan_graph import (
     DependencyAuditor,
@@ -134,16 +135,18 @@ def scan_path(
     target_name: str | None = None,
     clock: Callable[[], float] = monotonic,
     dependency_auditor: DependencyAuditor | None = None,
+    cwe_evidence: CweEvidenceProvider | None = None,
 ) -> ScanReport:
     """Scan one file or directory through the shared LangGraph engine."""
 
     graph = (
         _DEFAULT_SCAN_GRAPH
-        if dependency_auditor is None
+        if dependency_auditor is None and cwe_evidence is None
         else build_scan_graph(
             ScanGraphServices(
                 deterministic_scanner=_deterministic_scan,
                 dependency_auditor=dependency_auditor,
+                cwe_evidence=cwe_evidence,
             )
         )
     )

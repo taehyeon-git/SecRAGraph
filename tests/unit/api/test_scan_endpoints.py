@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from security_review.api.app import create_app
 from security_review.api.dependencies import get_scan_service, get_temp_factory
 from security_review.config import Settings
-from security_review.domain.models import Confidence, Finding, Severity
+from security_review.domain.models import Confidence, Finding, Severity, SourceReference
 from security_review.scanner.files import ScanLimits
 
 
@@ -151,6 +151,49 @@ def test_api_can_disable_automatic_osv_lookup() -> None:
 
     assert response.status_code == 200
     assert response.json()["summary"]["total"] == 0
+
+
+def test_api_scan_prepares_official_cwe_for_detected_finding() -> None:
+    seen: list[tuple[str, ...]] = []
+    reference = SourceReference(
+        id="mitre:CWE-95",
+        title="CWE-95",
+        source_url="https://cwe-api.mitre.org/api/v1/cwe/weakness/95",
+    )
+
+    def ensure(ids: tuple[str, ...], **_kwargs: object) -> SimpleNamespace:
+        seen.append(ids)
+        return SimpleNamespace(references_by_id={"CWE-95": reference}, warnings=())
+
+    app = create_app(Settings(testing=True), cwe_evidence=SimpleNamespace(ensure=ensure))
+    response = TestClient(app).post(
+        "/v1/scans/file",
+        files={"file": ("app.py", b"eval(user_input)\n", "text/x-python")},
+    )
+
+    assert response.status_code == 200
+    assert seen == [("CWE-95",)]
+    assert any(
+        item["source_url"] == reference.source_url
+        for item in response.json()["findings"][0]["references"]
+    )
+
+
+def test_api_setting_disables_automatic_cwe_evidence() -> None:
+    def forbidden(_ids: tuple[str, ...], **_kwargs: object) -> SimpleNamespace:
+        pytest.fail("disabled API must not request official CWE evidence")
+
+    app = create_app(
+        Settings(testing=True, auto_cwe_enabled=False),
+        cwe_evidence=SimpleNamespace(ensure=forbidden),
+    )
+    response = TestClient(app).post(
+        "/v1/scans/file",
+        files={"file": ("app.py", b"eval(user_input)\n", "text/x-python")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["findings"][0]["rule_id"] == "PY001"
 
 
 @pytest.mark.parametrize(

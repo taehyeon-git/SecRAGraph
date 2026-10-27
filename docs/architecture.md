@@ -12,6 +12,8 @@ flowchart TB
   TEMP --> SCAN
   SCAN --> SGRAPH[Scan LangGraph]
   SGRAPH --> DET[Text-only deterministic scanner]
+  SGRAPH --> CWE[Finding CWE IDs]
+  CWE --> MITRE[(Official MITRE CWE API)]
   SGRAPH -. optional source references .-> QDRANT[(Qdrant documents)]
   SGRAPH --> CANON[Canonical ScanReport]
   CANON --> FORMATS[JSON / Markdown / SARIF]
@@ -21,10 +23,15 @@ flowchart TB
   KGRAPH --> SQL[Guarded Text2SQL]
   SQL --> INTEL[(PostgreSQL intel schema)]
   KGRAPH --> VEC[Vector search and grounded answer]
+  KGRAPH --> TOPICS[Question CWE topics]
+  TOPICS --> MITRE
+  MITRE -. verified runtime corpus .-> QDRANT
   VEC --> QDRANT
 ```
 
 CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없고 PostgreSQL에 보고서를 저장하지 않지만, 지원되는 잠금 파일이 있으면 OSV 자동 감사를 연결합니다. API의 `ScanService`는 영속 보고서 저장소와 기본 OSV 감사를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
+
+CLI와 API 스캔 모두 기본적으로 finding에 나타난 CWE ID로 공식 문서를 확인합니다. CLI에는 Qdrant retriever가 없으므로 공식 출처를 보고서에 연결하고, 임베딩 제공자가 구성된 API는 같은 문서를 검색 코퍼스에도 추가합니다. RAG 질문의 자동 수집은 ChatModel이 연결된 지식 API에서만 동작합니다.
 
 ## 두 LangGraph의 실제 노드
 
@@ -32,19 +39,22 @@ CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에�
 
 ```text
 validate_input → deterministic_scan → normalize_findings
-→ audit_dependencies → retrieve_finding_evidence → calculate_risk → build_report
+→ audit_dependencies → prepare_cwe_evidence → retrieve_finding_evidence
+→ calculate_risk → build_report
 ```
 
 `retrieve_finding_evidence`는 규칙 결과의 `references`에 Qdrant 문서 출처를 합칩니다. finding ID, 탐지 위치, 심각도, CWE 매핑, 수정 권고는 결정적 결과를 유지합니다. 이 노드는 ChatModel 또는 PostgreSQL Text2SQL을 호출하지 않습니다. 검색 불가·시간 한도 초과 시 확인된 finding을 보존하고 `completed_with_warnings` 보고서를 만들 수 있습니다. 스캔 경로의 기본 수정 권고는 LLM 생성 문장이 아닙니다.
 
 `audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 정보 등급 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 정적 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
 
+`prepare_cwe_evidence`는 실제 스캔 결과의 CWE ID를 중복 제거하고 항목별 검증 캐시를 확인합니다. 없는 항목만 고정된 MITRE HTTPS API로 조회합니다. 응답의 CWE ID·형식·크기와 로컬 manifest SHA-256을 검사한 뒤 공식 출처를 finding에 연결합니다. 인덱서가 있으면 같은 Qdrant 컬렉션의 별도 런타임 코퍼스 ID로 문서를 추가합니다. 초기 사례 코퍼스 재동기화가 이 코퍼스를 제거하지 않습니다. 취득 실패·시간 초과·상한 도달 시 결정적 finding을 보존하고 범위 경고를 남깁니다. MITRE에는 업로드 코드나 질문 전문이 아닌 CWE ID만 보냅니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_CWE_ENABLED=false`로 자동 조회를 끌 수 있습니다.
+
 지식 그래프([knowledge_graph.py](../src/security_review/orchestrator/knowledge_graph.py)):
 
 ```text
 classify_intent ─┬→ general_answer → END
                  ├→ text2sql → END
-                 └→ vector_search → evaluate_vector_results
+                 └→ prepare_cwe_evidence → vector_search → evaluate_vector_results
                        ├→ generate_grounded_answer → END
                        ├→ rewrite_query → vector_search (bounded retry)
                        └→ END (insufficient evidence)
@@ -53,6 +63,8 @@ classify_intent ─┬→ general_answer → END
 분류·일반 답변·검색어 재작성·근거 기반 답변은 설정된 ChatModel을 사용합니다. RAG 답변은 실제 검색 chunk ID를 `[source:<id>]` 형식으로 인용해야 하며 없는 출처 ID를 반환하면 오류가 됩니다. 일반 답변은 문서나 DB 조회를 수행하지 않으므로 인용 근거가 없는 개념 설명입니다. Text2SQL은 별도 [보안 경계](text2sql-security.md)를 거칩니다.
 
 키 없는 [오프라인 RAG 증거 명령](demo.md#2-키-없는-오프라인-rag-근거)은 같은 지식 LangGraph와 `QdrantDocumentRetriever`를 사용하되, 동봉한 Markdown 지침을 메모리 내 Qdrant에 인덱싱하고 결정적 토큰 해시 임베딩·응답 어댑터로 네 가지 고정 경로를 실행합니다. 완료된 노드, 검색 후보 메타데이터, 실제 인용 ID 및 인용된 조각의 짧은 발췌만 JSON/Markdown으로 렌더링합니다. 검색됐지만 인용되지 않은 조각의 원문과 LangGraph 원시 상태 전체는 저장하지 않습니다. 이 경로의 결과는 워크플로·검색·인용 계약의 재현 가능한 검사이며 실제 모델 답변 품질 측정은 아닙니다.
+
+런타임 CWE 제공자가 연결되면 분류 모델은 경로와 관련 CWE 후보를 한 번에 제안합니다. 질문에 직접 적힌 CWE ID가 있으면 이를 우선하며, 후보가 없으면 새 공식 문서를 요청하지 않습니다. 제안은 식별자 후보일 뿐 취약점이나 CVE의 확인이 아니며 공식 MITRE 응답으로 검증한 항목만 근거가 됩니다. `text2sql`과 `general_answer` 경로는 이 수집 단계를 거치지 않습니다. 이 기능에는 모델·임베딩 키와 사용 가능한 Qdrant가 필요합니다. 키 없는 고정 RAG 평가는 별도 재현 경로입니다.
 
 ## 모듈과 인터페이스
 
@@ -65,6 +77,7 @@ classify_intent ─┬→ general_answer → END
 | `orchestrator/scan_graph.py`, `knowledge_graph.py`, `state.py` | 각 LangGraph의 상태, 노드, 조건부 분기와 결과 계약. |
 | `ports.py` | `ReportRepository`, `SecurityKnowledgeRepository`, `SecurityDocumentRetriever`, `ChatModel`, `EmbeddingModel` 프로토콜. 구현을 도메인 밖에 둡니다. |
 | `intelligence/ingestion.py`, `manifest.py`, `models.py` | 사용자 소유 UTF-8 Markdown 문서 탐색·chunk, 버전별 출처/권리/해시 검증, 코퍼스 식별자 및 지식 데이터 모델. |
+| `intelligence/case_corpus.py`, `dynamic_cwe.py` | 평가 사례와 규칙의 초기 CWE 코퍼스 준비, 실제 스캔·질문에서 발생한 CWE ID별 공식 자료 검증·캐시·선택적 인덱싱. |
 | `intelligence/qdrant_retriever.py`, `openai_adapters.py` | 컬렉션/차원 확인, bounded 검색·임베딩·모델 제공자 어댑터, 선택 관리 코퍼스의 미리보기/동기화. |
 | `intelligence/text2sql.py`, `sql_guard.py` | 모델 SQL 생성·재시도·답변 합성 및 SQLGlot AST 검증. |
 | `storage/database.py`, `reports.py`, `memory.py`, `models.py` | SQLAlchemy 연결·스캔 보고서 영속화·테스트용 메모리 저장소·테이블. |

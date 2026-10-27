@@ -18,6 +18,7 @@ class KnowledgeState(TypedDict, total=False):
 
     question: str
     intent: KnowledgeIntent
+    cwe_topic_ids: tuple[str, ...]
     attempt: int
     query: str
     sql_answer: Text2SqlAnswer | None

@@ -9,6 +9,7 @@ import security_review.application as application_module
 import security_review.cli as cli_module
 from security_review.application import scan_path
 from security_review.cli import app
+from security_review.domain.models import SourceReference
 from security_review.intelligence.dependency_osv import DependencyCoordinate, LiveDependencyAuditor
 from security_review.intelligence.ingestion import DocumentIngestionError
 from security_review.intelligence.osv import OsvAdvisory
@@ -16,6 +17,68 @@ from security_review.scanner.files import ScanLimits
 from security_review.storage.intelligence import ImportSummary
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def no_live_cwe_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI tests exercise injection, not the live MITRE network."""
+
+    monkeypatch.setattr(
+        cli_module,
+        "_cwe_evidence_factory",
+        lambda: SimpleNamespace(
+            ensure=lambda _ids, **_kwargs: SimpleNamespace(references_by_id={}, warnings=())
+        ),
+        raising=False,
+    )
+
+
+def test_cli_scan_automatically_prepares_cwe_for_real_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("eval(user_input)\n", encoding="utf-8")
+    seen: list[tuple[str, ...]] = []
+    reference = SourceReference(
+        id="mitre:CWE-95",
+        title="CWE-95",
+        source_url="https://cwe-api.mitre.org/api/v1/cwe/weakness/95",
+    )
+
+    def ensure(ids: tuple[str, ...], **_kwargs: object) -> SimpleNamespace:
+        seen.append(ids)
+        return SimpleNamespace(references_by_id={"CWE-95": reference}, warnings=())
+
+    monkeypatch.setattr(
+        cli_module,
+        "_cwe_evidence_factory",
+        lambda: SimpleNamespace(ensure=ensure),
+    )
+    result = runner.invoke(app, ["scan", str(target), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == [("CWE-95",)]
+    assert any(
+        item["source_url"] == reference.source_url
+        for item in json.loads(result.stdout)["findings"][0]["references"]
+    )
+
+
+def test_cli_offline_scan_does_not_prepare_cwe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("eval(user_input)\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_cwe_evidence_factory",
+        lambda: pytest.fail("offline scan must not create a CWE provider"),
+    )
+
+    result = runner.invoke(app, ["scan", str(target), "--format", "json", "--offline"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["summary"]["total"] == 1
 
 
 def test_cli_writes_json_report(tmp_path: Path) -> None:

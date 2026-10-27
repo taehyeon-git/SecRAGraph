@@ -1,8 +1,8 @@
-"""Select bounded official CWE evidence from labeled evaluation cases.
+"""Select bounded official CWE evidence from evaluation cases and scanner rules.
 
 Downloaded CWE fields are external evidence, never instructions. No source code,
 question text, or secret is sent to MITRE; the only variable URL component is a
-validated CWE number from the repository's fixed case labels.
+validated CWE number from checked-in labels or rule metadata.
 """
 
 from __future__ import annotations
@@ -12,10 +12,12 @@ import os
 import re
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from hashlib import sha256
 from pathlib import Path
+from time import monotonic
 from typing import Literal
 
 import httpx
@@ -33,11 +35,12 @@ _VERSION_URL = f"{_API_ROOT}/version"
 _CORPUS_ID = "secragraph-auto-cwe-v1"
 _SOURCE_LICENSE = "MITRE CWE Terms of Use"
 _SOURCE_TERMS_URL = "https://cwe.mitre.org/about/termsofuse.html"
-_MAX_CWE_IDS = 32
+_MAX_CWE_IDS = 128
 _MAX_RESPONSE_BYTES = 256_000
-_MAX_TOTAL_RESPONSE_BYTES = 4_000_000
+_MAX_TOTAL_RESPONSE_BYTES = 16_000_000
 _MAX_GENERATED_DOCUMENT_BYTES = 100_000
-_MAX_TOTAL_DOCUMENT_BYTES = 2_000_000
+_MAX_TOTAL_DOCUMENT_BYTES = 8_000_000
+_STARTUP_DEADLINE_SECONDS = 90.0
 _MAX_CACHE_JSON_BYTES = 32_000
 _ID_PATTERN = re.compile(r"CWE-([1-9][0-9]{0,5})\Z")
 _HEX_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
@@ -112,7 +115,8 @@ def _select_case_cwes(repo_root: Path) -> _Selection:
         rag_cases[rag_case.case_id] = sorted(set(rag_case.knowledge_cwe_ids), key=_cwe_sort_key)
 
     selected_ids = sorted(
-        {cwe_id for labels in (*scanner_cases.values(), *rag_cases.values()) for cwe_id in labels},
+        {cwe_id for labels in (*scanner_cases.values(), *rag_cases.values()) for cwe_id in labels}
+        | {cwe_id for rule in DEFAULT_RULES for cwe_id in rule.cwe_ids},
         key=_cwe_sort_key,
     )
     if not selected_ids or len(selected_ids) > _MAX_CWE_IDS:
@@ -134,15 +138,27 @@ def _make_client() -> httpx.Client:
 
 
 def _read_api_json(
-    client: httpx.Client, url: str, *, remaining_bytes: int
+    client: httpx.Client,
+    url: str,
+    *,
+    remaining_bytes: int,
+    deadline: float | None = None,
+    clock: Callable[[], float] = monotonic,
 ) -> tuple[object, str, int]:
     if not (
         url == _VERSION_URL
         or re.fullmatch(r"https://cwe-api\.mitre\.org/api/v1/cwe/weakness/[1-9][0-9]{0,5}", url)
     ):
         raise CorpusAcquisitionError("source_not_allowed")
+    timeout = httpx.Timeout(connect=3.0, read=6.0, write=3.0, pool=3.0)
+    if deadline is not None:
+        remaining_seconds = deadline - clock()
+        if remaining_seconds <= 0:
+            raise CorpusAcquisitionError("official_deadline_exceeded")
+        request_seconds = min(6.0, remaining_seconds)
+        timeout = httpx.Timeout(request_seconds, connect=min(3.0, request_seconds))
     try:
-        with client.stream("GET", url, follow_redirects=False) as response:
+        with client.stream("GET", url, follow_redirects=False, timeout=timeout) as response:
             if response.status_code != 200:
                 raise CorpusAcquisitionError("official_response_unavailable")
             if response.headers.get("content-encoding", "identity").casefold() != "identity":
@@ -153,6 +169,8 @@ def _read_api_json(
                 raise CorpusAcquisitionError("invalid_official_content_type")
             body = bytearray()
             for chunk in response.iter_raw(chunk_size=32_768):
+                if deadline is not None and clock() >= deadline:
+                    raise CorpusAcquisitionError("official_deadline_exceeded")
                 body.extend(chunk)
                 if len(body) > _MAX_RESPONSE_BYTES:
                     raise CorpusAcquisitionError("official_response_too_large")
@@ -160,6 +178,8 @@ def _read_api_json(
                     raise CorpusAcquisitionError("official_total_response_too_large")
     except httpx.HTTPError as error:
         raise CorpusAcquisitionError("official_network_unavailable") from error
+    if deadline is not None and clock() >= deadline:
+        raise CorpusAcquisitionError("official_deadline_exceeded")
     try:
         parsed = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -167,9 +187,18 @@ def _read_api_json(
     return parsed, sha256(body).hexdigest(), len(body)
 
 
-def _version(client: httpx.Client) -> tuple[str, str, int]:
+def _version(
+    client: httpx.Client,
+    *,
+    deadline: float | None = None,
+    clock: Callable[[], float] = monotonic,
+) -> tuple[str, str, int]:
     payload, _digest, response_bytes = _read_api_json(
-        client, _VERSION_URL, remaining_bytes=_MAX_TOTAL_RESPONSE_BYTES
+        client,
+        _VERSION_URL,
+        remaining_bytes=_MAX_TOTAL_RESPONSE_BYTES,
+        deadline=deadline,
+        clock=clock,
     )
     if not isinstance(payload, dict):
         raise CorpusAcquisitionError("invalid_official_version")
@@ -215,6 +244,12 @@ def _weakness_document(
     if weakness.get("ID") != cwe_id[4:]:
         raise CorpusAcquisitionError("mismatched_official_cwe_id")
     name = _markdown_text(_bounded_text(weakness.get("Name"), max_chars=300))
+    # The manifest reader uses the complete first heading as a title (max 300).
+    # Escaping Markdown punctuation may expand a valid MITRE Name, so enforce
+    # the final rendered heading length rather than only the raw field length.
+    max_name_length = 300 - len(f"{cwe_id}: ")
+    if len(name) > max_name_length:
+        name = name[: max_name_length - 3].rstrip("\\ ") + "..."
     description = _markdown_text(_bounded_text(weakness.get("Description"), max_chars=6_000))
     mitigations = weakness.get("PotentialMitigations", [])
     if not isinstance(mitigations, list):
@@ -270,7 +305,12 @@ def _read_bounded_json(path: Path) -> object:
         raise CorpusAcquisitionError("invalid_cache") from error
 
 
-def _load_cached_snapshot(cache_root: Path, cwe_ids: tuple[str, ...]) -> _Snapshot | None:
+def _load_cached_snapshot(
+    cache_root: Path,
+    cwe_ids: tuple[str, ...],
+    *,
+    corpus_id: str = _CORPUS_ID,
+) -> _Snapshot | None:
     pointer_path = cache_root / "current.json"
     if not pointer_path.exists():
         return None
@@ -293,7 +333,7 @@ def _load_cached_snapshot(cache_root: Path, cwe_ids: tuple[str, ...]) -> _Snapsh
         source_date = metadata.get("source_date")
         response_sha256 = metadata.get("response_sha256")
         if (
-            corpus.corpus_id != _CORPUS_ID
+            corpus.corpus_id != corpus_id
             or not isinstance(revision, str)
             or not revision.startswith("CWE ")
             or not isinstance(source_date, str)
@@ -349,6 +389,8 @@ def _publish_snapshot(
     source_date: str,
     documents: dict[str, bytes],
     response_sha256: dict[str, str],
+    *,
+    corpus_id: str = _CORPUS_ID,
 ) -> _Snapshot:
     snapshots_root = cache_root / "snapshots"
     snapshots_root.mkdir(exist_ok=True)
@@ -372,7 +414,7 @@ def _publish_snapshot(
             )
         _atomic_json(
             stage / "manifest.json",
-            {"version": 1, "corpus_id": _CORPUS_ID, "documents": entries},
+            {"version": 1, "corpus_id": corpus_id, "documents": entries},
         )
         _atomic_json(
             stage / "provenance.json",
@@ -481,7 +523,10 @@ def prepare_case_corpus(
 
     try:
         with _make_client() as client:
-            revision, source_date, version_bytes = _version(client)
+            deadline = monotonic() + _STARTUP_DEADLINE_SECONDS
+            revision, source_date, version_bytes = _version(
+                client, deadline=deadline, clock=monotonic
+            )
             remaining_bytes = _MAX_TOTAL_RESPONSE_BYTES - version_bytes
             if cached is not None and (cached.source_revision, cached.source_date) == (
                 revision,
@@ -494,7 +539,11 @@ def prepare_case_corpus(
             for cwe_id in selection.cwe_ids:
                 url = f"{_API_ROOT}/weakness/{cwe_id[4:]}"
                 payload, digest, response_bytes = _read_api_json(
-                    client, url, remaining_bytes=remaining_bytes
+                    client,
+                    url,
+                    remaining_bytes=remaining_bytes,
+                    deadline=deadline,
+                    clock=monotonic,
                 )
                 remaining_bytes -= response_bytes
                 document = _weakness_document(payload, cwe_id, revision, source_date)

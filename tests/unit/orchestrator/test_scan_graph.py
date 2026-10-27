@@ -14,6 +14,7 @@ from security_review.domain.models import (
     Finding,
     ScanStatus,
     Severity,
+    SourceReference,
 )
 from security_review.intelligence.fakes import (
     FakeChatModel,
@@ -119,11 +120,231 @@ def test_graph_exposes_the_scan_pipeline_as_explicit_nodes() -> None:
         "validate_input",
         "deterministic_scan",
         "normalize_findings",
+        "prepare_cwe_evidence",
         "retrieve_finding_evidence",
         "audit_dependencies",
         "calculate_risk",
         "build_report",
     }.issubset(graph.nodes)
+
+
+def test_runtime_cwe_evidence_deduplicates_ids_and_preserves_rag_and_osv_sources() -> None:
+    official = SourceReference(
+        id="mitre:CWE-22",
+        title="CWE-22: Path Traversal",
+        source_url="https://cwe-api.mitre.org/api/v1/cwe/weakness/22",
+    )
+    first = _finding(identifier="first").model_copy(update={"cwe_ids": ("CWE-22",)})
+    second = _finding(identifier="second").model_copy(update={"cwe_ids": ("CWE-22",)})
+    osv = _finding(identifier="OSV001:match", path="uv.lock").model_copy(
+        update={"rule_id": "OSV001", "category": "dependency", "cwe_ids": ()}
+    )
+    provider_calls: list[tuple[str, ...]] = []
+
+    class Provider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del deadline
+            provider_calls.append(tuple(cwe_ids))
+            return SimpleNamespace(references_by_id={"CWE-22": official}, warnings=())
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        return SimpleNamespace(findings=(osv,), warnings=())
+
+    result = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((first, second)),
+            dependency_auditor=audit,
+            cwe_evidence=Provider(),  # type: ignore[arg-type]
+            retriever=FakeDocumentRetriever(results=(_chunk(),)),
+        )
+    ).invoke({"target": Path("scan-target"), "limits": ScanLimits()})
+
+    findings = {finding.id: finding for finding in result["report"].findings}
+    assert provider_calls == [("CWE-22",)]
+    assert findings["first"].references == (official, _chunk().to_source_reference())
+    assert findings["second"].references == (official, _chunk().to_source_reference())
+    assert findings["OSV001:match"] == osv
+    assert result["report"].warnings == ()
+
+
+def test_runtime_cwe_evidence_includes_cwe_ids_added_by_dependency_audit() -> None:
+    deterministic = _finding().model_copy(update={"cwe_ids": ()})
+    audited = _finding(identifier="OSV001:match", path="uv.lock").model_copy(
+        update={"rule_id": "OSV001", "category": "dependency", "cwe_ids": ("CWE-79",)}
+    )
+    official = SourceReference(
+        id="mitre:CWE-79",
+        title="CWE-79: Cross-site Scripting",
+        source_url="https://cwe-api.mitre.org/api/v1/cwe/weakness/79",
+    )
+    calls: list[tuple[str, ...]] = []
+
+    class Provider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del deadline
+            calls.append(tuple(cwe_ids))
+            return SimpleNamespace(references_by_id={"CWE-79": official}, warnings=())
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        return SimpleNamespace(findings=(audited,), warnings=())
+
+    result = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((deterministic,)),
+            dependency_auditor=audit,
+            cwe_evidence=Provider(),  # type: ignore[arg-type]
+        )
+    ).invoke({"target": Path("scan-target"), "limits": ScanLimits()})
+
+    assert calls == [("CWE-79",)]
+    findings = {finding.id: finding for finding in result["report"].findings}
+    assert findings[deterministic.id] == deterministic
+    assert findings[audited.id].references == (official,)
+
+
+def test_runtime_cwe_evidence_accepts_maximum_official_weakness_title() -> None:
+    finding = _finding().model_copy(update={"cwe_ids": ("CWE-22",)})
+    official = SourceReference(
+        id="mitre:CWE-22",
+        title="CWE-22: " + "A" * 300,
+        source_url="https://cwe-api.mitre.org/api/v1/cwe/weakness/22",
+    )
+
+    class Provider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del cwe_ids, deadline
+            return SimpleNamespace(references_by_id={"CWE-22": official}, warnings=())
+
+    result = build_scan_graph(
+        ScanGraphServices(cwe_evidence=Provider())  # type: ignore[arg-type]
+    ).invoke({"findings": (finding,)})
+
+    assert result["findings"][0].references == (official,)
+    assert result["warnings"] == ()
+
+
+def test_runtime_cwe_evidence_limits_request_and_reports_partial_coverage() -> None:
+    requested = tuple(f"CWE-{number}" for number in range(1, 66))
+    finding = _finding().model_copy(update={"cwe_ids": requested})
+    calls: list[tuple[str, ...]] = []
+
+    class Provider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del deadline
+            calls.append(tuple(cwe_ids))
+            return SimpleNamespace(references_by_id={}, warnings=("cwe_evidence_partial",))
+
+    result = build_scan_graph(
+        ScanGraphServices(cwe_evidence=Provider())  # type: ignore[arg-type]
+    ).invoke({"findings": (finding,)})
+
+    assert calls == [requested[:64]]
+    assert result["findings"] == (finding,)
+    assert result["warnings"] == (
+        "cwe_evidence_limit_reached",
+        "cwe_evidence_partial",
+    )
+
+
+def test_runtime_cwe_provider_failure_keeps_finding_and_hides_provider_details() -> None:
+    finding = _finding()
+
+    class FailingProvider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del cwe_ids, deadline
+            raise IntelligenceUnavailableError("cwe", "private-token")
+
+    result = build_scan_graph(
+        ScanGraphServices(cwe_evidence=FailingProvider())  # type: ignore[arg-type]
+    ).invoke({"findings": (finding,)})
+
+    assert result["findings"] == (finding,)
+    assert result["warnings"] == ("cwe_evidence_unavailable",)
+    assert "private-token" not in result["report"].model_dump_json()
+
+
+def test_runtime_cwe_unexpected_provider_failure_keeps_the_deterministic_result() -> None:
+    finding = _finding()
+
+    class FailingProvider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del cwe_ids, deadline
+            raise RuntimeError("provider-internal-secret")
+
+    result = build_scan_graph(
+        ScanGraphServices(cwe_evidence=FailingProvider())  # type: ignore[arg-type]
+    ).invoke({"findings": (finding,)})
+
+    assert result["findings"] == (finding,)
+    assert result["warnings"] == ("cwe_evidence_unavailable",)
+    assert "provider-internal-secret" not in result["report"].model_dump_json()
+
+
+def test_runtime_cwe_malformed_provider_warning_does_not_break_scan() -> None:
+    finding = _finding()
+
+    class InvalidProvider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del cwe_ids, deadline
+            return SimpleNamespace(references_by_id={}, warnings=(["private-token"],))
+
+    result = build_scan_graph(
+        ScanGraphServices(cwe_evidence=InvalidProvider())  # type: ignore[arg-type]
+    ).invoke({"findings": (finding,)})
+
+    assert result["findings"] == (finding,)
+    assert result["warnings"] == ("cwe_evidence_unavailable",)
+    assert "private-token" not in result["report"].model_dump_json()
+
+
+def test_runtime_cwe_evidence_skips_fetch_after_scan_deadline() -> None:
+    now = [0.0]
+    finding = _finding()
+    calls: list[str] = []
+
+    class DeadlineScanner:
+        def __call__(self, request: ScanRequest) -> DeterministicScanResult:
+            now[0] = 2.0
+            return DeterministicScanResult(target_name=request.target.name, findings=(finding,))
+
+    class Provider:
+        def ensure(
+            self, cwe_ids: Sequence[str], *, deadline: float | None = None
+        ) -> SimpleNamespace:
+            del cwe_ids, deadline
+            calls.append("cwe")
+            return SimpleNamespace(references_by_id={}, warnings=())
+
+    result = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=DeadlineScanner(),
+            cwe_evidence=Provider(),  # type: ignore[arg-type]
+        )
+    ).invoke(
+        {
+            "target": Path("scan-target"),
+            "limits": ScanLimits(max_processing_seconds=1.0),
+            "clock": lambda: now[0],
+        }
+    )
+
+    assert calls == []
+    assert result["findings"] == (finding,)
+    assert result["warnings"] == ("processing_time_limit_exceeded",)
 
 
 def test_dependency_audit_appends_source_linked_findings_before_risk(
