@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import httpx
 import pytest
@@ -10,7 +12,42 @@ import pytest
 from security_review.intelligence.osv import OsvClient, OsvInputError, OsvUnavailableError
 
 
-def _advisory(*, identifier: str = "GHSA-abcd-1234-5678", aliases=None, withdrawn=None):
+class FakeClock:
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = value
+
+    def __call__(self) -> float:
+        return self.value
+
+
+class AdvanceBeforeYieldStream(httpx.SyncByteStream):
+    def __init__(self, clock: FakeClock, value: float, content: bytes) -> None:
+        self._clock = clock
+        self._value = value
+        self._content = content
+
+    def __iter__(self) -> Iterator[bytes]:
+        self._clock.value = self._value
+        yield self._content
+
+
+class AdvanceAfterYieldStream(httpx.SyncByteStream):
+    def __init__(self, clock: FakeClock, value: float, content: bytes) -> None:
+        self._clock = clock
+        self._value = value
+        self._content = content
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield self._content
+        self._clock.value = self._value
+
+
+def _advisory(
+    *,
+    identifier: str = "GHSA-abcd-1234-5678",
+    aliases: list[str] | None = None,
+    withdrawn: str | None = None,
+) -> dict[str, Any]:
     return {
         "id": identifier,
         "aliases": aliases if aliases is not None else ["CVE-2024-12345"],
@@ -21,7 +58,7 @@ def _advisory(*, identifier: str = "GHSA-abcd-1234-5678", aliases=None, withdraw
     }
 
 
-def _client(handler):
+def _client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=False)
 
 
@@ -124,3 +161,45 @@ def test_provider_errors_have_safe_public_error() -> None:
         with pytest.raises(OsvUnavailableError) as captured:
             OsvClient(http).query_package("PyPI", "jinja2", "2.4.1")
     assert "upstream-secret" not in str(captured.value)
+
+
+def test_optional_deadline_blocks_request_and_expired_stream_chunk() -> None:
+    expired = FakeClock(5.0)
+    with _client(lambda _request: pytest.fail("deadline must block the request")) as http:
+        with pytest.raises(OsvUnavailableError):
+            OsvClient(http, deadline=5.0, clock=expired).query_package("PyPI", "jinja2", "2.4.1")
+
+    clock = FakeClock()
+    payload = json.dumps({"vulns": []}).encode("utf-8")
+    with _client(
+        lambda _request: httpx.Response(
+            200,
+            stream=AdvanceBeforeYieldStream(clock, 5.0, payload),
+        )
+    ) as http:
+        with pytest.raises(OsvUnavailableError):
+            OsvClient(http, deadline=5.0, clock=clock).query_package("PyPI", "jinja2", "2.4.1")
+
+
+def test_deadline_caps_request_timeout_and_is_checked_before_next_page() -> None:
+    clock = FakeClock(7.0)
+    timeouts: list[dict[str, float]] = []
+    calls = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        timeouts.append(request.extensions["timeout"])
+        payload = json.dumps({"vulns": [], "next_page_token": "next"}).encode("utf-8")
+        return httpx.Response(
+            200,
+            stream=AdvanceAfterYieldStream(clock, 10.0, payload),
+        )
+
+    with _client(respond) as http:
+        with pytest.raises(OsvUnavailableError):
+            OsvClient(http, deadline=10.0, clock=clock).query_package("PyPI", "jinja2", "2.4.1")
+
+    assert calls == 1
+    assert timeouts
+    assert all(0 < value <= 3.0 for value in timeouts[0].values())

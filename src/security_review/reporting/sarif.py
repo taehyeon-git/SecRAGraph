@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from security_review.domain.models import Finding, ScanReport, Severity
 
@@ -24,7 +25,13 @@ def _descriptor(finding: Finding) -> dict[str, Any]:
     return {
         "id": finding.rule_id,
         "name": finding.rule_id,
-        "shortDescription": {"text": finding.message},
+        "shortDescription": {
+            "text": (
+                "Vulnerable locked dependency reported by OSV.dev."
+                if finding.rule_id == "OSV001"
+                else finding.message
+            )
+        },
         "help": {
             "text": finding.remediation,
             "markdown": finding.remediation,
@@ -46,19 +53,65 @@ def _region(finding: Finding) -> dict[str, int]:
 def _fingerprint(finding: Finding) -> str:
     # A source-free location identity avoids both evidence-derived hashes and
     # occurrence shifts when another finding is added earlier in the file.
-    payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}".encode()
-    return sha256(payload).hexdigest()
+    payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}"
+    if finding.rule_id == "OSV001":
+        # A lockfile has many coordinates and advisories but one stable location.
+        payload += f"\0{finding.id}"
+    encoded = payload.encode()
+    return sha256(encoded).hexdigest()
+
+
+def _osv_advisory_url(finding: Finding) -> str | None:
+    if finding.rule_id != "OSV001":
+        return None
+    for reference in finding.references:
+        url = reference.source_url
+        if not url or len(url) > 300:
+            continue
+        try:
+            parsed = urlsplit(url)
+        except ValueError:
+            continue
+        if (
+            parsed.scheme == "https"
+            and parsed.netloc == "osv.dev"
+            and re.fullmatch(r"/vulnerability/[A-Za-z0-9._-]{1,128}", parsed.path)
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return url
+    return None
+
+
+def _escaped_markdown_text(value: str) -> str:
+    flattened = " ".join(value.split())
+    return re.sub(r"([\\`*_\[\]()<>])", r"\\\1", flattened)
 
 
 def _result(
     finding: Finding, rule_index: int, path_prefix: str, fingerprint: str
 ) -> dict[str, Any]:
     source_path = (PurePosixPath(path_prefix) / finding.file_path).as_posix()
+    message = {"text": finding.message}
+    properties = {
+        "findingId": finding.id,
+        "category": finding.category,
+        "confidence": finding.confidence.value,
+        "cweIds": list(finding.cwe_ids),
+        "redactedEvidence": finding.redacted_evidence,
+        "severity": finding.severity.value,
+    }
+    osv_url = _osv_advisory_url(finding)
+    if osv_url is not None:
+        message["markdown"] = (
+            f"{_escaped_markdown_text(finding.message)} [Open OSV advisory]({osv_url})"
+        )
+        properties["osvAdvisoryUrl"] = osv_url
     return {
         "ruleId": finding.rule_id,
         "ruleIndex": rule_index,
         "level": LEVELS[finding.severity],
-        "message": {"text": finding.message},
+        "message": message,
         "locations": [
             {
                 "physicalLocation": {
@@ -70,14 +123,7 @@ def _result(
             }
         ],
         "partialFingerprints": {"primaryLocationLineHash": fingerprint},
-        "properties": {
-            "findingId": finding.id,
-            "category": finding.category,
-            "confidence": finding.confidence.value,
-            "cweIds": list(finding.cwe_ids),
-            "redactedEvidence": finding.redacted_evidence,
-            "severity": finding.severity.value,
-        },
+        "properties": properties,
     }
 
 

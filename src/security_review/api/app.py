@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, Request, Response
 from qdrant_client import QdrantClient
@@ -42,7 +43,7 @@ from security_review.orchestrator.knowledge_graph import (
     KnowledgeServices,
     build_knowledge_graph,
 )
-from security_review.orchestrator.scan_graph import ScanGraphServices
+from security_review.orchestrator.scan_graph import DependencyAuditor, ScanGraphServices
 from security_review.ports import ChatModel, EmbeddingModel, ReportRepository
 from security_review.storage import (
     InMemoryReportRepository,
@@ -77,6 +78,7 @@ def create_app(
     qdrant_client: QdrantClient | None = None,
     membership: MembershipManager | None = None,
     osv_client: OsvQueryer | None = None,
+    dependency_auditor: DependencyAuditor | None = None,
 ) -> FastAPI:
     """Create an isolated API instance for production or tests."""
 
@@ -196,6 +198,17 @@ def create_app(
                     )
                 )
             scan_graph_services = ScanGraphServices(retriever=retriever, chat_model=chat_model)
+    if configured.auto_osv_enabled:
+        if dependency_auditor is None and not configured.testing:
+            from security_review.intelligence.dependency_osv import LiveDependencyAuditor
+
+            dependency_auditor = LiveDependencyAuditor()
+        if dependency_auditor is not None:
+            scan_graph_services = (
+                ScanGraphServices(dependency_auditor=dependency_auditor)
+                if scan_graph_services is None
+                else replace(scan_graph_services, dependency_auditor=dependency_auditor)
+            )
     app.state.scan_service = ScanService(report_repository, graph_services=scan_graph_services)
     app.state.knowledge_service = knowledge_service
 

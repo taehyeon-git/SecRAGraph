@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from math import isfinite
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -124,8 +127,18 @@ def _parse_advisory(item: object, *, ecosystem: str, package: str) -> OsvAdvisor
 class OsvClient:
     """Query OSV over a fixed HTTPS origin without following redirects."""
 
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(
+        self,
+        client: httpx.Client,
+        *,
+        deadline: float | None = None,
+        clock: Callable[[], float] = monotonic,
+    ) -> None:
+        if deadline is not None and not isfinite(deadline):
+            raise ValueError("deadline must be finite")
         self._client = client
+        self._deadline = deadline
+        self._clock = clock
 
     def query_package(self, ecosystem: str, package: str, version: str) -> OsvQueryResult:
         ecosystem = _validated(ecosystem, _ECOSYSTEM)
@@ -168,13 +181,14 @@ class OsvClient:
         raise OsvUnavailableError()
 
     def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        timeout = self._request_timeout()
         try:
             with self._client.stream(
                 "POST",
                 f"{_ORIGIN}/v1/query",
                 json=payload,
                 follow_redirects=False,
-                timeout=httpx.Timeout(10.0, connect=3.0),
+                timeout=timeout,
             ) as response:
                 if response.status_code != 200:
                     raise OsvUnavailableError()
@@ -188,9 +202,11 @@ class OsvClient:
                         raise OsvUnavailableError()
                 content = bytearray()
                 for chunk in response.iter_bytes():
+                    self._require_time_remaining()
                     if len(content) + len(chunk) > _MAX_RESPONSE_BYTES:
                         raise OsvUnavailableError()
                     content.extend(chunk)
+                self._require_time_remaining()
         except httpx.RequestError as error:
             raise OsvUnavailableError() from error
         try:
@@ -200,6 +216,22 @@ class OsvClient:
         if not isinstance(parsed, dict):
             raise OsvUnavailableError()
         return parsed
+
+    def _request_timeout(self) -> httpx.Timeout:
+        if self._deadline is None:
+            return httpx.Timeout(10.0, connect=3.0)
+        remaining = self._deadline - self._clock()
+        if not isfinite(remaining) or remaining <= 0:
+            raise OsvUnavailableError()
+        request_seconds = min(10.0, remaining)
+        return httpx.Timeout(request_seconds, connect=min(3.0, request_seconds))
+
+    def _require_time_remaining(self) -> None:
+        if self._deadline is None:
+            return
+        current = self._clock()
+        if not isfinite(current) or current >= self._deadline:
+            raise OsvUnavailableError()
 
 
 class LiveOsvClient:

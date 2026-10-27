@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -119,9 +120,128 @@ def test_graph_exposes_the_scan_pipeline_as_explicit_nodes() -> None:
         "deterministic_scan",
         "normalize_findings",
         "retrieve_finding_evidence",
+        "audit_dependencies",
         "calculate_risk",
         "build_report",
     }.issubset(graph.nodes)
+
+
+def test_dependency_audit_appends_source_linked_findings_before_risk(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    code_finding = _finding()
+    dependency_finding = Finding(
+        id="OSV001:stable",
+        rule_id="OSV001",
+        category="dependency",
+        severity=Severity.INFO,
+        file_path="uv.lock",
+        line_start=1,
+        message="Locked package matched an OSV advisory.",
+        redacted_evidence="Version scoped OSV match; source omitted.",
+        confidence=Confidence.HIGH,
+        remediation="Upgrade to a reviewed fixed version.",
+    )
+    calls: list[Path] = []
+
+    def dependency_auditor(path: Path, _limits: ScanLimits) -> SimpleNamespace:
+        calls.append(path)
+        return SimpleNamespace(findings=(dependency_finding,), warnings=("osv_lookup_incomplete",))
+
+    graph = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((code_finding,)),
+            dependency_auditor=dependency_auditor,
+        )
+    )
+    result = graph.invoke({"target": target, "limits": ScanLimits()})
+
+    assert calls == [target]
+    assert {finding.id for finding in result["report"].findings} == {
+        code_finding.id,
+        dependency_finding.id,
+    }
+    assert result["report"].summary.total == 2
+    assert result["report"].status is ScanStatus.COMPLETED_WITH_WARNINGS
+    assert "osv_lookup_incomplete" in result["report"].warnings
+
+
+def test_dependency_audit_precedes_slow_rag_and_survives_its_deadline(tmp_path: Path) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("eval('unsafe')\n", encoding="utf-8")
+    now = [0.0]
+    calls: list[str] = []
+    code_finding = _finding()
+    dependency_finding = _finding(
+        identifier="OSV001:stable", path="uv.lock", severity=Severity.INFO
+    )
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        calls.append("osv")
+        return SimpleNamespace(findings=(dependency_finding,), warnings=())
+
+    class SlowRetriever:
+        def search(self, _query: str, limit: int = 5) -> tuple[DocumentChunk, ...]:
+            del limit
+            calls.append("rag")
+            now[0] = 2.0
+            return (_chunk(),)
+
+    graph = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((code_finding,)),
+            dependency_auditor=audit,
+            retriever=SlowRetriever(),
+        )
+    )
+    result = graph.invoke(
+        {
+            "target": target,
+            "limits": ScanLimits(max_processing_seconds=1.0),
+            "clock": lambda: now[0],
+        }
+    )
+
+    assert calls == ["osv", "rag"]
+    assert {finding.id for finding in result["report"].findings} == {
+        code_finding.id,
+        dependency_finding.id,
+    }
+    assert "processing_time_limit_exceeded" in result["report"].warnings
+
+
+def test_rag_enriches_code_finding_without_dropping_osv_result(tmp_path: Path) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("eval('unsafe')\n", encoding="utf-8")
+    code_finding = _finding()
+    dependency_finding = _finding(
+        identifier="OSV001:stable", path="uv.lock", severity=Severity.INFO
+    )
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        return SimpleNamespace(findings=(dependency_finding,), warnings=())
+
+    graph = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((code_finding,)),
+            dependency_auditor=audit,
+            retriever=FakeDocumentRetriever(results=(_chunk(),)),
+        )
+    )
+    report = graph.invoke({"target": target, "limits": ScanLimits()})["report"]
+
+    assert {finding.id for finding in report.findings} == {code_finding.id, dependency_finding.id}
+    assert next(
+        finding for finding in report.findings if finding.id == code_finding.id
+    ).references == (_chunk().to_source_reference(),)
+    assert (
+        next(
+            finding for finding in report.findings if finding.id == dependency_finding.id
+        ).references
+        == ()
+    )
 
 
 def test_disabled_enrichment_is_a_clean_deterministic_scan() -> None:

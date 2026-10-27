@@ -157,6 +157,7 @@ def _case_payload() -> dict[str, object]:
         "expected_retrieved_section": "Injection-resistant data access",
         "expected_cited_section": "Injection-resistant data access",
         "expected_outcome": "answer",
+        "knowledge_cwe_ids": ["CWE-89"],
         "rewrite_query": None,
         "expected_failure_stage": None,
     }
@@ -237,11 +238,30 @@ def test_bundled_manifest_has_four_labeled_rag_paths() -> None:
         "abstain",
         "invalid_source_citation",
     ]
+    assert [case.knowledge_cwe_ids for case in cases] == [
+        ("CWE-89",),
+        ("CWE-200",),
+        (),
+        ("CWE-347",),
+    ]
     assert all(case.route == "rag" and case.max_rag_attempts == 2 for case in cases)
     assert all(case.adapter_fault is None for case in cases[:3])
     assert cases[-1].adapter_fault == "forged_citation"
     assert "generate_grounded_answer" not in cases[-1].expected_completed_nodes
     assert cases[-1].expected_failure_stage == "grounded_answer_validation"
+
+
+@pytest.mark.parametrize("topics", [["cwe-89"], ["CWE-89", "CWE-89"], ["CWE-0"]])
+def test_rag_topic_labels_reject_invalid_or_duplicate_cwe_ids(
+    tmp_path: Path, topics: list[str]
+) -> None:
+    case = _case_payload()
+    case["knowledge_cwe_ids"] = topics
+    path = tmp_path / "invalid-topics.json"
+    path.write_text(json.dumps({"cases": [case]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid RAG case"):
+        load_rag_cases(path)
 
 
 def test_bundled_case_queries_exercise_labeled_retrieval_paths() -> None:

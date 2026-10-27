@@ -334,20 +334,26 @@ def _current_revision() -> str:
     git_executable = shutil.which("git")
     if git_executable is None:
         return "unavailable"
-    try:
-        # Only the resolved executable and fixed arguments reach the subprocess.
-        result = subprocess.run(  # noqa: S603 - fixed read-only Git metadata command
-            [str(Path(git_executable).resolve()), "rev-parse", "--verify", "HEAD"],
-            cwd=_REPOSITORY_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            shell=False,  # nosec B603
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return "unavailable"
-    return result.stdout.strip()
+    for attempt in range(2):
+        try:
+            # Only the resolved executable and fixed arguments reach the subprocess.
+            result = subprocess.run(  # noqa: S603 - fixed read-only Git metadata command
+                [str(Path(git_executable).resolve()), "rev-parse", "--verify", "HEAD"],
+                cwd=_REPOSITORY_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                shell=False,  # nosec B603
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 0:
+                continue
+            return "unavailable"
+        except (OSError, subprocess.CalledProcessError):
+            return "unavailable"
+        return result.stdout.strip()
+    return "unavailable"
 
 
 def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:

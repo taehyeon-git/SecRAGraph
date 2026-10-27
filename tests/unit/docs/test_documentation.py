@@ -37,12 +37,19 @@ def test_readme_has_required_portfolio_sections() -> None:
         "## 핵심 아키텍처",
         "## LangGraph 워크플로",
         "## RAG와 Text2SQL",
-        "## 빠른 시작",
+        "## 시작 및 구동",
         "## 테스트와 CI",
         "## 한계",
         "## 출처와 기여",
     ):
         assert heading in readme
+
+
+def test_readme_has_one_canonical_start_command() -> None:
+    readme = _read("README.md")
+    assert "## 빠른 시작" not in readme
+    assert readme.count("uv run --frozen python -m scripts.local_up") == 1
+    assert "docker compose up -d" not in readme
 
 
 def test_portfolio_artifacts_and_local_links_exist() -> None:

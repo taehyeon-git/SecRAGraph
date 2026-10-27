@@ -284,6 +284,24 @@ def test_current_revision_reports_unavailable_without_git(
     assert benchmark_module._current_revision() == "unavailable"
 
 
+def test_current_revision_retries_a_transient_git_timeout_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: str(Path("tools/git").resolve()))
+    attempts: list[float] = []
+
+    def flaky(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        attempts.append(float(kwargs["timeout"]))
+        if len(attempts) == 1:
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return subprocess.CompletedProcess(args, 0, "a" * 40 + "\n", "")
+
+    monkeypatch.setattr(subprocess, "run", flaky)
+
+    assert benchmark_module._current_revision() == "a" * 40
+    assert attempts == [5.0, 5.0]
+
+
 @pytest.mark.parametrize(
     "failure",
     [

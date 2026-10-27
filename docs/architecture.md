@@ -1,6 +1,6 @@
 # 아키텍처
 
-SecRAGraph는 Python 모듈형 단일 서비스입니다. 정적 스캔과 지식 질의가 같은 API 프로세스에 있지만, 서로 다른 LangGraph와 의존성 경계를 가집니다. [README](../README.md)의 빠른 시작은 이 구조의 로컬 Compose 배치를 사용합니다.
+SecRAGraph는 Python 모듈형 단일 서비스입니다. 정적 스캔과 지식 질의가 같은 API 프로세스에 있지만, 서로 다른 LangGraph와 의존성 경계를 가집니다. [README](../README.md)의 단일 시작 명령은 이 구조의 로컬 Compose 배치를 사용합니다.
 
 ## 요청과 데이터 흐름
 
@@ -24,7 +24,7 @@ flowchart TB
   VEC --> QDRANT
 ```
 
-CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없으며 PostgreSQL에 보고서를 저장하지 않습니다. API의 `ScanService`는 영속 보고서 저장소를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
+CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없고 PostgreSQL에 보고서를 저장하지 않지만, 지원되는 잠금 파일이 있으면 OSV 자동 감사를 연결합니다. API의 `ScanService`는 영속 보고서 저장소와 기본 OSV 감사를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
 
 ## 두 LangGraph의 실제 노드
 
@@ -32,10 +32,12 @@ CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에�
 
 ```text
 validate_input → deterministic_scan → normalize_findings
-→ retrieve_finding_evidence → calculate_risk → build_report
+→ audit_dependencies → retrieve_finding_evidence → calculate_risk → build_report
 ```
 
 `retrieve_finding_evidence`는 규칙 결과의 `references`에 Qdrant 문서 출처를 합칩니다. finding ID, 탐지 위치, 심각도, CWE 매핑, 수정 권고는 결정적 결과를 유지합니다. 이 노드는 ChatModel 또는 PostgreSQL Text2SQL을 호출하지 않습니다. 검색 불가·시간 한도 초과 시 확인된 finding을 보존하고 `completed_with_warnings` 보고서를 만들 수 있습니다. 스캔 경로의 기본 수정 권고는 LLM 생성 문장이 아닙니다.
+
+`audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 정보 등급 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 정적 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
 
 지식 그래프([knowledge_graph.py](../src/security_review/orchestrator/knowledge_graph.py)):
 
@@ -95,7 +97,7 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 
 `POST /v1/auth/login`은 회원 자격 증명을 확인하고 opaque Session 토큰을 발급합니다. 저장소에는 토큰 digest만 저장하며 절대/유휴 만료, logout 폐기, 실패 로그인 잠금이 적용됩니다. 운영 Bearer 토큰은 설정 시 자동화 클라이언트의 대체 자격 증명으로 허용되며 웹 컨테이너에는 전달되지 않습니다. 사용자 계정과 기존 owner 없는 보고서의 동작은 [회원 문서](membership.md)에 있습니다.
 
-`POST /v1/vulnerabilities/query`는 사용자가 지정한 ecosystem/package/exact version만 OSV.dev에 보냅니다. 고정 HTTPS origin과 페이지·응답 크기·레코드 제한으로 호출하며 불완전/오류 응답은 503입니다. OSV advisory ID와 실제 CVE 기본 ID 또는 alias를 반환하고 CWE나 정적 finding으로부터 CVE를 추정하지 않습니다. 구현과 한계는 [OSV 문서](osv.md)를 참고하세요.
+일반 스캔의 OSV 단계는 잠금 파일에서 추출한 ecosystem/package/exact version만 OSV.dev에 보냅니다. 별도 `POST /v1/vulnerabilities/query`는 수동 좌표 조회도 제공합니다. 고정 HTTPS origin과 응답 크기·레코드 제한을 사용하며 불완전한 자동 조회는 범위 경고, 수동 조회 오류는 503으로 나타냅니다. OSV advisory ID와 실제 CVE 기본 ID 또는 alias만 사용하고 CWE나 정적 finding으로부터 CVE를 추정하지 않습니다. 구현과 한계는 [OSV 문서](osv.md)를 참고하세요.
 
 관리 `sync-corpus`는 manifest의 명시 파일 중 Markdown과 PDF를 처리합니다. PDF는 SHA-256 검증 후 pypdf로 추출합니다. 입력 바이트·페이지 수·원시 페이지 스트림·추출 후 문자 수에 한도를 두지만, 압축된 PDF 데이터의 파싱 자원 소모를 완전히 제한하지는 않습니다. 자동 탐색·다운로드나 OCR은 없습니다. 파일은 컨테이너 밖의 로컬 CLI 프로세스에서 처리되므로 manifest provenance는 무해성이나 권리 허가를 의미하지 않습니다. [공식 PDF 코퍼스 절차](official-corpus.md)를 참고하세요.
 

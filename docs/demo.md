@@ -95,7 +95,7 @@ uv run python -m scripts.run_external_scanner_benchmark --root $benchmarkRoot --
 
 ## 3. 로컬 회원 로그인과 루프백 API
 
-[README 빠른 시작](../README.md#빠른-시작)의 PowerShell DB 비밀번호 설정과 Compose 명령을 실행한 뒤 `create-user alice`로 회원을 만드세요. 웹 UI(`http://127.0.0.1:8501`)가 기본 클라이언트이며, 직접 API 호출은 다음처럼 회원 Session을 사용합니다. `Get-Credential`은 비밀번호를 입력 기록에 남기지 않습니다. 기존 PostgreSQL 볼륨의 비밀번호가 다르면 [운영 문서](operations.md)의 회전 절차를 따르며 볼륨을 지우지 않습니다.
+[README 시작 및 구동](../README.md#시작-및-구동)의 단일 명령을 실행해 회원을 만드세요. 웹 UI(`http://127.0.0.1:8501`)가 기본 클라이언트이며, 직접 API 호출은 다음처럼 회원 Session을 사용합니다. `Get-Credential`은 비밀번호를 입력 기록에 남기지 않습니다. 기존 PostgreSQL 볼륨의 비밀번호 파일이 없으면 [운영 문서](operations.md)의 복구 절차를 따르며 볼륨을 지우지 않습니다.
 
 ```powershell
 $credential = Get-Credential -UserName alice -Message 'SecRAGraph member login'
@@ -120,27 +120,17 @@ ZIP 업로드는 `POST /v1/scans/archive`이며 보관 파일의 경로·링크�
 
 ## 4. 선택적 지식 질의
 
-동봉된 [CVE/CWE CSV](../data/samples/README.md)는 합성 데이터이므로 실제 취약점 피드로 사용하지 마세요. PostgreSQL 적재는 키 없이 실행할 수 있습니다.
+동봉된 [CVE/CWE CSV](../data/samples/README.md)는 합성 데이터입니다. [단일 시작 명령](../README.md#시작-및-구동)이 새 데이터베이스에만 이를 적재하므로 실제 취약점 피드로 해석하지 마세요.
+
+실제 RAG와 Text2SQL 답변에는 유효한 모델·임베딩 제공자 키가 필요합니다. 키를 현재 셸의 `SECRAGRAPH_OPENAI_API_KEY`에 안전하게 설정한 뒤 같은 단일 시작 명령을 다시 실행하면, 공식 수집 또는 검증된 캐시가 있을 때 사례별 CWE 코퍼스를 전용 Qdrant 컬렉션에 동기화합니다. 키가 없거나 검증된 공식 코퍼스가 없으면 앞의 키 없는 평가 증거만 생성됩니다. 별도 PDF를 추가할 때는 [공식 PDF 코퍼스 절차](official-corpus.md)를 따르세요.
+
+앞 절의 회원 로그인으로 얻은 `$headers`를 이용해 질의합니다.
 
 ```powershell
-docker compose run --rm migrate /app/.venv/bin/security-review import-intelligence --cwe /app/data/samples/cwe.csv --cve /app/data/samples/cve.csv
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/knowledge/query -Headers $headers -ContentType application/json -Body '{"question":"CWE 데이터는 몇 건인가요?"}'
 ```
 
-RAG와 Text2SQL 답변에는 유효한 모델/임베딩 제공자 키가 필요합니다. `SECRAGRAPH_OPENAI_API_KEY`를 현재 셸의 런타임 환경 변수로 안전하게 설정하고 API를 그 설정으로 다시 시작하세요. 다음 명령은 버전·출처·라이선스·원본 SHA-256을 적은 [매니페스트](../data/knowledge/manifest.json)를 먼저 검증하고 해당 코퍼스의 변경을 미리 보여 줍니다. 수집 대상은 manifest에 명시된 Markdown 또는 PDF입니다. 동봉한 `data/knowledge`는 프로젝트 고유의 Markdown 예시입니다. 공식 PDF를 쓸 때는 [명시적 acquisition, 권리 검토, digest 절차](official-corpus.md)를 먼저 확인하세요. PDF에는 OCR이나 자동 다운로드가 없습니다.
-
-```powershell
-docker compose up -d --force-recreate api
-docker compose run --rm qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge
-New-Item -ItemType Directory -Force -Path build/evidence | Out-Null
-$evidenceMount = "$(Join-Path (Get-Location) 'build/evidence'):/evidence"
-docker compose run --rm --volume $evidenceMount -e SECRAGRAPH_OPENAI_API_KEY qdrant-bootstrap /app/.venv/bin/security-review sync-corpus /app/data/knowledge --apply --receipt /evidence/ingest-receipt.json
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/knowledge/query -Headers @{Authorization = "Bearer $env:SECRAGRAPH_API_TOKEN"} -ContentType application/json -Body '{"question":"CWE 데이터는 몇 건인가요?"}'
-```
-
-분류 결과는 모델에 따라 달라질 수 있습니다. 응답의 `intent`, `sources`, `warnings`를 확인하고, RAG 인용은 해당 문서 원문과 대조하세요. 수집 데이터가 없거나 근거가 부족하면 충분한 답변이 나오지 않는 것이 정상입니다. 모델 호출은 외부 제공자 비용과 데이터 처리 정책의 영향을 받습니다.
-
-`sync-corpus`는 관리 코퍼스의 과거 버전 chunk만 정리하며, 빈 매니페스트를 적용하려면 별도의 `--allow-empty`가 필요합니다. 다른 코퍼스와 기존 비관리 chunk는 지우지 않습니다. 위 명령은 `--receipt` 경로를 호스트의 무시된 `build/evidence/ingest-receipt.json`에 연결합니다. 이 파일에는 문서 출처 메타데이터가 있으므로 공개 전 검토하세요. 이전의 `ingest-documents` 명령은 호환성을 위해 남아 있으나 출처 매니페스트 검증을 하지 않습니다.
-
+분류 결과는 모델에 따라 달라질 수 있습니다. 응답의 `intent`, `sources`, `warnings`를 확인하고 RAG 인용을 원문과 대조하세요. 근거가 부족하면 보류할 수 있으며, 외부 제공자 호출에는 비용과 데이터 처리 정책이 적용됩니다.
 ## 5. 검증과 증거 보관
 
 [CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416468)은 `v0.1.0` 태그 대상 커밋에서 테스트·품질·의존성 감사·컨테이너 빌드가 모두 통과했습니다. 같은 커밋의 [보안 셀프 스캔](https://github.com/taehyeon-git/SecRAGraph/actions/runs/37821416381)은 SARIF 생성·검증·업로드에 성공했고, [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning)에 결과가 반영되었습니다. 2026-10-09 확인 당시 열린 경고는 0건이지만, 이는 취약점이 없다는 보증이 아닙니다. [v0.1.0 릴리스](https://github.com/taehyeon-git/SecRAGraph/releases/tag/v0.1.0)도 공개했습니다.
