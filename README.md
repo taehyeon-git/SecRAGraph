@@ -37,6 +37,8 @@ flowchart LR
   API --> APP
   APP --> SG[LangGraph scan graph]
   SG --> RULES[Deterministic scanner]
+  SG --> LOCK[Exact lockfile coordinates]
+  LOCK --> OSV[(OSV.dev)]
   SG -. optional evidence references .-> QD[(Qdrant)]
   APP --> REPORT[Canonical report]
   REPORT --> PG[(PostgreSQL app schema)]
@@ -52,74 +54,38 @@ flowchart LR
 
 ## LangGraph 워크플로
 
-스캔 경로: `validate_input → deterministic_scan → normalize_findings → retrieve_finding_evidence → calculate_risk → build_report`. Qdrant 또는 임베딩 제공자를 사용할 수 없으면 확인된 finding은 유지하고 경고를 기록합니다. 스캔 경로는 ChatModel이나 PostgreSQL Text2SQL을 호출하지 않습니다.
+스캔 경로: `validate_input → deterministic_scan → normalize_findings → audit_dependencies → retrieve_finding_evidence → calculate_risk → build_report`. OSV 조회를 선택적 RAG보다 먼저 실행해 RAG 지연 때문에 잠금 파일 검사를 놓치지 않습니다. Qdrant, 임베딩 제공자 또는 OSV를 사용할 수 없으면 확인된 finding은 유지하고 범위 경고를 기록합니다. 스캔 경로는 ChatModel이나 PostgreSQL Text2SQL을 호출하지 않습니다.
 
 지식 질의 경로: `classify_intent`가 `general_answer`, `text2sql`, `vector_search` 중 하나를 고릅니다. RAG 경로는 `vector_search → evaluate_vector_results → [rewrite_query/retry | generate_grounded_answer | stop]`로 진행하며, 근거가 없으면 부족하다고 답합니다. 일반 설명 경로에는 저장된 문서 인용이 없으므로 근거 기반 답변으로 해석하면 안 됩니다. 자세한 노드와 인터페이스는 [아키텍처](docs/architecture.md)를 보세요.
 
 ## RAG와 Text2SQL
 
-- RAG 수집은 사용자가 실행합니다. 관리 manifest는 UTF-8 `.md`/`.markdown`과 명시적으로 지정한 PDF를 지원하며 PDF를 자동 검색하거나 다운로드하지 않습니다. PDF 원본은 manifest SHA-256으로 확인하고 추출 후 페이지·전체 문자 수를 제한하며, 원시 페이지 스트림 검사도 합니다. 압축된 PDF 데이터는 파싱 중 자원을 소모할 수 있으므로 해제된 전체 크기가 완전히 제한되는 것은 아닙니다. 임베딩 키와 Qdrant 컬렉션은 적용에 필요합니다. [동봉된 Markdown 지침](data/knowledge/secragraph-security-guidelines.md)은 프로젝트 데모 문서이고 [검증용 manifest](data/knowledge/manifest.json)에 provenance가 있습니다. [공식 PDF 코퍼스 절차](docs/official-corpus.md)는 publisher, 권리, 버전과 해시를 검토한 뒤 별도 로컬 manifest로 관리하는 방법을 설명합니다. `sync-corpus`는 기본 미리보기이며 `--apply`가 있어야 해당 관리 코퍼스만 갱신합니다.
+- 시작 파이프라인은 53개 스캐너 사례와 4개 RAG 질문의 검토된 CWE 라벨을 읽어 필요한 공식 MITRE CWE 항목만 자동 수집합니다. 수집 원문은 크기·출처·ID를 검사하고 SHA-256 manifest와 57개 사례의 연결 기록을 `build/auto-corpus`에 남깁니다. 네트워크 장애 때는 검증된 캐시를 재사용하거나 [동봉된 프로젝트 지침](data/knowledge/secragraph-security-guidelines.md)만 쓰면서 공식 근거 부재를 명시합니다. 관련 패키지·버전이 없는 평가 사례에서 CVE를 추정하지 않습니다. 제공자 키가 있으면 이 관리 코퍼스를 Qdrant에 적용하고, 키가 없으면 로컬 LangGraph 평가만 실행합니다. 추가 PDF는 자동 검색하지 않으며 [공식 PDF 코퍼스 절차](docs/official-corpus.md)에 따라 별도 검증·수집할 수 있습니다.
 - Text2SQL은 모델이 만든 SQL을 SQLGlot AST로 검증한 뒤 `intel.cwe`와 `intel.cve`의 제한된 `SELECT`만 읽기 전용 역할로 실행합니다. 행 수·시간·재시도가 제한됩니다. [세부 통제](docs/text2sql-security.md)를 참고하세요.
-- [동봉된 CVE/CWE CSV](data/samples/README.md)는 합성 데모 데이터입니다. 실제 취약점 피드나 운영 환경의 지식 범위를 대변하지 않습니다. 외부 자료는 권리를 확인한 사용자가 직접 확보하고 수집해야 합니다.
+- [동봉된 CVE/CWE CSV](data/samples/README.md)는 합성 데모 데이터입니다. 실제 취약점 피드나 운영 환경의 지식 범위를 대변하지 않습니다. 공식 CWE 자동 수집과 별개로 유지합니다.
 
 공식 자료 한 건의 실제 수집·해시 확인·키 없는 미리보기 결과는 [NIST SSDF PDF 로컬 검증 기록](docs/evidence/official-pdf-local.md)에 남겼습니다. PDF 원본은 Git에 포함하지 않습니다.
 
-모델 키 없이도 실제 지식 LangGraph·메모리 내 Qdrant의 RAG 경로를 재현할 수 있습니다. `uv run python -m scripts.run_rag_evidence`는 동봉한 지침과 고정 사례 4건을 평가해 `build/evidence/rag.json`, `build/evidence/rag.md`를 만들고 라벨 불일치 시 실패합니다. 2026-10-18 로컬 실행 결과는 4/4 사례 통과였으며, 직접 검색·재작성 후 검색·근거 부족 보류·가짜 인용 거부를 포함합니다. 이는 결정적 테스트 더블의 워크플로·인용 계약 결과이며 실제 LLM 품질 점수가 아닙니다. 별도의 선택 실행 `scripts.run_live_rag_evidence`는 키가 있을 때만 실제 제공자 경로를 관찰하고, 답변의 사실성은 사람 검토가 필요하다고 표시합니다. 질문, 출처 발췌, 지표 분모와 재현 절차는 [데모](docs/demo.md#2-키-없는-오프라인-rag-근거)에 있습니다.
+모델 키 없이도 실제 지식 LangGraph·메모리 내 Qdrant의 RAG 경로를 재현할 수 있습니다. `uv run python -m scripts.run_rag_evidence`는 동봉한 지침과 고정 사례 4건을 평가해 `build/evidence/rag.json`, `build/evidence/rag.md`를 만들고 라벨 불일치 시 실패합니다. 2026-10-18 로컬 실행 결과는 4/4 사례 통과였으며, 직접 검색·재작성 후 검색·근거 부족 보류·가짜 인용 거부를 포함합니다. 이 기준선 평가는 자동 수집한 MITRE 문서를 검색한 결과가 아니라 동봉 지침과 결정적 테스트 더블의 워크플로·인용 계약 결과이며 실제 LLM 품질 점수가 아닙니다. 별도의 선택 실행 `scripts.run_live_rag_evidence`는 키가 있을 때만 실제 제공자 경로를 관찰하고, 답변의 사실성은 사람 검토가 필요하다고 표시합니다. 질문, 출처 발췌, 지표 분모와 재현 절차는 [데모](docs/demo.md#2-키-없는-오프라인-rag-근거)에 있습니다.
 
-## 빠른 시작
+## 시작 및 구동
 
-저장소 루트에서 Docker Desktop의 Linux 엔진(또는 Linux Docker 엔진)을 사용합니다. 아래는 Windows PowerShell 5.1/7 명령이며 DB 비밀번호 두 개를 현재 셸에만 둡니다. 회원 계정은 기동 뒤 `create-user`로 만들며 웹 UI에 공용 API 토큰은 필요하지 않습니다. 기존 `postgres_data` 볼륨이 있다면 새 `POSTGRES_PASSWORD` 대신 초기화 당시 비밀번호를 사용하세요. 계정 및 DB 운영 절차는 [운영 문서](docs/operations.md)에 있습니다.
+Python 3.11 이상, `uv`, Docker Desktop Linux 엔진 또는 Linux Docker 엔진을 준비하고 저장소 루트에서 아래 명령을 실행합니다. Windows PowerShell과 Linux 셸에서 같습니다.
 
-```powershell
-$adminBytes = New-Object byte[] 32
-$readerBytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-try {
-    $rng.GetBytes($adminBytes)
-    $rng.GetBytes($readerBytes)
-} finally {
-    $rng.Dispose()
-}
-$env:POSTGRES_PASSWORD = [BitConverter]::ToString($adminBytes).Replace('-', '')
-$env:SECRAGRAPH_READER_PASSWORD = [BitConverter]::ToString($readerBytes).Replace('-', '')
-docker compose config --quiet
-docker compose build api web
-docker compose up -d
-docker compose ps -a
-docker compose exec api /app/.venv/bin/security-review create-user alice
-Invoke-RestMethod http://127.0.0.1:8000/health/ready
+```text
+uv run --frozen python -m scripts.local_up
 ```
 
-API와 웹 UI는 기본적으로 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. `create-user`가 만든 계정으로 `http://127.0.0.1:8501`에 로그인하세요. 회원 세션은 API에 `Session` 인증으로 전달되고 보고서 조회는 소유자별로 제한됩니다. 선택적 `SECRAGRAPH_API_TOKEN`은 신뢰된 CLI/CI 자동화용 운영 Bearer 자격 증명입니다. 첫 빌드 시간은 환경에 따라 다릅니다. 비밀번호·토큰을 담은 `docker compose config` 전체 출력은 공유하지 마세요.
+이 명령은 사례별 공식 CWE 코퍼스 준비, 키 없는 스캐너·RAG 평가, Docker Compose 빌드·마이그레이션·서비스 준비, 최초 회원 생성과 상태 확인을 이어서 실행합니다. DB 비밀번호는 Git에서 제외된 로컬 파일에 처음 한 번만 만들고 재실행 때 재사용합니다. 기존 PostgreSQL 볼륨은 있는데 암호 파일이 없다면 데이터 보호를 위해 멈추고 복구 방법을 안내합니다. API와 웹 UI는 호스트의 `127.0.0.1:8000`, `127.0.0.1:8501`에서만 열립니다. 화면 `http://127.0.0.1:8501`에 생성한 회원으로 로그인하세요. [운영 문서](docs/operations.md)에 상태 확인·복구·종료 절차가 있습니다.
 
-로컬 CLI는 Python 3.11 이상과 `uv`를 사용합니다. 아래 스캔에는 모델 키·PostgreSQL·Qdrant가 필요하지 않습니다.
+로컬 CLI 스캔에는 모델 키·PostgreSQL·Qdrant가 필요하지 않습니다. 잠금 파일이 있으면 지원되는 정확한 패키지·버전을 OSV.dev에 자동 조회해 의존성 결과를 보강합니다. 외부 조회를 끄는 방법과 전송되는 좌표는 [OSV 설명](docs/osv.md)을 참고하세요.
 
 ```powershell
-uv sync --frozen --dev
 uv run security-review scan examples/insecure/sample.py --format markdown
 uv run security-review scan examples/insecure/sample.py --format sarif --output build/sample.sarif
 ```
 
-직접 API를 호출할 때는 먼저 [빠른 시작](docs/operations.md)에서 만든 회원으로 로그인합니다. `Get-Credential`은 비밀번호를 입력 기록에 남기지 않으며 로그인 응답의 세션 토큰은 현재 PowerShell 프로세스의 변수에만 둡니다. 아래 예시는 세션 인증을 사용합니다. JSON 응답의 `scan_id`로 `/v1/scans/{scan_id}` 또는 `/v1/scans/{scan_id}/report?format=markdown|sarif`를 조회할 수 있습니다. OpenAPI는 `http://127.0.0.1:8000/docs`에 있습니다.
-
-```powershell
-$credential = Get-Credential -UserName alice -Message 'SecRAGraph member login'
-$secretPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
-try {
-    $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($secretPointer)
-    $loginBody = @{username = $credential.UserName; password = $plainPassword} | ConvertTo-Json -Compress
-    $session = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/v1/auth/login -ContentType 'application/json' -Body $loginBody
-} finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($secretPointer)
-    Remove-Variable plainPassword, loginBody -ErrorAction SilentlyContinue
-}
-$authHeader = "Authorization: Session $($session.token)"
-$scan = curl.exe -sS -H $authHeader -F "file=@examples/insecure/sample.py;type=text/x-python" http://127.0.0.1:8000/v1/scans/file | ConvertFrom-Json
-$scan.scan_id
-Invoke-RestMethod "http://127.0.0.1:8000/v1/scans/$($scan.scan_id)" -Headers @{Authorization = "Session $($session.token)"}
-```
-
-ZIP은 `POST /v1/scans/archive`에서 검증 후 처리합니다. `POST /v1/knowledge/query`는 별도 지식 기능입니다. 제공자 키, PostgreSQL 데이터, Qdrant에 수집한 문서를 준비한 뒤 호출해야 하며, 빈 Compose 시작만으로 근거 있는 답변이 생성되지는 않습니다. [운영 문서](docs/operations.md)에 샘플 데이터 적재와 Markdown 수집 명령이 있습니다.
+직접 API 호출은 [운영 문서](docs/operations.md)의 회원 로그인 절차를 따르세요. OpenAPI는 `http://127.0.0.1:8000/docs`에 있습니다. 제공자 키가 없으면 공식 CWE 문서를 로컬에 준비하더라도 API의 실제 모델 기반 RAG 답변은 사용할 수 없습니다. 키 없는 평가 증거는 별도로 생성됩니다.
 
 ## 키 없는 스캐너 평가
 
@@ -150,13 +116,13 @@ uv run python -m scripts.run_scanner_benchmark
 
 ## 패키지 취약점 조회
 
-`security-review osv-query --ecosystem PyPI --package jinja2 --version 2.4.1`은 지정한 패키지와 버전을 OSV.dev에 조회합니다. 인증된 `POST /v1/vulnerabilities/query`와 웹 UI의 **Dependency CVEs** 탭도 같은 버전 범위 조회를 사용합니다. 패키지 식별자는 외부 OSV 서비스로 전송되며 빈 결과는 안전을 증명하지 않습니다. 결과의 CVE는 OSV가 실제로 반환한 CVE 기본 ID 또는 alias만 포함합니다. [OSV 조회 세부사항](docs/osv.md)을 참고하세요.
+일반 스캔은 공개 레지스트리의 `uv.lock`과 npm `package-lock.json` v2/v3에서 정확한 패키지·버전을 자동 추출하고 OSV.dev에 조회합니다. 일치하는 권고는 출처가 연결된 정보 등급 의존성 finding으로 추가하고, 조회 실패·지원하지 않는 잠금 항목은 검사 범위 경고로 남깁니다. 잠금 파일을 OSV에 그대로 보내지는 않지만 패키지명·버전은 전송됩니다. CLI의 `--offline`이나 API 자동 조회 설정으로 외부 조회를 끌 수 있습니다. 개별 `security-review osv-query --ecosystem PyPI --package jinja2 --version 2.4.1` 명령과 회원용 조회 화면도 유지합니다. CVE는 OSV가 실제 반환한 ID 또는 alias만 표시하며 빈 조회 결과는 안전을 증명하지 않습니다. [OSV 조회 세부사항](docs/osv.md)을 참고하세요.
 
 프로젝트 자신의 잠금 환경도 OSV로 감사하고 권고가 나온 라이브러리를 갱신했습니다. 실행 시점의 분모·버전·한계는 [의존성 감사 기록](docs/evidence/dependency-audit-2026-10-27.md)에 있습니다.
 
 ## 테스트와 CI
 
-이번 변경의 로컬 전체 테스트, 격리된 Compose·회원 로그인 스모크, RAG·스캐너 평가, 정적 검사 결과는 [2026-10-27 검증 기록](docs/evidence/validation-2026-10-27.md)에 있습니다. 실제 모델 품질과 임의 저장소 스캔 정확도는 이 수치에 포함되지 않습니다.
+이번 자동 수집·OSV·단일 구동 변경의 로컬 전체 테스트, 격리된 Compose·회원 로그인 스모크, 실조회, 평가 및 한계는 [자동 파이프라인 검증 기록](docs/evidence/auto-pipeline-2026-10-27.md)에 있습니다. 이전 기능의 [기존 검증 기록](docs/evidence/validation-2026-10-27.md)도 별도로 보존합니다. 실제 모델 품질과 임의 저장소 스캔 정확도는 이 수치에 포함되지 않습니다.
 
 CI의 `quality` 작업은 키 없는 RAG 증거와 오프라인 스캐너 벤치마크를 각각 실행하고, 두 평가의 JSON·Markdown 증거 파일을 검증합니다. 신뢰된 `main` push에서만 동봉된 합성 자료로 만든 네 파일을 [CI 실행 아티팩트](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml)로 14일간 게시합니다. PR 실행은 검증만 합니다. 전체 API·웹·DB·Qdrant Compose 스모크도 독립 프로젝트에서 수행하고 볼륨을 정리합니다.
 
@@ -165,12 +131,12 @@ CI의 `quality` 작업은 키 없는 RAG 증거와 오프라인 스캐너 벤치
 ```powershell
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src apps
+uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py
 uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 uv run bandit -q -r src apps
 ```
 
-전체 `uv run pytest`는 통합 테스트 전용 서비스가 필요합니다. [통합 테스트 Compose](tests/compose.integration.yaml)는 PostgreSQL을 `127.0.0.1:55432`, Qdrant를 `127.0.0.1:56333`에 띄우도록 정의합니다. 일부 테스트는 `SECRAGRAPH_TEST_API_URL`의 실행 중인 API도 필요하며 기본 URL은 `http://127.0.0.1:8000`입니다. 이는 빠른 시작 Compose의 PostgreSQL/Qdrant 기본 호스트 포트 `5432`/`6333`과 별개입니다. 해당 서비스를 준비하지 않은 로컬 환경에서 전체 테스트가 통과한다고 주장하지 않습니다.
+전체 `uv run pytest`는 통합 테스트 전용 서비스가 필요합니다. [통합 테스트 Compose](tests/compose.integration.yaml)는 PostgreSQL을 `127.0.0.1:55432`, Qdrant를 `127.0.0.1:56333`에 띄우도록 정의합니다. 일부 테스트는 `SECRAGRAPH_TEST_API_URL`의 실행 중인 API도 필요하며 기본 URL은 `http://127.0.0.1:8000`입니다. 이는 기본 Compose의 PostgreSQL/Qdrant 호스트 포트 `5432`/`6333`과 별개입니다. 해당 서비스를 준비하지 않은 로컬 환경에서 전체 테스트가 통과한다고 주장하지 않습니다.
 
 ## 한계
 

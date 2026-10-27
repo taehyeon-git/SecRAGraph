@@ -25,7 +25,9 @@ class UploadPolicy:
 
 
 FILE_UPLOAD_POLICY = UploadPolicy(
-    extensions=frozenset({".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".env", ".ini"}),
+    extensions=frozenset(
+        {".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".env", ".ini", ".uv.lock"}
+    ),
     content_types=frozenset(
         {
             "application/json",
@@ -49,6 +51,8 @@ def _extension(filename: str) -> str:
     path = Path(filename)
     if path.name.lower() == ".env":
         return ".env"
+    if path.name.lower() == "uv.lock":
+        return ".uv.lock"
     return path.suffix.lower()
 
 

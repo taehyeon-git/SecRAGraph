@@ -24,7 +24,7 @@ jobs:
       - run: uv sync --frozen --dev
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run mypy src apps
+      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py
       - run: uv run bandit -q -r src apps
       - name: Run keyless RAG evidence
         run: uv run python -m scripts.run_rag_evidence

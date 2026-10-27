@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from security_review.application import scan_path
-from security_review.domain.models import Confidence, Finding, ScanReport, Severity
+from security_review.domain.models import Confidence, Finding, ScanReport, Severity, SourceReference
 from security_review.reporting.builder import build_report
 from security_review.reporting.json_report import render_json
 from security_review.reporting.sarif import render_sarif
@@ -122,6 +122,76 @@ def test_sarif_fingerprints_distinguish_identical_matches_in_one_file() -> None:
 
     assert len(results) == 2
     assert len({item["partialFingerprints"]["primaryLocationLineHash"] for item in results}) == 2
+
+
+def test_sarif_keeps_distinct_osv_advisories_in_one_lockfile() -> None:
+    advisories = [
+        Finding(
+            id=f"OSV001:{suffix}",
+            rule_id="OSV001",
+            category="dependency",
+            severity=Severity.INFO,
+            file_path="package-lock.json",
+            line_start=1,
+            message=f"OSV advisory GHSA-{suffix} matches a locked dependency.",
+            redacted_evidence="Exact locked dependency coordinate matched an OSV advisory.",
+            confidence=Confidence.HIGH,
+            remediation="Review the advisory and upgrade.",
+        )
+        for suffix in ("one", "two")
+    ]
+    report = build_report("package-lock.json", advisories)
+
+    run = json.loads(render_sarif(report))["runs"][0]
+    assert len(run["results"]) == 2
+    assert (
+        len({item["partialFingerprints"]["primaryLocationLineHash"] for item in run["results"]})
+        == 2
+    )
+    assert run["tool"]["driver"]["rules"][0]["shortDescription"]["text"] == (
+        "Vulnerable locked dependency reported by OSV.dev."
+    )
+    assert {item["message"]["text"] for item in run["results"]} == {
+        advisory.message for advisory in advisories
+    }
+
+
+def test_sarif_osv_result_links_only_a_validated_public_advisory() -> None:
+    advisory = Finding(
+        id="OSV001:stable",
+        rule_id="OSV001",
+        category="dependency",
+        severity=Severity.INFO,
+        file_path="uv.lock",
+        line_start=1,
+        message="OSV advisory GHSA-abcd-1234-5678 matches jinja2 2.4.1.",
+        redacted_evidence="Exact locked dependency coordinate matched an OSV advisory.",
+        confidence=Confidence.HIGH,
+        remediation="Review the advisory and upgrade.",
+        references=(
+            SourceReference(
+                id="forged",
+                title="forged",
+                source_url="https://example.test/secret",
+            ),
+            SourceReference(
+                id="osv:GHSA-abcd-1234-5678",
+                title="GHSA-abcd-1234-5678",
+                source_url="https://osv.dev/vulnerability/GHSA-abcd-1234-5678",
+            ),
+        ),
+    )
+    result = json.loads(render_sarif(build_report("uv.lock", (advisory,))))["runs"][0]["results"][0]
+
+    assert result["properties"]["osvAdvisoryUrl"] == (
+        "https://osv.dev/vulnerability/GHSA-abcd-1234-5678"
+    )
+    assert (
+        "[Open OSV advisory](https://osv.dev/vulnerability/GHSA-abcd-1234-5678)"
+        in result["message"]["markdown"]
+    )
+    assert "jinja2 2.4.1" in result["message"]["markdown"]
+    assert "example.test" not in json.dumps(result)
 
 
 def test_sarif_fingerprint_does_not_hash_raw_secret_value() -> None:

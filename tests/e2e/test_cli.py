@@ -1,13 +1,17 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 import security_review.application as application_module
 import security_review.cli as cli_module
 from security_review.application import scan_path
 from security_review.cli import app
+from security_review.intelligence.dependency_osv import DependencyCoordinate, LiveDependencyAuditor
 from security_review.intelligence.ingestion import DocumentIngestionError
+from security_review.intelligence.osv import OsvAdvisory
 from security_review.scanner.files import ScanLimits
 from security_review.storage.intelligence import ImportSummary
 
@@ -80,6 +84,139 @@ def test_cli_succeeds_with_no_findings(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.stdout
     assert json.loads(result.stdout)["summary"]["total"] == 0
+
+
+def test_cli_scan_automatically_runs_dependency_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "safe.py"
+    target.write_text("answer = 42", encoding="utf-8")
+    calls: list[Path] = []
+
+    def fake_auditor(path: Path, _limits: ScanLimits) -> SimpleNamespace:
+        calls.append(path)
+        return SimpleNamespace(findings=(), warnings=())
+
+    monkeypatch.setattr(cli_module, "_dependency_auditor_factory", lambda: fake_auditor)
+
+    result = runner.invoke(app, ["scan", str(target), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [target.resolve()]
+
+
+def test_cli_scan_offline_makes_no_dependency_auditor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "safe.py"
+    target.write_text("answer = 42", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_dependency_auditor_factory",
+        lambda: pytest.fail("offline scan must not create an OSV auditor"),
+        raising=False,
+    )
+
+    result = runner.invoke(app, ["scan", str(target), "--format", "json", "--offline"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["summary"]["total"] == 0
+
+
+def test_cli_scan_auto_osv_adds_returned_cve_to_canonical_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "app.py").write_text("answer = 42\n", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text(
+        json.dumps(
+            {
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "demo", "version": "1.0.0"},
+                    "node_modules/vulnerable": {
+                        "version": "1.0.0",
+                        "resolved": "https://registry.npmjs.org/vulnerable/-/vulnerable-1.0.0.tgz",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    requested: list[DependencyCoordinate] = []
+
+    class FakeQueryer:
+        def query_batch(
+            self, coordinates: tuple[DependencyCoordinate, ...]
+        ) -> dict[DependencyCoordinate, tuple[OsvAdvisory, ...]]:
+            requested.extend(coordinates)
+            return {
+                coordinates[0]: (
+                    OsvAdvisory(
+                        id="GHSA-abcd-1234-5678",
+                        cve_ids=("CVE-2020-1234",),
+                        summary="Affected exact package version.",
+                        published_at=None,
+                        source_url="https://osv.dev/vulnerability/GHSA-abcd-1234-5678",
+                    ),
+                )
+            }
+
+    monkeypatch.setattr(
+        cli_module,
+        "_dependency_auditor_factory",
+        lambda: LiveDependencyAuditor(FakeQueryer()),
+    )
+
+    result = runner.invoke(app, ["scan", str(tmp_path), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert [(item.ecosystem, item.name, item.version) for item in requested] == [
+        ("npm", "vulnerable", "1.0.0")
+    ]
+    report = json.loads(result.stdout)
+    assert report["summary"]["total"] == 1
+    finding = report["findings"][0]
+    assert finding["rule_id"] == "OSV001"
+    assert "CVE-2020-1234" in finding["message"]
+    assert finding["references"][0]["source_url"] == (
+        "https://osv.dev/vulnerability/GHSA-abcd-1234-5678"
+    )
+
+
+@pytest.mark.parametrize("lockfile_name", ["uv.lock", "package-lock.json"])
+def test_cli_accepts_single_lockfile_for_dependency_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lockfile_name: str
+) -> None:
+    target = tmp_path / lockfile_name
+    target.write_text("invalid lock data", encoding="utf-8")
+    calls: list[Path] = []
+
+    def fake_auditor(path: Path, _limits: ScanLimits) -> SimpleNamespace:
+        calls.append(path)
+        return SimpleNamespace(findings=(), warnings=("dependency_lockfile_invalid",))
+
+    monkeypatch.setattr(cli_module, "_dependency_auditor_factory", lambda: fake_auditor)
+    result = runner.invoke(app, ["scan", str(target), "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [target.resolve()]
+    warnings = json.loads(result.stdout)["warnings"]
+    assert "dependency_lockfile_invalid" in warnings
+    assert f"{lockfile_name}:unsupported_extension" not in warnings
+
+
+def test_offline_uv_lock_scan_reports_unchecked_dependency_scope(tmp_path: Path) -> None:
+    target = tmp_path / "uv.lock"
+    target.write_text("version = 1\npackage = []\n", encoding="utf-8")
+
+    direct = runner.invoke(app, ["scan", str(target), "--format", "json", "--offline"])
+    directory = runner.invoke(app, ["scan", str(tmp_path), "--format", "json", "--offline"])
+
+    assert direct.exit_code == directory.exit_code == 0
+    for result in (direct, directory):
+        report = json.loads(result.stdout)
+        assert report["status"] == "completed_with_warnings"
+        assert "uv.lock:unsupported_extension" in report["warnings"]
 
 
 def test_scan_stops_with_stable_warning_after_deadline(

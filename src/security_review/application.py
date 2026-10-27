@@ -12,6 +12,7 @@ from uuid import UUID
 from security_review.domain.models import Finding, ScanReport
 from security_review.observability import log_scan_completed, request_context_bound
 from security_review.orchestrator.scan_graph import (
+    DependencyAuditor,
     DeterministicScanResult,
     ScanGraph,
     ScanGraphServices,
@@ -43,11 +44,19 @@ def _deterministic_scan(request: ScanRequest) -> DeterministicScanResult:
         deadline=deadline,
         clock=request.clock,
     )
+    dependency_lock_only = (
+        request.target.is_file()
+        and request.target.name.lower() == "uv.lock"
+        and not discovery.files
+        and len(discovery.skipped) == 1
+        and discovery.skipped[0].reason == "unsupported_extension"
+    )
     if (
         request.target.is_file()
         and not discovery.files
         and len(discovery.skipped) == 1
         and discovery.skipped[0].reason == "unsupported_extension"
+        and not dependency_lock_only
     ):
         raise UnsupportedTargetError(f"unsupported_extension: {request.target.name}")
 
@@ -124,11 +133,22 @@ def scan_path(
     *,
     target_name: str | None = None,
     clock: Callable[[], float] = monotonic,
+    dependency_auditor: DependencyAuditor | None = None,
 ) -> ScanReport:
     """Scan one file or directory through the shared LangGraph engine."""
 
+    graph = (
+        _DEFAULT_SCAN_GRAPH
+        if dependency_auditor is None
+        else build_scan_graph(
+            ScanGraphServices(
+                deterministic_scanner=_deterministic_scan,
+                dependency_auditor=dependency_auditor,
+            )
+        )
+    )
     report = _invoke_scan_graph(
-        _DEFAULT_SCAN_GRAPH,
+        graph,
         target,
         limits,
         target_name=target_name,

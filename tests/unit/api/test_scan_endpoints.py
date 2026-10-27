@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory, gettempdir
+from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -12,6 +13,8 @@ from fastapi.testclient import TestClient
 from security_review.api.app import create_app
 from security_review.api.dependencies import get_scan_service, get_temp_factory
 from security_review.config import Settings
+from security_review.domain.models import Confidence, Finding, Severity
+from security_review.scanner.files import ScanLimits
 
 
 class RaisingScanService:
@@ -79,6 +82,75 @@ def test_archive_scan_preserves_original_name_and_relative_paths(client: TestCli
     body = response.json()
     assert body["target_name"] == "backend-source.zip"
     assert body["findings"][0]["file_path"] == "src/app.py"
+
+
+def test_archive_scan_uses_automatic_dependency_auditor() -> None:
+    calls: list[str] = []
+    dependency_finding = Finding(
+        id="OSV001:sample",
+        rule_id="OSV001",
+        category="dependency",
+        severity=Severity.INFO,
+        file_path="package-lock.json",
+        line_start=1,
+        message="Locked package matched an OSV advisory.",
+        redacted_evidence="Version scoped OSV match; source omitted.",
+        confidence=Confidence.HIGH,
+        remediation="Upgrade to a reviewed fixed version.",
+    )
+
+    def auditor(target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        calls.append(target.name)
+        return SimpleNamespace(findings=(dependency_finding,), warnings=())
+
+    app = create_app(Settings(testing=True), dependency_auditor=auditor)
+    response = TestClient(app).post(
+        "/v1/scans/archive",
+        files={
+            "file": (
+                "source.zip",
+                zip_payload({"package-lock.json": b'{"lockfileVersion": 3, "packages": {}}'}),
+                "application/zip",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls
+    assert response.json()["findings"][0]["rule_id"] == "OSV001"
+
+
+def test_file_upload_accepts_exact_uv_lock_for_automatic_dependency_audit() -> None:
+    seen: list[str] = []
+
+    def auditor(target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        seen.append(target.name)
+        return SimpleNamespace(findings=(), warnings=("dependency_lockfile_invalid",))
+
+    app = create_app(Settings(testing=True), dependency_auditor=auditor)
+    response = TestClient(app).post(
+        "/v1/scans/file", files={"file": ("uv.lock", b"not toml", "text/plain")}
+    )
+
+    assert response.status_code == 200
+    assert seen == ["uv.lock"]
+    assert "dependency_lockfile_invalid" in response.json()["warnings"]
+
+
+def test_api_can_disable_automatic_osv_lookup() -> None:
+    def forbidden_auditor(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        pytest.fail("disabled API must not call OSV auditor")
+
+    app = create_app(
+        Settings(testing=True, auto_osv_enabled=False), dependency_auditor=forbidden_auditor
+    )
+    response = TestClient(app).post(
+        "/v1/scans/file",
+        files={"file": ("safe.py", b"answer = 42\n", "text/x-python")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["total"] == 0
 
 
 @pytest.mark.parametrize(

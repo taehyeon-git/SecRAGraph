@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     testing: bool = False
     api_token: SecretStr | None = None
     allow_self_registration: bool = False
+    auto_osv_enabled: bool = True
     database_url: str = "postgresql+psycopg://secragraph@postgres:5432/secragraph"
     intelligence_database_url: str | None = Field(default=None, min_length=1)
     qdrant_url: str = "http://qdrant:6333"

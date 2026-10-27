@@ -79,6 +79,22 @@ class DeterministicScanner(Protocol):
     def __call__(self, request: ScanRequest) -> DeterministicScanResult: ...
 
 
+class DependencyAuditResult(Protocol):
+    """Version-scoped OSV additions and bounded coverage warnings."""
+
+    @property
+    def findings(self) -> tuple[Finding, ...]: ...
+
+    @property
+    def warnings(self) -> tuple[str, ...]: ...
+
+
+class DependencyAuditor(Protocol):
+    """Inspect lockfiles and query exact coordinates without running target code."""
+
+    def __call__(self, target: Path, limits: ScanLimits) -> DependencyAuditResult: ...
+
+
 class ReportBuilder(Protocol):
     """Build the canonical report shared by every delivery adapter."""
 
@@ -121,6 +137,7 @@ class ScanGraphServices:
     """Dependencies and hard cost bounds captured by a compiled scan graph."""
 
     deterministic_scanner: DeterministicScanner | None = None
+    dependency_auditor: DependencyAuditor | None = None
     retriever: SecurityDocumentRetriever | None = None
     chat_model: ChatModel | None = None
     report_builder: ReportBuilder = assemble_report
@@ -226,11 +243,12 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
 
     def retrieve_finding_evidence(state: ScanState) -> ScanState:
         baseline = _required_findings(state, "deterministic_findings")
+        current = _required_findings(state, "findings")
         warnings = _required_warnings(state)
         if services.retriever is None or not baseline:
-            return {"findings": baseline}
+            return {"findings": current}
         if PROCESSING_TIME_LIMIT_EXCEEDED in warnings:
-            return {"findings": baseline}
+            return {"findings": current}
 
         limited = baseline[: services.max_enriched_findings]
         if len(baseline) > len(limited):
@@ -264,26 +282,64 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             warning = _configuration_warning(error, active_phase)
             log_dependency_failed(error.capability or active_phase, "configuration")
             return {
-                "findings": baseline,
+                "findings": current,
                 "warnings": _append_warning(warnings, warning),
             }
         except IntelligenceUnavailableError as error:
             warning = _provider_warning(error, active_phase)
             log_dependency_failed(error.capability, "unavailable")
             return {
-                "findings": baseline,
+                "findings": current,
                 "warnings": _append_warning(warnings, warning),
             }
         except _EnrichmentDeadlineReached:
             return {
-                "findings": baseline,
+                "findings": current,
                 "warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED),
             }
-        return {"findings": tuple(enriched), "warnings": warnings}
+        enriched_by_id = {finding.id: finding for finding in enriched}
+        return {
+            "findings": tuple(enriched_by_id.get(finding.id, finding) for finding in current),
+            "warnings": warnings,
+        }
 
     def calculate_risk(state: ScanState) -> ScanState:
         findings = _required_findings(state, "findings")
         return {"risk": calculate_risk_summary(findings)}
+
+    def audit_dependencies(state: ScanState) -> ScanState:
+        findings = _required_findings(state, "findings")
+        warnings = _required_warnings(state)
+        request = state.get("request")
+        if (
+            request is None
+            or services.dependency_auditor is None
+            or PROCESSING_TIME_LIMIT_EXCEEDED in warnings
+        ):
+            return {"findings": findings}
+        try:
+            _require_enrichment_time(state)
+        except _EnrichmentDeadlineReached:
+            return {"warnings": _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED)}
+        result = services.dependency_auditor(request.target, request.limits)
+        additions = _validated_finding_tuple(result.findings)
+        added_warnings = _validated_warning_tuple(result.warnings)
+        merged = normalize_report_findings((*findings, *additions))
+        warnings = tuple(
+            warning
+            for warning in warnings
+            if not (
+                warning.endswith(":unsupported_extension")
+                and Path(warning.removesuffix(":unsupported_extension")).name.lower() == "uv.lock"
+            )
+        )
+        for warning in added_warnings:
+            warnings = _append_warning(warnings, warning)
+        try:
+            _require_enrichment_time(state)
+        except _EnrichmentDeadlineReached:
+            warnings = _append_warning(warnings, PROCESSING_TIME_LIMIT_EXCEEDED)
+        return {"findings": merged, "warnings": warnings}
 
     def build_report(state: ScanState) -> ScanState:
         target_name = _validated_target_name(state.get("target_name"))
@@ -316,12 +372,14 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
     builder.add_node("deterministic_scan", deterministic_scan)
     builder.add_node("normalize_findings", normalize_findings)
     builder.add_node("retrieve_finding_evidence", retrieve_finding_evidence)
+    builder.add_node("audit_dependencies", audit_dependencies)
     builder.add_node("calculate_risk", calculate_risk)
     builder.add_node("build_report", build_report)
     builder.add_edge(START, "validate_input")
     builder.add_edge("validate_input", "deterministic_scan")
     builder.add_edge("deterministic_scan", "normalize_findings")
-    builder.add_edge("normalize_findings", "retrieve_finding_evidence")
+    builder.add_edge("normalize_findings", "audit_dependencies")
+    builder.add_edge("audit_dependencies", "retrieve_finding_evidence")
     builder.add_edge("retrieve_finding_evidence", "calculate_risk")
     builder.add_edge("calculate_risk", "build_report")
     builder.add_edge("build_report", END)

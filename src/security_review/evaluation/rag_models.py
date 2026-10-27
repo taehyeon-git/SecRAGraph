@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -32,6 +33,7 @@ class RagCase(BaseModel):
     expected_retrieved_section: str | None = Field(default=None, max_length=500)
     expected_cited_section: str | None = Field(default=None, max_length=500)
     expected_outcome: RagOutcome
+    knowledge_cwe_ids: tuple[str, ...] = Field(max_length=3)
     adapter_fault: Literal["forged_citation"] | None = None
     rewrite_query: str | None = Field(default=None, max_length=MAX_QUESTION_CHARACTERS)
     expected_failure_stage: Literal["grounded_answer_validation"] | None = None
@@ -54,6 +56,15 @@ class RagCase(BaseModel):
             raise ValueError("case text must not be blank or contain NUL")
         return normalized
 
+    @field_validator("knowledge_cwe_ids")
+    @classmethod
+    def validate_knowledge_cwe_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value) or any(
+            re.fullmatch(r"CWE-[1-9][0-9]{0,4}", item) is None for item in value
+        ):
+            raise ValueError("invalid or duplicate CWE topic ID")
+        return value
+
     @model_validator(mode="after")
     def validate_labels(self) -> Self:
         rewrites = "rewrite_query" in self.expected_completed_nodes
@@ -63,7 +74,11 @@ class RagCase(BaseModel):
             if self.expected_cited_section is None or self.expected_failure_stage is not None:
                 raise ValueError("answer cases require a cited section and no failure stage")
         elif self.expected_outcome == "abstain":
-            if self.expected_cited_section is not None or self.expected_failure_stage is not None:
+            if (
+                self.expected_cited_section is not None
+                or self.expected_failure_stage is not None
+                or self.knowledge_cwe_ids
+            ):
                 raise ValueError("abstention cases cannot cite or fail")
         elif (
             self.expected_cited_section is not None

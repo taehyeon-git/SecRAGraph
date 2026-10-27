@@ -9,6 +9,7 @@
       "expected_retrieved_section": "Injection-resistant data access",
       "expected_cited_section": "Injection-resistant data access",
       "expected_outcome": "answer",
+      "knowledge_cwe_ids": ["CWE-89"],
       "rewrite_query": null,
       "expected_failure_stage": null
     },
@@ -21,6 +22,7 @@
       "expected_retrieved_section": "Secrets and credential handling",
       "expected_cited_section": "Secrets and credential handling",
       "expected_outcome": "answer",
+      "knowledge_cwe_ids": ["CWE-200"],
       "rewrite_query": "exposed secret revoke rotate access logs credentials",
       "expected_failure_stage": null
     },
@@ -33,6 +35,7 @@
       "expected_retrieved_section": null,
       "expected_cited_section": null,
       "expected_outcome": "abstain",
+      "knowledge_cwe_ids": [],
       "rewrite_query": "lunar mining asteroid orbital telemetry",
       "expected_failure_stage": null
     },
@@ -45,6 +48,7 @@
       "expected_retrieved_section": "Authentication and authorization",
       "expected_cited_section": null,
       "expected_outcome": "invalid_source_citation",
+      "knowledge_cwe_ids": ["CWE-347"],
       "adapter_fault": "forged_citation",
       "rewrite_query": null,
       "expected_failure_stage": "grounded_answer_validation"

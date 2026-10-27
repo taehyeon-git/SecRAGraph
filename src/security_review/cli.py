@@ -24,6 +24,7 @@ from security_review.intelligence.manifest import ManifestError, load_verified_c
 from security_review.intelligence.osv import LiveOsvClient, OsvInputError, OsvUnavailableError
 from security_review.intelligence.qdrant_retriever import CorpusSyncResult
 from security_review.membership.service import MembershipError
+from security_review.orchestrator.scan_graph import DependencyAuditor
 from security_review.ports import IntelligenceConfigurationError, IntelligenceUnavailableError
 from security_review.reporting.sarif import render_sarif
 from security_review.reporting.types import ReportFormat, render_report
@@ -114,6 +115,12 @@ def _osv_client_factory() -> LiveOsvClient:
     return LiveOsvClient()
 
 
+def _dependency_auditor_factory() -> DependencyAuditor:
+    from security_review.intelligence.dependency_osv import LiveDependencyAuditor
+
+    return LiveDependencyAuditor()
+
+
 @app.command("osv-query")
 def osv_query(
     ecosystem: Annotated[str, typer.Option("--ecosystem")],
@@ -165,11 +172,16 @@ def scan(
         typer.Option("--format", case_sensitive=False),
     ] = ReportFormat.MARKDOWN,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    offline: Annotated[bool, typer.Option("--offline")] = False,
 ) -> None:
     """Scan TARGET and write JSON, Markdown, or SARIF."""
 
     try:
-        report = scan_path(target, ScanLimits())
+        report = scan_path(
+            target,
+            ScanLimits(),
+            dependency_auditor=None if offline else _dependency_auditor_factory(),
+        )
     except UnsupportedTargetError as error:
         raise typer.BadParameter(str(error), param_hint="TARGET") from error
     if report_format is ReportFormat.SARIF:

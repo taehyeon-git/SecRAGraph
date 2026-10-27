@@ -1,5 +1,7 @@
 # Curating an official PDF corpus
 
+The one-command local startup automatically retrieves a small, case-matched set of official MITRE CWE text records. This page covers **additional PDFs** only. The automatic collector does not search for or download PDFs; PDF rights, issue dates, and parser resource risks still require separate review.
+
 PDF support is limited to explicit, local files named in a version 1 `manifest.json`. The sync command never discovers PDFs recursively or downloads publisher links. A manifest SHA-256 authenticates the bytes selected by the operator; it does not certify that a file is harmless or that its reuse rights are clear. The CLI runs in the local host process, so it does not inherit the Compose API container's 1 CPU / 1 GB memory limits. For an operational corpus, use a disposable container or equivalent OS resource limits and mount the corpus read-only. pypdf does not execute PDF JavaScript or attachments here; this pipeline does not OCR scanned pages, follow links, or open embedded files.
 
 ## Reviewed acquisition catalog
