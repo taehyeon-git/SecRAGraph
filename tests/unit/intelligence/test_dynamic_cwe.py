@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from security_review.evaluation.scanner_models import load_scanner_cases
 from security_review.intelligence import case_corpus
 from security_review.intelligence.dynamic_cwe import (
     RUNTIME_CWE_CORPUS_ID,
@@ -274,7 +275,9 @@ def test_current_rules_are_preloaded_even_without_positive_case(
     selected = case_corpus._select_case_cwes(REPO_ROOT)
 
     assert "CWE-22" in selected.cwe_ids
-    assert len(selected.scanner_cases) == 53
+    assert len(selected.scanner_cases) == len(
+        load_scanner_cases(REPO_ROOT / "data/evaluation/scanner_cases.json")
+    )
     assert len(selected.rag_cases) == 4
     assert all("CWE-22" not in ids for ids in selected.scanner_cases.values())
 
@@ -300,7 +303,9 @@ def test_startup_selection_accepts_more_than_32_current_rule_cwes(
 
     assert set(f"CWE-{number}" for number in range(1000, 1040)).issubset(selected.cwe_ids)
     assert len(selected.cwe_ids) == 48
-    assert len(selected.scanner_cases) == 53
+    assert len(selected.scanner_cases) == len(
+        load_scanner_cases(REPO_ROOT / "data/evaluation/scanner_cases.json")
+    )
     assert len(selected.rag_cases) == 4
 
 

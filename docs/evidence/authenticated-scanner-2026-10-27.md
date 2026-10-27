@@ -3,7 +3,7 @@
 ## 실행 조건
 
 - 실행 코드 커밋: `af3844c9b7462c547c25e6dc37feb5e6728599fe` (실행 전 작업 트리 깨끗함)
-- 입력: `data/evaluation/scanner_cases.json`, 정규화 UTF-8 SHA-256 `8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826`
+- 입력: 당시의 `data/evaluation/scanner_cases.json`, 현재 [53건 보존 사본](../../data/evaluation/history/scanner_cases_53_2026-10-27.json), 정규화 UTF-8 SHA-256 `8cca80371d91e939c01274926547074cf26d23806f6e2432738446aa968bf826`
 - 규칙 버전: `2026.10.4`
 - 경로: 격리된 Docker Compose의 FastAPI, PostgreSQL, Qdrant; 임의의 `127.0.0.1` 포트
 - 계정: 회원 서비스로 만든 임시 회원 2명. 공개 회원가입이나 기존 사용자 계정을 사용하지 않음
