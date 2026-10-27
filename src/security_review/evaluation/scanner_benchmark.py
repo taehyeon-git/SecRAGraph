@@ -8,7 +8,7 @@ import subprocess  # nosec B404
 import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from security_review.application import scan_path
 from security_review.evaluation.scanner_models import FindingKey, ScannerCase, load_scanner_cases
@@ -385,6 +385,11 @@ def run_scanner_benchmark(cases_path: Path) -> ScannerBenchmark:
     )
 
 
+def _case_extension(file_path: str) -> str:
+    path = PurePosixPath(file_path)
+    return ".env" if path.name.lower() == ".env" else path.suffix.lower()
+
+
 def summarize_scanner_assessments(
     assessments: list[CaseAssessment], *, corpus_sha256: str, rule_set_version: str
 ) -> ScannerBenchmark:
@@ -394,6 +399,10 @@ def summarize_scanner_assessments(
     expected = frozenset(key for case in assessed for key in case.expected_findings)
     actual_keys = frozenset(key for case in assessed for key in case.actual_findings)
     eligible = frozenset(case.case_id for case in assessed if case.eligible_benign)
+    eligible_extensions = {
+        case.case_id: _case_extension(case.file_path) for case in assessed if case.eligible_benign
+    }
+    rule_extensions = {rule.rule_id: rule.extensions for rule in DEFAULT_RULES}
     rule_ids = sorted(
         {rule.rule_id for rule in DEFAULT_RULES}
         | {key[1] for key in expected}
@@ -405,7 +414,11 @@ def summarize_scanner_assessments(
             score_findings(
                 frozenset(key for key in expected if key[1] == rule_id),
                 frozenset(key for key in actual_keys if key[1] == rule_id),
-                eligible,
+                frozenset(
+                    case_id
+                    for case_id, extension in eligible_extensions.items()
+                    if extension in rule_extensions.get(rule_id, frozenset())
+                ),
             ),
         )
         for rule_id in rule_ids

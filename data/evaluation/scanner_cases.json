@@ -295,6 +295,842 @@
       "case_id": "sql-local-negative", "file_path": "sql/local.py",
       "source": "def process(user):\n    query = \"SELECT * FROM users WHERE id=?\"\n    cursor.execute(query, (user,))\n",
       "expected": [], "is_benign": true, "expected_diagnostics": [], "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py001-builtins-alias-positive",
+      "file_path": "python/exp-py001-builtins-alias-positive.py",
+      "source": "from builtins import eval as evaluate\nevaluate(request_text)\n",
+      "expected": [
+        {
+          "rule_id": "PY001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py001-qualified-positive",
+      "file_path": "python/exp-py001-qualified-positive.py",
+      "source": "import builtins\nbuiltins.eval(request_text)\n",
+      "expected": [
+        {
+          "rule_id": "PY001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py001-shadow-function-negative",
+      "file_path": "python/exp-py001-shadow-function-negative.py",
+      "source": "def eval(value):\n    return value\neval(request_text)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py001-quoted-example-negative",
+      "file_path": "python/exp-py001-quoted-example-negative.py",
+      "source": "note = 'eval(request_text)'\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py001-two-calls-line-positive",
+      "file_path": "python/exp-py001-two-calls-line-positive.py",
+      "source": "eval(first); eval(second)\n",
+      "expected": [
+        {
+          "rule_id": "PY001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-popen-alias-positive",
+      "file_path": "python/exp-py002-popen-alias-positive.py",
+      "source": "import subprocess as sp\nsp.Popen(request_text, shell=True)\n",
+      "expected": [
+        {
+          "rule_id": "PY002",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-system-import-positive",
+      "file_path": "python/exp-py002-system-import-positive.py",
+      "source": "from os import system as execute\nexecute(request_text)\n",
+      "expected": [
+        {
+          "rule_id": "PY002",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-sh-dynamic-list-positive",
+      "file_path": "python/exp-py002-sh-dynamic-list-positive.py",
+      "source": "import subprocess\nsubprocess.run(['sh', '-c', f'echo {request_text}'])\n",
+      "expected": [
+        {
+          "rule_id": "PY002",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-cmd-dynamic-tuple-positive",
+      "file_path": "python/exp-py002-cmd-dynamic-tuple-positive.py",
+      "source": "import subprocess\nsubprocess.call(('cmd.exe', '/c', 'echo ' + request_text))\n",
+      "expected": [
+        {
+          "rule_id": "PY002",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-sh-static-command-negative",
+      "file_path": "python/exp-py002-sh-static-command-negative.py",
+      "source": "import subprocess\nsubprocess.run(['sh', '-c', 'echo fixed'])\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-safe-argv-negative",
+      "file_path": "python/exp-py002-safe-argv-negative.py",
+      "source": "import subprocess\nsubprocess.run(['python', '--version'], shell=False)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py002-cmd-static-command-negative",
+      "file_path": "python/exp-py002-cmd-static-command-negative.py",
+      "source": "import subprocess\nsubprocess.call(('cmd.exe', '/c', 'echo fixed'))\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py003-from-get-alias-positive",
+      "file_path": "python/exp-py003-from-get-alias-positive.py",
+      "source": "from requests import get as fetch\nfetch(url, verify=False)\n",
+      "expected": [
+        {
+          "rule_id": "PY003",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py003-post-positive",
+      "file_path": "python/exp-py003-post-positive.py",
+      "source": "import requests\nrequests.post(url, data=payload, verify=False)\n",
+      "expected": [
+        {
+          "rule_id": "PY003",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py003-verify-true-negative",
+      "file_path": "python/exp-py003-verify-true-negative.py",
+      "source": "import requests\nrequests.get(url, verify=True)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py003-verify-string-negative",
+      "file_path": "python/exp-py003-verify-string-negative.py",
+      "source": "import requests\nrequests.get(url, verify='ca.pem')\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py003-shadow-negative",
+      "file_path": "python/exp-py003-shadow-negative.py",
+      "source": "import requests as http\nclass SafeClient:\n    def get(self, url, verify):\n        return None\nhttp = SafeClient()\nhttp.get(url, verify=False)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py004-positional-loader-positive",
+      "file_path": "python/exp-py004-positional-loader-positive.py",
+      "source": "import yaml\nyaml.load(untrusted_text, yaml.UnsafeLoader)\n",
+      "expected": [
+        {
+          "rule_id": "PY004",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py004-unsafe-import-positive",
+      "file_path": "python/exp-py004-unsafe-import-positive.py",
+      "source": "from yaml import unsafe_load as parse\nparse(untrusted_text)\n",
+      "expected": [
+        {
+          "rule_id": "PY004",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py004-cunsafe-loader-positive",
+      "file_path": "python/exp-py004-cunsafe-loader-positive.py",
+      "source": "import yaml\nyaml.load(untrusted_text, Loader=yaml.CUnsafeLoader)\n",
+      "expected": [
+        {
+          "rule_id": "PY004",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py004-safe-loader-negative",
+      "file_path": "python/exp-py004-safe-loader-negative.py",
+      "source": "import yaml\nyaml.load(untrusted_text, Loader=yaml.SafeLoader)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py004-safe-load-negative",
+      "file_path": "python/exp-py004-safe-load-negative.py",
+      "source": "import yaml\nyaml.safe_load(untrusted_text)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-sqlalchemy-format-positive",
+      "file_path": "python/exp-py005-sqlalchemy-format-positive.py",
+      "source": "from sqlalchemy import text as sql\nsql('UPDATE users SET name={}'.format(untrusted_name))\n",
+      "expected": [
+        {
+          "rule_id": "PY005",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-local-alias-positive",
+      "file_path": "python/exp-py005-local-alias-positive.py",
+      "source": "query = f'SELECT * FROM users WHERE id={untrusted_id}'\nstatement = query\ncursor.execute(statement)\n",
+      "expected": [
+        {
+          "rule_id": "PY005",
+          "line_start": 3
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-percent-positive",
+      "file_path": "python/exp-py005-percent-positive.py",
+      "source": "cursor.executemany('DELETE FROM users WHERE id=%s' % untrusted_id, rows)\n",
+      "expected": [
+        {
+          "rule_id": "PY005",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-bound-negative",
+      "file_path": "python/exp-py005-bound-negative.py",
+      "source": "query = 'SELECT * FROM users WHERE id=?'\ncursor.execute(query, (user_id,))\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-fixed-concat-negative",
+      "file_path": "python/exp-py005-fixed-concat-negative.py",
+      "source": "cursor.execute('SELECT * FROM ' + 'users')\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py005-nonsql-negative",
+      "file_path": "python/exp-py005-nonsql-negative.py",
+      "source": "message = f'hello {name}'\nlogger.info(message)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py006-loads-import-positive",
+      "file_path": "python/exp-py006-loads-import-positive.py",
+      "source": "from pickle import loads as decode\ndecode(untrusted_bytes)\n",
+      "expected": [
+        {
+          "rule_id": "PY006",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py006-module-alias-positive",
+      "file_path": "python/exp-py006-module-alias-positive.py",
+      "source": "import pickle as p\np.load(untrusted_stream)\n",
+      "expected": [
+        {
+          "rule_id": "PY006",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py006-shadow-negative",
+      "file_path": "python/exp-py006-shadow-negative.py",
+      "source": "import pickle as p\nclass IdentityDecoder:\n    def loads(self, data):\n        return data\np = IdentityDecoder()\np.loads(untrusted_bytes)\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-py006-comment-negative",
+      "file_path": "python/exp-py006-comment-negative.py",
+      "source": "# pickle.loads(untrusted_bytes)\nvalue = 1\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-mixed-eval-pickle-positive",
+      "file_path": "python/exp-mixed-eval-pickle-positive.py",
+      "source": "import pickle\neval(request_text)\npickle.loads(untrusted_bytes)\n",
+      "expected": [
+        {
+          "rule_id": "PY001",
+          "line_start": 2
+        },
+        {
+          "rule_id": "PY006",
+          "line_start": 3
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-mixed-shell-tls-positive",
+      "file_path": "python/exp-mixed-shell-tls-positive.py",
+      "source": "import subprocess\nimport requests\nsubprocess.run(request_text, shell=True)\nrequests.get(url, verify=False)\n",
+      "expected": [
+        {
+          "rule_id": "PY002",
+          "line_start": 3
+        },
+        {
+          "rule_id": "PY003",
+          "line_start": 4
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-mixed-safe-eval-positive",
+      "file_path": "python/exp-mixed-safe-eval-positive.py",
+      "source": "import ast\nvalue = ast.literal_eval(request_text)\nresult = eval(request_text)\n",
+      "expected": [
+        {
+          "rule_id": "PY001",
+          "line_start": 3
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-bracket-key-positive",
+      "file_path": "config/tls.js",
+      "source": "process.env[\"NODE_TLS_REJECT_UNAUTHORIZED\"] = \"0\";\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-bracket-env-positive",
+      "file_path": "config/tls.ts",
+      "source": "process[\"env\"].NODE_TLS_REJECT_UNAUTHORIZED = 0;\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-bracket-both-positive",
+      "file_path": "config/tls.ts",
+      "source": "process['env']['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-second-line-positive",
+      "file_path": "config/tls.js",
+      "source": "const safe = true;\nprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-env-spaces-positive",
+      "file_path": "config/.env",
+      "source": " NODE_TLS_REJECT_UNAUTHORIZED = \"0\" # disabled\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-env-singlequote-positive",
+      "file_path": "config/.env",
+      "source": "NODE_TLS_REJECT_UNAUTHORIZED='0'\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-repeat-positive",
+      "file_path": "config/tls.js",
+      "source": "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;\nprocess.env.NODE_TLS_REJECT_UNAUTHORIZED = \"0\";\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        },
+        {
+          "rule_id": "JS001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-prefix-receiver-negative",
+      "file_path": "config/tls.js",
+      "source": "other.process.env.NODE_TLS_REJECT_UNAUTHORIZED = \"0\";\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-property-extra-negative",
+      "file_path": "config/tls.js",
+      "source": "process.env.NODE_TLS_REJECT_UNAUTHORIZED_EXTRA = \"0\";\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-env-comment-negative",
+      "file_path": "config/.env",
+      "source": "# NODE_TLS_REJECT_UNAUTHORIZED=0\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js001-env-suffix-negative",
+      "file_path": "config/.env",
+      "source": "NODE_TLS_REJECT_UNAUTHORIZED=0suffix\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-js-positive",
+      "file_path": "config/client.js",
+      "source": "const API_KEY = \"synthetic-js-key-123456\";\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-ts-positive",
+      "file_path": "config/client.ts",
+      "source": "const API_KEY: string = \"synthetic-ts-key-123456\";\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-yaml-positive",
+      "file_path": "config/settings.yaml",
+      "source": "API_KEY: synthetic-yaml-key-123456\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-yml-positive",
+      "file_path": "config/settings.yml",
+      "source": "CLIENT_SECRET: \"synthetic-yml-secret-123456\"\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-toml-positive",
+      "file_path": "config/settings.toml",
+      "source": "API_KEY = \"synthetic-toml-key-123456\"\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-ini-positive",
+      "file_path": "config/settings.ini",
+      "source": "[auth]\nPASSWORD=synthetic-ini-pass-123456\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-json-nested-positive",
+      "file_path": "config/settings.json",
+      "source": "{\"auth\":{\"ACCESS_TOKEN\":\"synthetic-token-123456\"}}\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-env-aws-positive",
+      "file_path": "config/.env",
+      "source": "AWS_SECRET_ACCESS_KEY=synthetic-aws-secret-123456\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-yaml-quoted-positive",
+      "file_path": "config/settings.yaml",
+      "source": "auth:\n  \"CLIENT_SECRET\": \"synthetic-yaml-secret-123456\"\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-js-runtime-negative",
+      "file_path": "config/client.js",
+      "source": "const API_KEY = process.env.API_KEY;\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-yaml-comment-negative",
+      "file_path": "config/settings.yaml",
+      "source": "# CLIENT_SECRET: synthetic-long-secret-123456\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-js-comment-negative",
+      "file_path": "config/client.js",
+      "source": "// ACCESS_TOKEN = \"synthetic-comment-token-123456\";\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-ts-string-negative",
+      "file_path": "config/client.ts",
+      "source": "const note = 'API_KEY = \"synthetic-doc-key-123456\"';\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-json-placeholder-negative",
+      "file_path": "config/settings.json",
+      "source": "{\"CLIENT_SECRET\":\"replace_me\"}\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-toml-placeholder-negative",
+      "file_path": "config/settings.toml",
+      "source": "API_KEY=\"example_value\"\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-env-short-negative",
+      "file_path": "config/.env",
+      "source": "GITHUB_TOKEN=short\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-sec001-ini-comment-negative",
+      "file_path": "config/settings.ini",
+      "source": "[auth]\n# PASSWORD=synthetic-comment-pass-123456\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js-sec-env-combined-positive",
+      "file_path": "config/.env",
+      "source": "NODE_TLS_REJECT_UNAUTHORIZED=0\nAPI_KEY=synthetic-env-key-123456\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        },
+        {
+          "rule_id": "SEC001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "wide-js-sec-source-combined-positive",
+      "file_path": "config/client.js",
+      "source": "process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;\nconst API_KEY = \"synthetic-js-key-123456\";\n",
+      "expected": [
+        {
+          "rule_id": "JS001",
+          "line_start": 1
+        },
+        {
+          "rule_id": "SEC001",
+          "line_start": 2
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [],
+      "unassessed_rules": []
+    },
+    {
+      "case_id": "exp-python-syntax-secret-positive",
+      "file_path": "python/broken_secret.py",
+      "source": "API_KEY=\"synthetic-only-123456\"\nif (\n",
+      "expected": [
+        {
+          "rule_id": "SEC001",
+          "line_start": 1
+        }
+      ],
+      "is_benign": false,
+      "expected_diagnostics": [
+        "python_syntax_error"
+      ],
+      "unassessed_rules": [
+        "PY001",
+        "PY002",
+        "PY003",
+        "PY004",
+        "PY005",
+        "PY006"
+      ]
+    },
+    {
+      "case_id": "exp-python-syntax-benign",
+      "file_path": "python/broken_empty.py",
+      "source": "if (\n",
+      "expected": [],
+      "is_benign": true,
+      "expected_diagnostics": [
+        "python_syntax_error"
+      ],
+      "unassessed_rules": [
+        "PY001",
+        "PY002",
+        "PY003",
+        "PY004",
+        "PY005",
+        "PY006"
+      ]
     }
   ]
 }
