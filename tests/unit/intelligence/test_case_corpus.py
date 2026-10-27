@@ -157,11 +157,14 @@ def test_total_official_response_budget_degrades_before_unbounded_download(
         (REPO_ROOT / "data/evaluation/scanner_cases.json").read_bytes()
     )
     rag_cases = json.loads((REPO_ROOT / "data/evaluation/rag_cases.json").read_text("utf-8"))
-    extra_ids = [22, 79, 94, 119, 269, 287, 352, 434, 522, 611, 918, 943]
-    for number in extra_ids:
+    # 84 additional small, valid CWE IDs exceed the 16 MB aggregate response
+    # budget while remaining within the 128-ID startup selection cap.
+    extra_ids = list(range(1000, 1084))
+    for offset in range(0, len(extra_ids), 3):
+        batch = extra_ids[offset : offset + 3]
         case = rag_cases["cases"][0].copy()
-        case["case_id"] = f"extra_cwe_{number}"
-        case["knowledge_cwe_ids"] = [f"CWE-{number}"]
+        case["case_id"] = f"extra_cwe_{batch[0]}"
+        case["knowledge_cwe_ids"] = [f"CWE-{number}" for number in batch]
         rag_cases["cases"].append(case)
     (evaluation / "rag_cases.json").write_text(json.dumps(rag_cases), encoding="utf-8")
     shutil.copytree(REPO_ROOT / "data/knowledge", repo_root / "data/knowledge")
@@ -197,6 +200,31 @@ def test_total_official_response_budget_degrades_before_unbounded_download(
     coverage = json.loads(result.coverage_path.read_text(encoding="utf-8"))
     assert coverage["reason"] == "official_total_response_too_large"
     assert coverage["covered_cwe_ids"] == []
+
+
+def test_startup_official_collection_has_overall_deadline_without_waiting(
+    corpus_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [0.0]
+    requests: list[str] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        now[0] += 31.0
+        return _mitre_response(request, requests)
+
+    monkeypatch.setattr(case_corpus, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        case_corpus,
+        "_make_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(respond), follow_redirects=False),
+    )
+
+    result = case_corpus.prepare_case_corpus(REPO_ROOT, corpus_cache)
+
+    assert result.status == "fallback"
+    coverage = json.loads(result.coverage_path.read_text(encoding="utf-8"))
+    assert coverage["reason"] == "official_deadline_exceeded"
+    assert len(requests) <= 3
 
 
 def test_offline_reuses_only_verified_official_cache(

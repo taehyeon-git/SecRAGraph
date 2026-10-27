@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -38,6 +39,35 @@ class _UntypedChatModel:
         if isinstance(response, Exception):
             raise response
         return cast(str, response)
+
+
+class _FakeCweEvidence:
+    def __init__(
+        self,
+        *,
+        retriever: FakeDocumentRetriever | None = None,
+        failure: Exception | None = None,
+        warnings: tuple[str, ...] = (),
+    ) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.retriever = retriever
+        self.failure = failure
+        self.warnings = warnings
+
+    def ensure(self, cwe_ids: Sequence[str], *, deadline: float | None = None) -> object:
+        assert deadline is None
+        self.calls.append(tuple(cwe_ids))
+        if self.failure is not None:
+            raise self.failure
+        if self.retriever is not None:
+            self.retriever.results = (
+                _chunk(
+                    identifier="official:22",
+                    text="Validate paths before accessing files.",
+                    source_url="https://cwe.mitre.org/data/definitions/22.html",
+                ),
+            )
+        return SimpleNamespace(references_by_id={}, warnings=self.warnings)
 
 
 def _chunk(
@@ -133,6 +163,15 @@ def test_routes_security_questions(
 
 def test_graph_exposes_explicit_portfolio_nodes() -> None:
     services, _, _ = _services(("general", "answer"))
+    baseline_graph = build_knowledge_graph(services).get_graph()
+    assert "prepare_cwe_evidence" not in baseline_graph.nodes
+    provider = _FakeCweEvidence()
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
 
     graph = build_knowledge_graph(services).get_graph()
 
@@ -140,11 +179,142 @@ def test_graph_exposes_explicit_portfolio_nodes() -> None:
         "classify_intent",
         "general_answer",
         "text2sql",
+        "prepare_cwe_evidence",
         "vector_search",
         "evaluate_vector_results",
         "rewrite_query",
         "generate_grounded_answer",
     }.issubset(graph.nodes)
+
+
+def test_new_question_prepares_model_suggested_cwe_before_search() -> None:
+    retriever = FakeDocumentRetriever(results=())
+    provider = _FakeCweEvidence(retriever=retriever)
+    services, model, _ = _services(
+        ('{"route":"rag","cwe_ids":["CWE-22"]}', "Use validation. [source:official:22]"),
+        retriever=retriever,
+    )
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+
+    result = build_knowledge_graph(services).invoke(
+        {"question": "How do I prevent path traversal?"}
+    )
+
+    assert provider.calls == [("CWE-22",)]
+    assert retriever.calls == [("How do I prevent path traversal?", 5)]
+    assert result["intent"] == "rag"
+    assert result["answer"] == "Use validation. [source:official:22]"
+    assert result["sources"][0].id == "official:22"
+    assert len(model.calls) == 2
+
+
+def test_explicit_cwe_in_question_takes_priority_over_model_and_general_route() -> None:
+    provider = _FakeCweEvidence()
+    services, _, retriever = _services(
+        ('{"route":"general","cwe_ids":["CWE-89"]}', "Answer [source:guide:1]")
+    )
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "Explain CWE-22 mitigation"})
+
+    assert result["intent"] == "rag"
+    assert provider.calls == [("CWE-22",)]
+    assert len(retriever.calls) == 1
+
+
+def test_invalid_or_excessive_model_cwe_topics_do_not_trigger_acquisition() -> None:
+    provider = _FakeCweEvidence()
+    services, _, _ = _services(
+        ('{"route":"rag","cwe_ids":["CWE-22","CWE-0"]}', "Answer [source:guide:1]")
+    )
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "ambiguous security question"})
+
+    assert provider.calls == []
+    assert "cwe_topics_invalid" in result["warnings"]
+    assert result["intent"] == "rag"
+
+    excessive = ",".join(f'"CWE-{item}"' for item in range(1, 10))
+    second_services, _, _ = _services(
+        (f'{{"route":"rag","cwe_ids":[{excessive}]}}', "Answer [source:guide:1]")
+    )
+    second_services = KnowledgeServices(
+        chat_model=second_services.chat_model,
+        text2sql=second_services.text2sql,
+        retriever=second_services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+    second = build_knowledge_graph(second_services).invoke({"question": "many topics"})
+    assert provider.calls == []
+    assert "cwe_topics_invalid" in second["warnings"]
+
+
+def test_text2sql_question_does_not_acquire_model_cwe_topics() -> None:
+    provider = _FakeCweEvidence()
+    services, _, retriever = _services(('{"route":"text2sql","cwe_ids":["CWE-22"]}',))
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "Count CWE-22 records"})
+
+    assert result["intent"] == "text2sql"
+    assert provider.calls == []
+    assert retriever.calls == []
+
+
+def test_cwe_acquisition_failure_preserves_existing_rag_answer() -> None:
+    provider = _FakeCweEvidence(failure=RuntimeError("untrusted provider detail"))
+    services, _, _ = _services(('{"route":"rag","cwe_ids":["CWE-22"]}', "Answer [source:guide:1]"))
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+
+    result = build_knowledge_graph(services).invoke({"question": "What is path traversal?"})
+
+    assert result["sources"][0].id == "guide:1"
+    assert "cwe_evidence_unavailable" in result["warnings"]
+    assert "untrusted provider detail" not in str(result)
+
+
+def test_explicit_cwe_count_is_bounded_without_losing_the_question() -> None:
+    provider = _FakeCweEvidence(warnings=("cwe_evidence_partial",))
+    services, _, _ = _services(("rag", "Answer [source:guide:1]"))
+    services = KnowledgeServices(
+        chat_model=services.chat_model,
+        text2sql=services.text2sql,
+        retriever=services.retriever,
+        cwe_evidence=provider,  # type: ignore[arg-type]
+    )
+    question = "Explain " + " ".join(f"CWE-{number}" for number in range(1, 11))
+
+    result = build_knowledge_graph(services).invoke({"question": question})
+
+    assert provider.calls == [tuple(f"CWE-{number}" for number in range(1, 9))]
+    assert result["query"] == question
+    assert result["warnings"] == ("cwe_topics_truncated", "cwe_evidence_partial")
 
 
 def test_retrieved_instructions_remain_user_data_and_cannot_trigger_sql() -> None:
@@ -345,6 +515,7 @@ def test_hostile_preseeded_state_is_reset_before_routing() -> None:
         {
             "question": "What is a CVE?",
             "intent": "text2sql",
+            "cwe_topic_ids": ("CWE-999",),
             "attempt": 999,
             "query": "DELETE FROM intel.cwe",
             "chunks": (forged_chunk,),
@@ -355,6 +526,7 @@ def test_hostile_preseeded_state_is_reset_before_routing() -> None:
     )
 
     assert result["intent"] == "general"
+    assert result["cwe_topic_ids"] == ()
     assert result["attempt"] == 1
     assert result["query"] == "What is a CVE?"
     assert result["chunks"] == ()

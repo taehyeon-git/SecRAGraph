@@ -78,6 +78,7 @@ _SAFE_RUNTIME_SETTINGS = {
     "SECRAGRAPH_QDRANT_VECTOR_DIMENSION": "1536",
     "SECRAGRAPH_QDRANT_COLLECTION": "secragraph-auto-cwe",
     "SECRAGRAPH_AUTO_OSV_ENABLED": "false",
+    "SECRAGRAPH_AUTO_CWE_ENABLED": "false",
     "SECRAGRAPH_OPENAI_API_KEY": "",
 }
 
@@ -481,10 +482,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         corpus = _prepare_corpus(_ROOT, offline=args.offline)
         if args.offline:
             environment["SECRAGRAPH_AUTO_OSV_ENABLED"] = "false"
+            environment["SECRAGRAPH_AUTO_CWE_ENABLED"] = "false"
             environment["SECRAGRAPH_OPENAI_API_KEY"] = ""
         else:
             environment["SECRAGRAPH_AUTO_OSV_ENABLED"] = os.environ.get(
                 "SECRAGRAPH_AUTO_OSV_ENABLED", "true"
+            )
+            environment["SECRAGRAPH_AUTO_CWE_ENABLED"] = os.environ.get(
+                "SECRAGRAPH_AUTO_CWE_ENABLED", "true"
             )
             if corpus.status == "fallback":
                 environment["SECRAGRAPH_OPENAI_API_KEY"] = ""
@@ -629,9 +634,9 @@ def _read_runtime_env(path: Path) -> RuntimeSecrets:
             elif name == "SECRAGRAPH_QDRANT_COLLECTION":
                 if value != "secragraph-auto-cwe":
                     raise ValueError("invalid collection")
-            elif name == "SECRAGRAPH_AUTO_OSV_ENABLED":
+            elif name in {"SECRAGRAPH_AUTO_OSV_ENABLED", "SECRAGRAPH_AUTO_CWE_ENABLED"}:
                 if value not in {"true", "false"}:
-                    raise ValueError("invalid OSV mode")
+                    raise ValueError("invalid automatic evidence mode")
             elif value != "":
                 raise ValueError("provider key must not be saved")
             fields[name] = value
@@ -665,6 +670,9 @@ def _persist_compose_config(runtime: RuntimeSecrets, environment: Mapping[str, s
     mode = environment.get("SECRAGRAPH_AUTO_OSV_ENABLED", "true")
     if mode not in {"true", "false"}:
         raise StartupError("Invalid automatic OSV mode.")
+    cwe_mode = environment.get("SECRAGRAPH_AUTO_CWE_ENABLED", "true")
+    if cwe_mode not in {"true", "false"}:
+        raise StartupError("Invalid automatic CWE mode.")
     settings = {
         **{
             name: str(_port(environment, name, default)) for name, default in _PORT_DEFAULTS.items()
@@ -672,6 +680,7 @@ def _persist_compose_config(runtime: RuntimeSecrets, environment: Mapping[str, s
         "SECRAGRAPH_QDRANT_VECTOR_DIMENSION": _vector_dimension(environment),
         "SECRAGRAPH_QDRANT_COLLECTION": "secragraph-auto-cwe",
         "SECRAGRAPH_AUTO_OSV_ENABLED": mode,
+        "SECRAGRAPH_AUTO_CWE_ENABLED": cwe_mode,
         "SECRAGRAPH_OPENAI_API_KEY": "",
     }
     content = _render_runtime_env(runtime.admin_password, runtime.reader_password, settings)

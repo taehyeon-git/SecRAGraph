@@ -7,7 +7,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, gettempdir
 from typing import Annotated, Protocol
 
 import typer
@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from security_review.application import UnsupportedTargetError, scan_path
 from security_review.config import Settings
+from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
 from security_review.intelligence.ingestion import (
     DocumentIngestionError,
     chunk_documents,
@@ -121,6 +122,13 @@ def _dependency_auditor_factory() -> DependencyAuditor:
     return LiveDependencyAuditor()
 
 
+def _cwe_evidence_factory() -> CweEvidenceProvider:
+    from security_review.intelligence.dynamic_cwe import LiveCweEvidenceProvider
+
+    cache_root = Path(gettempdir()) / "secragraph-cwe-evidence"
+    return LiveCweEvidenceProvider(cache_root)
+
+
 @app.command("osv-query")
 def osv_query(
     ecosystem: Annotated[str, typer.Option("--ecosystem")],
@@ -181,6 +189,7 @@ def scan(
             target,
             ScanLimits(),
             dependency_auditor=None if offline else _dependency_auditor_factory(),
+            cwe_evidence=None if offline else _cwe_evidence_factory(),
         )
     except UnsupportedTargetError as error:
         raise typer.BadParameter(str(error), param_hint="TARGET") from error
