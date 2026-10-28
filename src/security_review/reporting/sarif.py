@@ -44,6 +44,8 @@ def _descriptor(finding: Finding) -> dict[str, Any]:
 
 
 def _region(finding: Finding) -> dict[str, int]:
+    if finding.line_start is None:
+        raise ValueError("source finding requires a line")
     region = {"startLine": finding.line_start}
     if finding.line_end is not None:
         region["endLine"] = finding.line_end
@@ -53,6 +55,9 @@ def _region(finding: Finding) -> dict[str, int]:
 def _fingerprint(finding: Finding) -> str:
     # A source-free location identity avoids both evidence-derived hashes and
     # occurrence shifts when another finding is added earlier in the file.
+    if finding.http_path is not None:
+        payload = f"{finding.rule_id}\0{finding.http_method}\0{finding.http_path}\0{finding.id}"
+        return sha256(payload.encode()).hexdigest()
     payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}"
     if finding.rule_id == "OSV001" or finding.engine != "secragraph" or finding.trace:
         # Distinct advisories or flows can share a sink location.
@@ -107,7 +112,6 @@ def _escaped_markdown_text(value: str) -> str:
 def _result(
     finding: Finding, rule_index: int, path_prefix: str, fingerprint: str
 ) -> dict[str, Any]:
-    source_path = (PurePosixPath(path_prefix) / finding.file_path).as_posix()
     message = {"text": finding.message}
     properties = {
         "findingId": finding.id,
@@ -124,24 +128,30 @@ def _result(
             f"{_escaped_markdown_text(finding.message)} [Open OSV advisory]({osv_url})"
         )
         properties["osvAdvisoryUrl"] = osv_url
-    result = {
+    result: dict[str, Any] = {
         "ruleId": finding.rule_id,
         "ruleIndex": rule_index,
         "level": LEVELS[finding.severity],
         "message": message,
-        "locations": [
+        "properties": properties,
+    }
+    if finding.http_path is not None:
+        name = f"{finding.http_method} {finding.http_path}"
+        result["locations"] = [{"logicalLocations": [{"name": name, "fullyQualifiedName": name}]}]
+        result["partialFingerprints"] = {"secragraph/httpLocationHash": fingerprint}
+    else:
+        if finding.file_path is None:
+            raise ValueError("source finding requires a file path")
+        source_path = (PurePosixPath(path_prefix) / finding.file_path).as_posix()
+        result["locations"] = [
             {
                 "physicalLocation": {
-                    "artifactLocation": {
-                        "uri": quote(source_path, safe="/-._~"),
-                    },
+                    "artifactLocation": {"uri": quote(source_path, safe="/-._~")},
                     "region": _region(finding),
                 }
             }
-        ],
-        "partialFingerprints": {"primaryLocationLineHash": fingerprint},
-        "properties": properties,
-    }
+        ]
+        result["partialFingerprints"] = {"primaryLocationLineHash": fingerprint}
     if finding.trace:
         result["codeFlows"] = [
             {

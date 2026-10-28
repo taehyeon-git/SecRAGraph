@@ -39,13 +39,17 @@ def _render_reference(reference: SourceReference) -> str:
 
 
 def _render_finding(finding: Finding) -> list[str]:
+    if finding.http_path is not None:
+        location = f"{finding.http_method} {finding.http_path}"
+    else:
+        location = f"{finding.file_path}:{finding.line_start}"
     lines = [
         f"### {_escape(finding.id)}",
         "",
         f"- Rule: {_escape(finding.rule_id)}",
         f"- Engine: {_escape(finding.engine)}",
         f"- Severity: {_escape(finding.severity.value.upper())}",
-        f"- Location: {_escape(finding.file_path)}:{finding.line_start}",
+        f"- Location: {_escape(location)}",
         f"- CWE: {_escape(', '.join(finding.cwe_ids) or 'Not mapped')}",
         f"- Message: {_escape(finding.message)}",
         f"- Evidence: {_escape(finding.redacted_evidence)}",
@@ -77,7 +81,25 @@ def _render_execution(execution: ScanExecution) -> list[str]:
         f"- Version: {_escape(execution.version or 'Unknown')}",
         f"- Elapsed: {execution.elapsed_ms} ms",
     ]
-    if execution.engine == "gitleaks":
+    if execution.kind == "dast":
+        eligible = ", ".join(_escape(endpoint) for endpoint in execution.eligible_endpoints[:50])
+        observed = ", ".join(
+            _escape(endpoint) for endpoint in execution.observed_alert_endpoints[:50]
+        )
+        if len(execution.eligible_endpoints) > 50:
+            eligible += f" (+{len(execution.eligible_endpoints) - 50} more)"
+        if len(execution.observed_alert_endpoints) > 50:
+            observed += f" (+{len(execution.observed_alert_endpoints) - 50} more)"
+        lines.extend(
+            [
+                f"- Eligible endpoints: {len(execution.eligible_endpoints)}",
+                f"- Operations: {eligible or 'None'}",
+                f"- Observed alert endpoints: {len(execution.observed_alert_endpoints)}",
+                f"- Alert locations: {observed or 'None'}",
+                "- Alert locations do not inventory every request sent.",
+            ]
+        )
+    elif execution.engine == "gitleaks":
         lines.extend(
             [
                 f"- Submitted files: {len(execution.eligible_files)}",

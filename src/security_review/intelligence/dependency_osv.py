@@ -450,7 +450,7 @@ def audit_dependencies(
     ordered_findings = tuple(
         sorted(
             findings.values(),
-            key=lambda item: (item.file_path, item.line_start, item.rule_id, item.id),
+            key=lambda item: (item.file_path or "", item.line_start or 0, item.rule_id, item.id),
         )
     )
     return finish(
