@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from security_review.application import UnsupportedTargetError, scan_path
 from security_review.config import Settings
+from security_review.domain.models import ScanReport
 from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
 from security_review.intelligence.ingestion import (
     DocumentIngestionError,
@@ -35,14 +36,14 @@ from security_review.storage.intelligence import IntelligenceImportError, import
 
 app = typer.Typer(
     name="security-review",
-    help="Scan source code without executing it and render a canonical security report.",
+    help="Scan source without executing it and inspect disposable running test APIs.",
     no_args_is_help=True,
 )
 
 
 @app.callback()
 def main() -> None:
-    """Run SecRAGraph's local, non-executing security review tools."""
+    """Run SecRAGraph's source and isolated test-API review tools."""
 
 
 class MembershipAdmin(Protocol):
@@ -167,6 +168,65 @@ def _write_atomically(output: Path, rendered: str) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def scan_dast_container(
+    container: str,
+    port: int,
+    openapi_path: str,
+    *,
+    auth_header_env: str | None = None,
+) -> ScanReport:
+    """Use the DAST service without loading Docker code for other CLI commands."""
+
+    from security_review.dast.application import scan_dast_container as run
+
+    return run(
+        container,
+        port,
+        openapi_path,
+        auth_header_env=auth_header_env,
+        cwe_evidence=_cwe_evidence_factory(),
+    )
+
+
+@app.command("dast")
+def dast(
+    container: Annotated[
+        str, typer.Argument(help="Running Docker container labelled as a disposable test API")
+    ],
+    port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
+    openapi_path: Annotated[str, typer.Option("--openapi-path")] = "/openapi.json",
+    auth_header_env: Annotated[str | None, typer.Option("--auth-header-env")] = None,
+    report_format: Annotated[
+        ReportFormat, typer.Option("--format", case_sensitive=False)
+    ] = ReportFormat.MARKDOWN,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Passively inspect a disposable running test API through isolated ZAP."""
+
+    try:
+        report = scan_dast_container(
+            container,
+            port,
+            openapi_path,
+            auth_header_env=auth_header_env,
+        )
+    except ValueError as error:
+        del error
+        typer.echo("DAST target or scan configuration is invalid.", err=True)
+        raise typer.Exit(code=2) from None
+    rendered = render_report(report, report_format)
+    if output is None:
+        typer.echo(rendered, nl=False)
+    else:
+        try:
+            _write_atomically(output, rendered)
+        except OSError as error:
+            typer.echo(f"Could not write report: {error}", err=True)
+            raise typer.Exit(code=1) from error
+    if any(item.status not in {"completed", "skipped"} for item in report.executions):
+        raise typer.Exit(code=1)
 
 
 @app.command()

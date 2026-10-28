@@ -122,8 +122,11 @@ class ScanState(TypedDict, total=False):
     target_name: str | None
     clock: Callable[[], float]
     deadline: float | None
+    enrichment_budget_seconds: float
     request: ScanRequest | None
     input_findings: tuple[Finding, ...]
+    input_warnings: tuple[str, ...]
+    input_executions: tuple[ScanExecution, ...]
     deterministic_findings: tuple[Finding, ...]
     findings: tuple[Finding, ...]
     deterministic_warnings: tuple[str, ...]
@@ -198,16 +201,45 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             resolved_name = target_name
         else:
             request = None
-            deadline = None
             input_findings = _validated_finding_tuple(state.get("findings"))
+            input_warnings = _validated_warning_tuple(state.get("warnings", ()))
+            input_executions = _validated_execution_tuple(state.get("executions", ()))
             resolved_name = _validated_target_name(state.get("target_name")) or "scan-target"
+            budget = state.get("enrichment_budget_seconds")
+            clock = state.get("clock", monotonic)
+            if budget is not None:
+                if (
+                    isinstance(budget, bool)
+                    or not isinstance(budget, (int, float))
+                    or not math.isfinite(float(budget))
+                    or not 0 < float(budget) <= 300
+                ):
+                    raise ValueError("enrichment_budget_seconds must be between 0 and 300")
+                if not callable(clock):
+                    raise ValueError("clock must be callable")
+                started_at = clock()
+                if (
+                    isinstance(started_at, bool)
+                    or not isinstance(started_at, (int, float))
+                    or not math.isfinite(float(started_at))
+                ):
+                    raise ValueError("clock must return a finite number")
+                deadline = float(started_at) + float(budget)
+            else:
+                deadline = None
+        if request is not None:
+            input_warnings = ()
+            input_executions = ()
         if request_context_bound():
             log_scan_started()
         return {
             "request": request,
             "target_name": resolved_name,
             "deadline": deadline,
+            "clock": clock,
             "input_findings": input_findings,
+            "input_warnings": input_warnings,
+            "input_executions": input_executions,
             "deterministic_findings": (),
             "findings": (),
             "deterministic_warnings": (),
@@ -221,12 +253,14 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
         request = state.get("request")
         if request is None:
             findings = _required_findings(state, "input_findings")
+            warnings = _validated_warning_tuple(state.get("input_warnings"))
+            executions = _validated_execution_tuple(state.get("input_executions"))
             return {
                 "deterministic_findings": findings,
                 "findings": findings,
-                "deterministic_warnings": (),
-                "warnings": (),
-                "executions": (),
+                "deterministic_warnings": warnings,
+                "warnings": warnings,
+                "executions": executions,
             }
         if services.deterministic_scanner is None:
             raise ScanWorkflowError("missing_deterministic_scanner")
@@ -341,9 +375,11 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
             }
 
         request = state.get("request")
+        deadline = state.get("deadline")
         provider_deadline = None
-        if request is not None and request.deadline is not None:
-            remaining = request.deadline - request.clock()
+        if deadline is not None:
+            clock = request.clock if request is not None else state.get("clock", monotonic)
+            remaining = deadline - clock()
             provider_deadline = monotonic() + max(0.0, remaining)
         try:
             evidence = services.cwe_evidence.ensure(selected, deadline=provider_deadline)
@@ -744,6 +780,8 @@ def _rebuild_enriched_finding(
         file_path=finding.file_path,
         line_start=finding.line_start,
         line_end=finding.line_end,
+        http_method=finding.http_method,
+        http_path=finding.http_path,
         message=finding.message,
         redacted_evidence=finding.redacted_evidence,
         confidence=finding.confidence,
@@ -767,6 +805,8 @@ def _protected_fields(finding: Finding) -> tuple[object, ...]:
         finding.file_path,
         finding.line_start,
         finding.line_end,
+        finding.http_method,
+        finding.http_path,
         finding.message,
         finding.redacted_evidence,
         finding.confidence,
@@ -814,9 +854,10 @@ def _capability_warning(
 def _require_enrichment_time(state: ScanState) -> None:
     request = state.get("request")
     deadline = state.get("deadline")
-    if request is None or deadline is None:
+    if deadline is None:
         return
-    if request.clock() >= deadline:
+    clock = request.clock if request is not None else state.get("clock", monotonic)
+    if clock() >= deadline:
         raise _EnrichmentDeadlineReached
 
 
