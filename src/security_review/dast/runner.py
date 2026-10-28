@@ -340,9 +340,22 @@ def run_zap_api_scan(
                                     with report_file.open("rb") as stream:
                                         raw_report = stream.read(MAX_ZAP_REPORT_BYTES + 1)
                                     findings = parse_zap_report(
-                                        raw_report, origin=origin, eligible_endpoints=eligible
+                                        raw_report,
+                                        origin=origin,
+                                        eligible_endpoints=eligible,
+                                        deadline=deadline,
                                     )
-                                except (OSError, DastReportError):
+                                except DastReportError as error:
+                                    timed_out = str(error) == "zap_report_timeout"
+                                    outcome = _result(
+                                        started=started,
+                                        status="partial" if timed_out else "error",
+                                        eligible=eligible,
+                                        reason="dast_scan_timeout"
+                                        if timed_out
+                                        else "dast_report_invalid",
+                                    )
+                                except OSError:
                                     outcome = _result(
                                         started=started,
                                         status="error",

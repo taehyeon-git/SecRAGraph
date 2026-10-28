@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from time import monotonic
 
 import pytest
 
+from security_review.dast import zap
 from security_review.dast.zap import (
     DastInputError,
     DastReportError,
@@ -226,4 +228,67 @@ def test_zap_report_rejects_invalid_url_fields(field: str, value: object) -> Non
             json.dumps(payload).encode(),
             origin=ORIGIN,
             eligible_endpoints=safe.eligible_endpoints,
+        )
+
+
+def test_zap_report_reuses_route_matching_for_repeated_instances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoints = tuple(f"GET /route-{index:04d}" for index in range(999)) + ("GET /item/{item_id}",)
+    instance = {"uri": f"{ORIGIN}/item/secret", "method": "GET"}
+    report = {
+        "site": [
+            {
+                "@name": ORIGIN,
+                "alerts": [
+                    {
+                        "pluginid": "10021",
+                        "riskcode": "1",
+                        "confidence": "2",
+                        "instances": [instance] * 1_000,
+                    }
+                ],
+            }
+        ]
+    }
+    route_checks = 0
+    original = zap._route_matches
+
+    def count_checks(route: str, actual: str) -> bool:
+        nonlocal route_checks
+        route_checks += 1
+        if route_checks > 3_000:
+            pytest.fail("Repeated identical instances rematched every eligible route")
+        return original(route, actual)
+
+    monkeypatch.setattr(zap, "_route_matches", count_checks)
+    findings = parse_zap_report(
+        json.dumps(report).encode(), origin=ORIGIN, eligible_endpoints=endpoints
+    )
+
+    assert len(findings) == 1
+    assert findings[0].http_path == "/item/{item_id}"
+    assert route_checks <= 3_000
+
+
+def test_zap_report_prefers_literal_route_over_parameter_route() -> None:
+    payload = json.loads(_report(f"{ORIGIN}/items/specific"))
+    payload["site"][0]["alerts"][0]["instances"] = payload["site"][0]["alerts"][0]["instances"][:1]
+    findings = parse_zap_report(
+        json.dumps(payload).encode(),
+        origin=ORIGIN,
+        eligible_endpoints=("GET /items/{item_id}", "GET /items/specific"),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].http_path == "/items/specific"
+
+
+def test_zap_report_respects_parse_deadline() -> None:
+    with pytest.raises(DastReportError, match="zap_report_timeout"):
+        parse_zap_report(
+            _report(),
+            origin=ORIGIN,
+            eligible_endpoints=("GET /items/{item_id}",),
+            deadline=monotonic() - 1,
         )

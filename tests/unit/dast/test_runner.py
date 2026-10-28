@@ -190,6 +190,30 @@ def test_cleanup_failure_overrides_success(monkeypatch: pytest.MonkeyPatch) -> N
     assert "dast_cleanup_failed" in result.warnings
 
 
+def test_report_parse_timeout_is_partial_and_still_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    def timed_out_parse(
+        _raw: bytes, *, origin: str, eligible_endpoints: tuple[str, ...], deadline: float
+    ) -> tuple[object, ...]:
+        assert origin == "http://secragraph-target:8765"
+        assert eligible_endpoints == ("GET /protected", "GET /public")
+        assert deadline > 0
+        raise runner.DastReportError("zap_report_timeout")
+
+    monkeypatch.setattr(runner, "parse_zap_report", timed_out_parse)
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "partial"
+    assert "dast_scan_timeout" in result.warnings
+    commands = [args for args, _ in fake.calls]
+    assert any(args[:2] == ("container", "rm") for args in commands)
+    assert any(args[:2] == ("network", "rm") for args in commands)
+
+
 @pytest.mark.parametrize(
     "container,port,path",
     [

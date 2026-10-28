@@ -11,6 +11,8 @@ import json
 import re
 from dataclasses import dataclass
 from hashlib import sha256
+from re import Pattern
+from time import monotonic
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
@@ -24,6 +26,7 @@ MAX_OPENAPI_DEPTH = 128
 MAX_SITES = 8
 MAX_ALERTS = 2_000
 MAX_INSTANCES = 10_000
+MAX_REPORT_PARSE_SECONDS = 30.0
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _OPENAPI_VERSION = re.compile(r"3\.(?:0|1)\.[0-9]+\Z")
 _ROUTE = re.compile(r"/[A-Za-z0-9._~{}/-]{0,1023}\Z")
@@ -194,20 +197,60 @@ def _same_origin(url: object, origin: str) -> str:
     return parsed.path or "/"
 
 
-def _route_matches(route: str, actual: str) -> bool:
+def _compile_route(route: str) -> Pattern[str]:
     parts = route.strip("/").split("/")
     segments = [r"[^/]{1,256}" if _PARAMETER.fullmatch(part) else re.escape(part) for part in parts]
     pattern = r"/".join(segments)
-    return re.fullmatch(r"/" + pattern if route != "/" else r"/", actual) is not None
+    return re.compile(r"/" + pattern if route != "/" else r"/")
 
 
-def _route_for(method: str, actual: str, eligible: tuple[str, ...]) -> str:
-    routes = [item.split(" ", 1)[1] for item in eligible if item.startswith(f"{method} ")]
-    routes.sort(key=lambda path: (-path.count("/") + path.count("{"), path))
-    for route in routes:
-        if _route_matches(route, actual):
+def _route_matches(pattern: Pattern[str], actual: str) -> bool:
+    return pattern.fullmatch(actual) is not None
+
+
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and monotonic() >= deadline:
+        raise DastReportError("zap_report_timeout")
+
+
+class _RouteIndex:
+    """Compile eligible routes once and resolve each observed operation once."""
+
+    def __init__(self, eligible: tuple[str, ...], deadline: float | None) -> None:
+        if len(eligible) > MAX_OPERATIONS:
+            raise DastReportError("invalid_eligible_endpoints")
+        self.exact: dict[tuple[str, str], str] = {}
+        self.templates: dict[str, list[tuple[str, Pattern[str]]]] = {}
+        self.cache: dict[tuple[str, str], str] = {}
+        for index, item in enumerate(eligible):
+            if index % 64 == 0:
+                _check_deadline(deadline)
+            try:
+                method, route = item.split(" ", 1)
+                if method not in SAFE_METHODS:
+                    raise DastInputError("invalid_openapi_method")
+                _route_path(route)
+            except (ValueError, DastInputError) as error:
+                raise DastReportError("invalid_eligible_endpoints") from error
+            if "{" in route:
+                self.templates.setdefault(method, []).append((route, _compile_route(route)))
+            else:
+                self.exact[(method, route)] = route
+        for patterns in self.templates.values():
+            patterns.sort(key=lambda item: (-item[0].count("/") + item[0].count("{"), item[0]))
+
+    def route_for(self, method: str, actual: str, deadline: float | None) -> str:
+        key = (method, actual)
+        route = self.cache.get(key) or self.exact.get(key)
+        if route is not None:
             return route
-    raise DastReportError("unlisted_zap_endpoint")
+        for index, (candidate, pattern) in enumerate(self.templates.get(method, ())):
+            if index % 64 == 0:
+                _check_deadline(deadline)
+            if _route_matches(pattern, actual):
+                self.cache[key] = candidate
+                return candidate
+        raise DastReportError("unlisted_zap_endpoint")
 
 
 def _code(value: object, *, maximum: int, error_code: str) -> int:
@@ -220,26 +263,36 @@ def _code(value: object, *, maximum: int, error_code: str) -> int:
 
 
 def parse_zap_report(
-    raw: bytes, *, origin: str, eligible_endpoints: tuple[str, ...]
+    raw: bytes,
+    *,
+    origin: str,
+    eligible_endpoints: tuple[str, ...],
+    deadline: float | None = None,
 ) -> tuple[Finding, ...]:
     """Normalize only scoped ZAP alert metadata, discarding all raw evidence."""
 
     _origin(origin)
+    parse_deadline = monotonic() + MAX_REPORT_PARSE_SECONDS
+    deadline = min(parse_deadline, deadline) if deadline is not None else parse_deadline
+    _check_deadline(deadline)
     if not raw or len(raw) > MAX_ZAP_REPORT_BYTES:
         raise DastReportError("zap_report_size_limit")
     try:
         payload = json.loads(raw)
     except (ValueError, RecursionError) as error:
         raise DastReportError("invalid_zap_json") from error
+    _check_deadline(deadline)
     if not isinstance(payload, dict):
         raise DastReportError("invalid_zap_report")
     sites = payload.get("site")
     if not isinstance(sites, list) or not sites or len(sites) > MAX_SITES:
         raise DastReportError("invalid_zap_report")
+    routes = _RouteIndex(eligible_endpoints, deadline)
     findings: dict[tuple[str, str, str], Finding] = {}
     instance_count = 0
     alert_count = 0
     for site in sites:
+        _check_deadline(deadline)
         if not isinstance(site, dict) or not isinstance(site.get("alerts"), list):
             raise DastReportError("invalid_zap_report")
         _same_origin(site.get("@name", ""), origin)
@@ -248,6 +301,7 @@ def parse_zap_report(
         if alert_count > MAX_ALERTS:
             raise DastReportError("zap_alert_limit")
         for alert in alerts:
+            _check_deadline(deadline)
             if not isinstance(alert, dict):
                 raise DastReportError("invalid_zap_alert")
             raw_plugin = alert.get("pluginid")
@@ -267,7 +321,9 @@ def parse_zap_report(
             instance_count += len(instances)
             if instance_count > MAX_INSTANCES:
                 raise DastReportError("zap_instance_limit")
-            for instance in instances:
+            for instance_index, instance in enumerate(instances):
+                if instance_index % 64 == 0:
+                    _check_deadline(deadline)
                 if not isinstance(instance, dict):
                     raise DastReportError("invalid_zap_instance")
                 method = instance.get("method")
@@ -279,7 +335,7 @@ def parse_zap_report(
                 ):
                     raise DastReportError("invalid_zap_instance")
                 actual = _same_origin(uri, origin)
-                route = _route_for(method, actual, eligible_endpoints)
+                route = routes.route_for(method, actual, deadline)
                 if confidence == 0:  # ZAP explicitly marked this alert false positive.
                     continue
                 rule_id = f"ZAP/{raw_plugin}"
@@ -307,4 +363,5 @@ def parse_zap_report(
                     engine="zap",
                 )
                 findings[(raw_plugin, method, route)] = finding
+    _check_deadline(deadline)
     return tuple(findings[key] for key in sorted(findings))
