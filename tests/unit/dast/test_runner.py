@@ -65,10 +65,19 @@ def _zap_report() -> bytes:
 
 
 class FakeDocker:
-    def __init__(self, *, timeout_zap: bool = False, cleanup_failure: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_zap: bool = False,
+        cleanup_failure: bool = False,
+        image_present: bool = True,
+        pull_fails: bool = False,
+    ) -> None:
         self.calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
         self.timeout_zap = timeout_zap
         self.cleanup_failure = cleanup_failure
+        self.image_present = image_present
+        self.pull_fails = pull_fails
 
     def __call__(
         self,
@@ -83,6 +92,12 @@ class FakeDocker:
         if args[:2] == ["inspect", "--format"]:
             output = b"true\n" if ".State.Running" in args[2] else b"true\n"
             return subprocess.CompletedProcess(args, 0, output)
+        if args[:2] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(args, 0 if self.image_present else 1, b"")
+        if args[0] == "pull":
+            if not self.pull_fails:
+                self.image_present = True
+            return subprocess.CompletedProcess(args, 1 if self.pull_fails else 0, b"")
         if args[:2] == ["network", "create"]:
             return subprocess.CompletedProcess(args, 0, b"network-id\n")
         if args[:2] == ["network", "inspect"]:
@@ -141,6 +156,8 @@ def test_dast_runner_isolated_auth_and_sanitized_result(monkeypatch: pytest.Monk
     assert "do-not-save" not in result.findings[0].model_dump_json()
     assert "dast_redirects_within_isolated_network_possible" in result.warnings
     commands = [args for args, _ in fake.calls]
+    assert ("image", "inspect", runner.ZAP_IMAGE) in commands
+    assert not any(args[0] == "pull" for args in commands)
     network_create = next(args for args in commands if args[:2] == ("network", "create"))
     assert network_create[2:10] == (
         "--internal",
@@ -205,6 +222,38 @@ def test_timeout_force_removes_named_container_and_marks_partial(
     zap_name = zap_run[zap_run.index("--name") + 1]
     assert ("container", "rm", "-f", zap_name) in commands
     assert any(args[:2] == ("network", "rm") for args in commands)
+
+
+def test_missing_pinned_image_is_pulled_before_network_and_helper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(image_present=False)
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "completed"
+    commands = [args for args, _ in fake.calls]
+    pull = ("pull", runner.ZAP_IMAGE)
+    assert pull in commands
+    assert commands.index(pull) < next(
+        index for index, item in enumerate(commands) if item[:2] == ("network", "create")
+    )
+
+
+def test_failed_image_pull_is_incomplete_without_network_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(image_present=False, pull_fails=True)
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "error"
+    assert "dast_zap_image_unavailable" in result.warnings
+    commands = [args for args, _ in fake.calls]
+    assert ("pull", runner.ZAP_IMAGE) in commands
+    assert not any(item[:2] == ("network", "create") for item in commands)
 
 
 def test_cleanup_failure_overrides_success(monkeypatch: pytest.MonkeyPatch) -> None:

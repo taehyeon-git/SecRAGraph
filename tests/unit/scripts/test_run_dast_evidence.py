@@ -54,6 +54,7 @@ def _install_fakes(
 
     monkeypatch.setattr(run_dast_evidence, "_run_compose", compose)
     monkeypatch.setattr(run_dast_evidence, "_docker_executable", lambda: "docker")
+    monkeypatch.setattr(run_dast_evidence, "_prepare_zap_image", lambda: None)
     monkeypatch.setattr(run_dast_evidence, "_fixture_container", lambda *_args: "a" * 64)
     monkeypatch.setattr(
         run_dast_evidence,
@@ -172,10 +173,50 @@ def test_probe_docker_cleanup_timeout_is_recorded(monkeypatch: pytest.MonkeyPatc
     assert not run_dast_evidence._cleanup_docker(["network", "rm", "temporary"])
 
 
+def test_prepare_zap_image_uses_bounded_runner_pull(monkeypatch: pytest.MonkeyPatch) -> None:
+    deadlines: list[float] = []
+
+    def ready(deadline: float) -> bool:
+        deadlines.append(deadline)
+        return True
+
+    monkeypatch.setattr(run_dast_evidence, "prepare_zap_image", ready)
+    run_dast_evidence._prepare_zap_image()
+    assert len(deadlines) == 1
+    assert deadlines[0] > run_dast_evidence.monotonic()
+
+
+def test_prepare_zap_image_fails_closed_on_pull_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(run_dast_evidence, "prepare_zap_image", lambda _deadline: False)
+    with pytest.raises(RuntimeError, match="zap_image_unavailable"):
+        run_dast_evidence._prepare_zap_image()
+
+
+def test_incomplete_report_surfaces_only_known_runner_reason() -> None:
+    report = _report(completed=False)
+    report.executions[0].reason = "dast_zap_image_unavailable"
+    with pytest.raises(RuntimeError, match="dast_zap_image_unavailable"):
+        run_dast_evidence._require_evidence(report)
+    report.executions[0].reason = "Session secret-value"
+    with pytest.raises(RuntimeError, match="dast_incomplete"):
+        run_dast_evidence._require_evidence(report)
+
+
+def test_main_prints_only_allowlisted_failure_code(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fail() -> None:
+        raise RuntimeError("zap_image_unavailable")
+
+    monkeypatch.setattr(run_dast_evidence, "run_evidence", fail)
+    assert run_dast_evidence.main() == 1
+    assert "(zap_image_unavailable)" in capsys.readouterr().err
+
+
 def test_main_prints_generic_failure_without_exception_text(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fail(_output: Path) -> None:
+    def fail() -> None:
         raise RuntimeError("secret test-token must not appear")
 
     monkeypatch.setattr(run_dast_evidence, "run_evidence", fail)

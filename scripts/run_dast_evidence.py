@@ -17,7 +17,7 @@ from time import monotonic
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from security_review.dast.runner import ZAP_IMAGE, _network_isolated
+from security_review.dast.runner import ZAP_IMAGE, _network_isolated, prepare_zap_image
 from security_review.domain.models import ScanReport
 from security_review.reporting.types import ReportFormat, render_report
 
@@ -25,6 +25,40 @@ _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
 _CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}\Z")
+_SAFE_FAILURE_CODES = frozenset(
+    {
+        "authenticated_route_not_tested",
+        "credential_in_report",
+        "dast_cleanup_failed",
+        "dast_connect_failed",
+        "dast_docker_failed",
+        "dast_incomplete",
+        "dast_openapi_fetch_failed",
+        "dast_openapi_invalid",
+        "dast_openapi_size_limit",
+        "dast_report_invalid",
+        "dast_scan_timeout",
+        "dast_network_failed",
+        "dast_network_isolation_failed",
+        "dast_unknown_failure",
+        "dast_zap_failed",
+        "dast_zap_image_unavailable",
+        "docker_unavailable",
+        "expected_alert_missing",
+        "fixture_cleanup_failed",
+        "fixture_container_unavailable",
+        "fixture_probe_failed",
+        "fixture_start_failed",
+        "fixture_unhealthy",
+        "host_redirect_escaped",
+        "redirect_probe_cleanup_failed",
+        "redirect_probe_control_failed",
+        "redirect_probe_isolation_failed",
+        "redirect_probe_network_unavailable",
+        "redirect_probe_target_unavailable",
+        "zap_image_unavailable",
+    }
+)
 _REDIRECT_FETCH = "\n".join(
     (
         "import sys, urllib.request",
@@ -51,6 +85,13 @@ def _docker_executable() -> str:
     if docker is None:
         raise RuntimeError("docker_unavailable")
     return docker
+
+
+def _prepare_zap_image() -> None:
+    """Allow a bounded image pull before short Docker helper deadlines begin."""
+
+    if not prepare_zap_image(monotonic() + 240):
+        raise RuntimeError("zap_image_unavailable")
 
 
 def _run_compose(
@@ -317,6 +358,11 @@ def _require_evidence(report: ScanReport) -> None:
         item.engine == "zap" and item.kind == "dast" and item.status == "completed"
         for item in report.executions
     ):
+        for item in report.executions:
+            if item.engine == "zap" and item.kind == "dast":
+                reason = getattr(item, "reason", None)
+                if reason in _SAFE_FAILURE_CODES:
+                    raise RuntimeError(reason)
         raise RuntimeError("dast_incomplete")
     if not any(
         finding.engine == "zap"
@@ -339,6 +385,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
     """Build, scan and remove one labelled fixture, writing only normalized reports."""
 
     _docker_executable()
+    _prepare_zap_image()
     project = f"secragraph-dast-{uuid4().hex[:12]}"
     token = secrets.token_urlsafe(32)
     environment = os.environ.copy()
@@ -398,8 +445,13 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
 def main() -> int:
     try:
         run_evidence()
-    except Exception:  # Never print a subprocess error or a disposable credential.
-        print("DAST evidence generation failed.", file=sys.stderr)
+    except Exception as error:  # Never print raw subprocess errors or a disposable credential.
+        code = (
+            str(error)
+            if type(error) is RuntimeError and str(error) in _SAFE_FAILURE_CODES
+            else "unknown"
+        )
+        print(f"DAST evidence generation failed ({code}).", file=sys.stderr)
         return 1
     print("DAST evidence passed: isolated fixture and normalized reports.")
     return 0

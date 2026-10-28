@@ -194,6 +194,35 @@ def _cleanup(args: list[str]) -> bool:
         return False
 
 
+def prepare_zap_image(deadline: float) -> bool:
+    """Resolve the pinned image before short-lived Docker helper calls."""
+
+    try:
+        if monotonic() >= deadline:
+            return False
+        inspected = _docker(
+            ["image", "inspect", ZAP_IMAGE],
+            timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
+        )
+        if inspected.returncode == 0:
+            return True
+        if monotonic() >= deadline:
+            return False
+        pulled = _docker(
+            ["pull", ZAP_IMAGE],
+            timeout=min(240.0, max(0.1, deadline - monotonic())),
+        )
+        if pulled.returncode != 0 or monotonic() >= deadline:
+            return False
+        confirmed = _docker(
+            ["image", "inspect", ZAP_IMAGE],
+            timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
+        )
+        return confirmed.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def _network_isolated(network: str, deadline: float) -> bool:
     """Fail closed unless Docker confirms an internal bridge without a host gateway."""
 
@@ -245,6 +274,8 @@ def run_zap_api_scan(
     _inspect_target(container)
     started = monotonic()
     deadline = started + _MAX_DURATION_SECONDS
+    if not prepare_zap_image(deadline):
+        return _result(started=started, status="error", reason="dast_zap_image_unavailable")
     nonce = secrets.token_hex(8)
     network = f"secragraph-dast-{nonce}"
     helper_name = f"secragraph-dast-fetch-{nonce}"
