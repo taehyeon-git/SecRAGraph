@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml) · [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning) · [아키텍처](docs/architecture.md) · [데모 절차](docs/demo.md)
 
-**로그인한 사용자가 소스 파일이나 ZIP을 제출하면 여러 보안 검사기의 결과를 하나의 근거 있는 보고서로 정리하는 백엔드·DevSecOps 포트폴리오입니다.** LangGraph가 코드 검사, 패키지 권고 조회, CWE 근거 검색과 위험도 계산을 조정합니다. FastAPI와 CLI는 같은 스캔 경로를 쓰고 Streamlit은 로컬 데모 화면입니다.
+**로그인한 사용자가 소스 파일이나 ZIP을 제출하면 여러 보안 검사기의 결과를 하나의 근거 있는 보고서로 정리하는 백엔드·DevSecOps 포트폴리오입니다.** 별도의 DAST 경로는 격리된 일회용 테스트 API를 실행해 HTTP 응답을 검사합니다. LangGraph가 검사 결과의 CWE 근거 검색과 위험도 계산을 조정합니다. FastAPI와 CLI는 소스 스캔 경로를 공유하고 Streamlit은 로컬 데모 화면입니다.
 
 ## 문제 정의
 
@@ -53,6 +53,7 @@ flowchart LR
   SCAN --> OSV["잠금 파일 → OSV.dev"]
   SCAN --> CWE["Finding CWE → MITRE"]
   SCAN --> EVIDENCE["Qdrant 문서 근거 · 선택"]
+  DAST["일회용 테스트 API → ZAP 패시브 검사"] --> CWE
   SAST --> REPORT["Finding + 검사 범위 → JSON · Markdown · SARIF"]
   SECRET --> REPORT
   CONFIG --> REPORT
@@ -73,6 +74,7 @@ flowchart LR
 | **비밀정보** | Gitleaks 8.30.1. `.env.local`, `.npmrc`, 키 파일을 포함한 허용 텍스트에서 비밀 유사 값을 검사하고 값을 가립니다. |
 | **설정 오류** | Checkov 3.3.30. 지원 Terraform·구성 파일을 검사하며 [간접 의존성도 해시로 고정](infra/scanners/checkov-requirements.txt)합니다. |
 | **패키지 권고** | `uv.lock`·npm `package-lock.json`의 정확한 버전을 OSV.dev에서 확인합니다. 코드나 잠금 파일 원문은 전송하지 않습니다. |
+| **테스트 API DAST** | `io.secragraph.dast.disposable=true`가 붙은 실행 중인 Docker 컨테이너만 ZAP의 패시브 검사 모드로 확인합니다. 내부 전용 네트워크에서 인증된 GET 요청과 응답 보안 헤더를 검사하고 HTTP 경로를 별도 위치로 보고합니다. [격리 데모와 검증 절차](docs/demo.md#7-격리-테스트-api-dast)를 참고하세요. |
 | **공개 저장소 자체** | [GitHub Actions의 CodeQL `security-extended`](.github/workflows/security-scan.yml)를 사용합니다. 별도 [FastAPI 흐름 픽스처 쿼리](codeql/FastApiCrossFileFlow.ql)는 파일을 넘나드는 추적·차단 모델의 테스트이며 실제 코드 경고 규칙은 아닙니다. 무료 CodeQL 허용 범위인 공개 코드에만 적용합니다. |
 
 회원이 업로드한 비공개 코드는 CodeQL로 검사하지 않습니다. 업로드 코드의 Opengrep 흐름 추적은 **파일 내부의 함수 간** 범위이고 확인한 source·중간 단계·sink 위치를 소스 내용 없이 기록합니다. CodeQL의 여러 파일을 가로지르는 흐름 검사는 이 공개 저장소에 적용합니다. 검사기 실행 실패나 지원하지 않는 언어는 성공으로 숨기지 않고 범위 기록에 남깁니다.
@@ -107,7 +109,7 @@ flowchart LR
 
 ## 테스트와 CI
 
-[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 도구가 설치된 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 Compose 스모크를 실행합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
+[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 도구가 설치된 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. DAST 작업은 보호된 경로에 인증 요청이 도달했는지, 예상 보안 헤더 경고가 있는지 확인하고 정규화한 JSON·Markdown·SARIF만 아티팩트로 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
 
 서비스 없이 문서·CLI 검사를 실행하려면 다음 명령을 사용합니다.
 
@@ -124,6 +126,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 - 회원 로그인과 보고서 소유권은 로컬 배포를 위한 기능입니다. 공개 서비스용 속도 제한·MFA·계정 복구가 없어 인터넷에 그대로 배포할 수 없습니다.
 - OSV 조회는 명시된 패키지 버전에 한정됩니다. 보고서의 파일 경로·대상 이름·인용 메타데이터는 민감할 수 있습니다. 모델 답변은 오류나 프롬프트 인젝션 영향을 받을 수 있고, 문서 근거의 품질은 수집 자료에 좌우됩니다. [위협 모델](docs/threat-model.md)에 신뢰 경계와 남은 위험을 기록했습니다.
 - 외부 검사기는 현재 API 컨테이너와 같은 네트워크 네임스페이스에서 실행됩니다. 프록시·다운로드 금지 설정을 완전한 네트워크 격리로 간주하지 않습니다.
+- 현재 DAST는 승인 표시가 있는 일회용 Docker 테스트 API의 제한된 GET/HEAD/OPTIONS와 패시브 응답 검사를 보여줍니다. 임의 운영 URL이나 업로드한 코드를 실행하지 않으며 SQL 주입 같은 능동 취약점 검증을 주장하지 않습니다. DAST SARIF의 위치는 HTTP 경로이므로 GitHub Code Scanning의 소스 줄 주석으로 올리지 않습니다.
 
 ## 출처와 기여
 
