@@ -185,6 +185,47 @@ def test_dast_runner_isolated_auth_and_sanitized_result(monkeypatch: pytest.Monk
     assert zap_env["ZAP_AUTH_HEADER_SITE"] == "secragraph-target"
 
 
+def test_posix_bind_mount_uses_private_host_group_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeDocker()
+    monkeypatch.setattr(runner, "_docker", fake)
+    monkeypatch.setattr(runner, "_host_group_id", lambda: 1234)
+    original_chmod = Path.chmod
+    modes: list[tuple[str, int]] = []
+
+    def record_chmod(path: Path, mode: int, *args: object, **kwargs: object) -> None:
+        modes.append((path.name, mode))
+        original_chmod(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "chmod", record_chmod)
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "completed"
+    assert any(name.startswith("secragraph-dast-") and mode == 0o2770 for name, mode in modes)
+    assert ("openapi.json", 0o640) in modes
+    assert ("zap.json", 0o660) in modes
+    zap_run = next(args for args, _ in fake.calls if args[0] == "run" and "-S" in args)
+    assert zap_run[zap_run.index("--group-add") + 1] == "1234"
+
+
+def test_posix_bind_mount_chmod_failure_aborts_before_docker_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    monkeypatch.setattr(runner, "_docker", fake)
+    monkeypatch.setattr(runner, "_host_group_id", lambda: 1234)
+    original_chmod = Path.chmod
+
+    def deny_private_group(path: Path, mode: int, *args: object, **kwargs: object) -> None:
+        if mode == 0o2770:
+            raise OSError("permission denied")
+        original_chmod(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "chmod", deny_private_group)
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+    assert result.execution.status == "error"
+    assert not any(args[:2] == ("network", "create") for args, _ in fake.calls)
+
+
 def test_unlabelled_target_is_rejected_before_network_creation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -194,6 +194,13 @@ def _cleanup(args: list[str]) -> bool:
         return False
 
 
+def _host_group_id() -> int | None:
+    """Return a POSIX host group that can access a private bind mount."""
+
+    getgid = getattr(os, "getgid", None)
+    return getgid() if getgid is not None else None
+
+
 def prepare_zap_image(deadline: float) -> bool:
     """Resolve the pinned image before short-lived Docker helper calls."""
 
@@ -291,7 +298,10 @@ def run_zap_api_scan(
 
     with tempfile.TemporaryDirectory(prefix="secragraph-dast-") as directory:
         working = Path(directory)
+        host_group = _host_group_id()
         try:
+            if host_group is not None:
+                working.chmod(0o2770)
             network_attempted = True
             created = _docker(
                 [
@@ -369,7 +379,13 @@ def run_zap_api_scan(
                             )
                         else:
                             eligible = safe.eligible_endpoints
-                            (working / "openapi.json").write_bytes(safe.document)
+                            schema_file = working / "openapi.json"
+                            schema_file.write_bytes(safe.document)
+                            report_file = working / "zap.json"
+                            report_file.touch(exist_ok=False)
+                            if host_group is not None:
+                                schema_file.chmod(0o640)
+                                report_file.chmod(0o660)
                             child_env = dict(os.environ)
                             child_env["ZAP_AUTH_HEADER_SITE"] = _ALIAS
                             zap_args = [
@@ -391,6 +407,8 @@ def run_zap_api_scan(
                                 "--mount",
                                 f"type=bind,src={working},dst=/zap/wrk",
                             ]
+                            if host_group is not None:
+                                zap_args.extend(["--group-add", str(host_group)])
                             if auth_value is not None:
                                 child_env["ZAP_AUTH_HEADER_VALUE"] = auth_value
                                 zap_args.extend(["-e", "ZAP_AUTH_HEADER_VALUE"])
@@ -427,7 +445,6 @@ def run_zap_api_scan(
                                     reason="dast_zap_failed",
                                 )
                             else:
-                                report_file = working / "zap.json"
                                 try:
                                     with report_file.open("rb") as stream:
                                         raw_report = stream.read(MAX_ZAP_REPORT_BYTES + 1)
