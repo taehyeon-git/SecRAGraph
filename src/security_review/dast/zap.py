@@ -20,6 +20,7 @@ MAX_OPENAPI_BYTES = 2_000_000
 MAX_ZAP_REPORT_BYTES = 8_000_000
 MAX_PATHS = 1_000
 MAX_OPERATIONS = 2_000
+MAX_OPENAPI_DEPTH = 128
 MAX_SITES = 8
 MAX_ALERTS = 2_000
 MAX_INSTANCES = 10_000
@@ -71,12 +72,12 @@ def _is_local_ref(value: object) -> bool:
 
 
 def _check_refs(payload: object) -> None:
-    queue: list[tuple[object, tuple[str, ...]]] = [(payload, ())]
+    queue: list[tuple[object, tuple[str, ...], int]] = [(payload, (), 0)]
     visited = 0
     while queue:
-        current, path = queue.pop()
+        current, path, depth = queue.pop()
         visited += 1
-        if visited > 40_000:
+        if visited > 40_000 or depth > MAX_OPENAPI_DEPTH:
             raise DastInputError("openapi_too_complex")
         if isinstance(current, dict):
             if "$ref" in current and not _is_local_ref(current["$ref"]):
@@ -86,9 +87,9 @@ def _check_refs(payload: object) -> None:
                     raise DastInputError("nested_openapi_server_override")
                 if key == "server" and len(path) >= 2 and path[-2] == "links":
                     raise DastInputError("nested_openapi_server_override")
-                queue.append((value, (*path, key)))
+                queue.append((value, (*path, key), depth + 1))
         elif isinstance(current, list):
-            queue.extend((value, path) for value in current)
+            queue.extend((value, path, depth + 1) for value in current)
 
 
 def _route_path(value: object) -> str:
@@ -116,7 +117,7 @@ def sanitize_openapi(raw: bytes, *, origin: str) -> SafeOpenAPI:
         raise DastInputError("openapi_size_limit")
     try:
         source = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (ValueError, RecursionError) as error:
         raise DastInputError("invalid_openapi_json") from error
     if not isinstance(source, dict):
         raise DastInputError("invalid_openapi_document")
@@ -164,7 +165,10 @@ def sanitize_openapi(raw: bytes, *, origin: str) -> SafeOpenAPI:
     for key in ("components", "security", "tags"):
         if key in source:
             safe[key] = source[key]
-    document = json.dumps(safe, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    try:
+        document = json.dumps(safe, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (ValueError, RecursionError) as error:
+        raise DastInputError("openapi_too_complex") from error
     if len(document) > MAX_OPENAPI_BYTES:
         raise DastInputError("openapi_size_limit")
     return SafeOpenAPI(document=document, eligible_endpoints=tuple(sorted(operations)))
@@ -225,7 +229,7 @@ def parse_zap_report(
         raise DastReportError("zap_report_size_limit")
     try:
         payload = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (ValueError, RecursionError) as error:
         raise DastReportError("invalid_zap_json") from error
     if not isinstance(payload, dict):
         raise DastReportError("invalid_zap_report")

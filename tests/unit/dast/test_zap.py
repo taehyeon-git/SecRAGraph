@@ -118,6 +118,28 @@ def test_sanitize_openapi_rejects_unsafe_or_unusable_schema(payload: bytes) -> N
         sanitize_openapi(payload, origin=ORIGIN)
 
 
+def test_sanitize_openapi_rejects_deeply_nested_json_as_input_error() -> None:
+    nested = b"[" * 1_100 + b"0" + b"]" * 1_100
+    raw = (
+        b'{"openapi":"3.1.0","info":{},"paths":{"/public":{"get":{"responses":{}}}},'
+        b'"components":{"nested":' + nested + b"}}"
+    )
+
+    with pytest.raises(DastInputError, match="invalid_openapi_json"):
+        sanitize_openapi(raw, origin=ORIGIN)
+
+
+def test_sanitize_openapi_rejects_valid_but_excessively_deep_schema() -> None:
+    nested = b"[" * 150 + b"0" + b"]" * 150
+    raw = (
+        b'{"openapi":"3.1.0","info":{},"paths":{"/public":{"get":{"responses":{}}}},'
+        b'"components":{"nested":' + nested + b"}}"
+    )
+
+    with pytest.raises(DastInputError, match="openapi_too_complex"):
+        sanitize_openapi(raw, origin=ORIGIN)
+
+
 def test_zap_report_uses_route_template_and_discards_secrets() -> None:
     safe = sanitize_openapi(_schema(), origin=ORIGIN)
     findings = parse_zap_report(
@@ -157,6 +179,14 @@ def test_zap_report_uses_route_template_and_discards_secrets() -> None:
 def test_zap_report_rejects_off_scope_or_malformed_output(raw: bytes) -> None:
     safe = sanitize_openapi(_schema(), origin=ORIGIN)
     with pytest.raises(DastReportError):
+        parse_zap_report(raw, origin=ORIGIN, eligible_endpoints=safe.eligible_endpoints)
+
+
+def test_zap_report_rejects_deeply_nested_json_as_report_error() -> None:
+    safe = sanitize_openapi(_schema(), origin=ORIGIN)
+    raw = b'{"site":' + b"[" * 1_100 + b"0" + b"]" * 1_100 + b"}"
+
+    with pytest.raises(DastReportError, match="invalid_zap_json"):
         parse_zap_report(raw, origin=ORIGIN, eligible_endpoints=safe.eligible_endpoints)
 
 
