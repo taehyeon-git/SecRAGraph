@@ -85,6 +85,19 @@ class FakeDocker:
             return subprocess.CompletedProcess(args, 0, output)
         if args[:2] == ["network", "create"]:
             return subprocess.CompletedProcess(args, 0, b"network-id\n")
+        if args[:2] == ["network", "inspect"]:
+            payload = [
+                {
+                    "Driver": "bridge",
+                    "Internal": True,
+                    "Options": {
+                        "com.docker.network.bridge.gateway_mode_ipv4": "isolated",
+                        "com.docker.network.bridge.gateway_mode_ipv6": "isolated",
+                    },
+                    "IPAM": {"Config": [{"Subnet": "172.29.0.0/16"}]},
+                }
+            ]
+            return subprocess.CompletedProcess(args, 0, json.dumps(payload).encode())
         if args[:2] == ["network", "connect"]:
             return subprocess.CompletedProcess(args, 0, b"")
         if args[0] == "run" and "--entrypoint" in args:
@@ -126,8 +139,20 @@ def test_dast_runner_isolated_auth_and_sanitized_result(monkeypatch: pytest.Monk
     assert len(result.findings) == 1
     assert result.findings[0].http_path == "/public"
     assert "do-not-save" not in result.findings[0].model_dump_json()
+    assert "dast_redirects_within_isolated_network_possible" in result.warnings
     commands = [args for args, _ in fake.calls]
-    assert any(args[:2] == ("network", "create") and "--internal" in args for args in commands)
+    network_create = next(args for args in commands if args[:2] == ("network", "create"))
+    assert network_create[2:10] == (
+        "--internal",
+        "--driver",
+        "bridge",
+        "--opt",
+        "com.docker.network.bridge.gateway_mode_ipv4=isolated",
+        "--opt",
+        "com.docker.network.bridge.gateway_mode_ipv6=isolated",
+        network_create[-1],
+    )
+    assert any(args[:2] == ("network", "inspect") for args in commands)
     assert any(args[:2] == ("network", "connect") for args in commands)
     assert any(args[:2] == ("container", "rm") for args in commands)
     assert any(args[:2] == ("network", "disconnect") for args in commands)
@@ -188,6 +213,77 @@ def test_cleanup_failure_overrides_success(monkeypatch: pytest.MonkeyPatch) -> N
     result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
     assert result.execution.status == "error"
     assert "dast_cleanup_failed" in result.warnings
+
+
+@pytest.mark.parametrize(
+    "network_payload",
+    [
+        [{"Driver": "bridge", "Internal": True, "Options": {}, "IPAM": {"Config": []}}],
+        [
+            {
+                "Driver": "bridge",
+                "Internal": True,
+                "Options": {
+                    "com.docker.network.bridge.gateway_mode_ipv4": "isolated",
+                    "com.docker.network.bridge.gateway_mode_ipv6": "isolated",
+                },
+                "IPAM": {"Config": [{"Subnet": "172.29.0.0/16", "Gateway": "172.29.0.1"}]},
+            }
+        ],
+    ],
+)
+def test_network_without_verified_isolation_fails_before_target_connect(
+    monkeypatch: pytest.MonkeyPatch, network_payload: list[dict[str, object]]
+) -> None:
+    fake = FakeDocker()
+
+    def insecure_network(
+        args: list[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
+        capture: bool = False,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if args[:2] == ["network", "inspect"]:
+            fake.calls.append((tuple(args), None))
+            return subprocess.CompletedProcess(args, 0, json.dumps(network_payload).encode())
+        return fake(args, timeout=timeout, env=env, capture=capture)
+
+    monkeypatch.setattr(runner, "_docker", insecure_network)
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "error"
+    assert "dast_network_isolation_failed" in result.warnings
+    commands = [args for args, _ in fake.calls]
+    assert not any(args[:2] == ("network", "connect") for args in commands)
+    assert any(args[:2] == ("network", "rm") for args in commands)
+
+
+def test_unsupported_gateway_mode_fails_before_target_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+
+    def unsupported_network(
+        args: list[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
+        capture: bool = False,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if args[:2] == ["network", "create"]:
+            fake.calls.append((tuple(args), None))
+            return subprocess.CompletedProcess(args, 1, b"")
+        return fake(args, timeout=timeout, env=env, capture=capture)
+
+    monkeypatch.setattr(runner, "_docker", unsupported_network)
+    result = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+
+    assert result.execution.status == "error"
+    assert "dast_network_failed" in result.warnings
+    commands = [args for args, _ in fake.calls]
+    assert not any(args[:2] == ("network", "connect") for args in commands)
+    assert any(args[:2] == ("network", "rm") for args in commands)
 
 
 def test_report_parse_timeout_is_partial_and_still_cleans_up(

@@ -65,6 +65,9 @@ def _install_fakes(
         ),
     )
     monkeypatch.setattr(run_dast_evidence, "_scan", scan)
+    monkeypatch.setattr(
+        run_dast_evidence, "_assert_host_redirect_isolated", lambda _container: None
+    )
     monkeypatch.setattr(run_dast_evidence, "render_report", lambda _report, fmt: fmt.value)
     monkeypatch.setattr(run_dast_evidence.secrets, "token_urlsafe", lambda _length: "test-token")
     return calls, scans
@@ -143,6 +146,30 @@ def test_token_in_renderer_output_is_rejected_without_writing(
 
     assert [args[0] for _, args in calls] == ["up", "down"]
     assert not list(tmp_path.glob("dast.*"))
+
+
+def test_host_redirect_escape_fails_evidence_and_still_cleans_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls, _ = _install_fakes(monkeypatch)
+
+    def escaped(_container: str) -> None:
+        raise RuntimeError("host_redirect_escaped")
+
+    monkeypatch.setattr(run_dast_evidence, "_assert_host_redirect_isolated", escaped)
+    with pytest.raises(RuntimeError, match="host_redirect_escaped"):
+        run_dast_evidence.run_evidence(tmp_path)
+
+    assert [args[0] for _, args in calls] == ["up", "down"]
+    assert not list(tmp_path.glob("dast.*"))
+
+
+def test_probe_docker_cleanup_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    def timeout(_args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["docker"], timeout)
+
+    monkeypatch.setattr(run_dast_evidence, "_run_docker", timeout)
+    assert not run_dast_evidence._cleanup_docker(["network", "rm", "temporary"])
 
 
 def test_main_prints_generic_failure_without_exception_text(

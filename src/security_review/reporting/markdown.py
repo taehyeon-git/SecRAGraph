@@ -92,11 +92,12 @@ def _render_execution(execution: ScanExecution) -> list[str]:
             observed += f" (+{len(execution.observed_alert_endpoints) - 50} more)"
         lines.extend(
             [
-                f"- Eligible endpoints: {len(execution.eligible_endpoints)}",
-                f"- Operations: {eligible or 'None'}",
+                f"- OpenAPI seed endpoints: {len(execution.eligible_endpoints)}",
+                f"- Seed operations: {eligible or 'None'}",
                 f"- Observed alert endpoints: {len(execution.observed_alert_endpoints)}",
                 f"- Alert locations: {observed or 'None'}",
-                "- Alert locations do not inventory every request sent.",
+                "- Seeds and alert locations do not inventory every request sent; "
+                "redirects within the isolated network may be followed.",
             ]
         )
     elif execution.engine == "gitleaks":

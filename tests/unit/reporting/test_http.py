@@ -67,7 +67,7 @@ def test_mixed_locations_have_stable_order_and_distinct_rendering() -> None:
     markdown = render_markdown(report)
     assert "Location: GET /public" in markdown
     assert "Location: src/app.py:3" in markdown
-    assert "Eligible endpoints: 2" in markdown
+    assert "OpenAPI seed endpoints: 2" in markdown
     assert "Observed alert endpoints: 1" in markdown
     assert "None:None" not in markdown
 

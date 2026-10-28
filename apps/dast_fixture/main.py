@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import RedirectResponse
 
 _TOKEN = os.environ.get("SECRAGRAPH_DAST_TEST_TOKEN")
 if not _TOKEN:
@@ -20,6 +21,7 @@ app = FastAPI(
 )
 _counter_lock = Lock()
 _authenticated_protected_requests = 0
+_host_redirect_requests = 0
 
 
 @app.get("/health", include_in_schema=False)
@@ -50,4 +52,15 @@ def protected(authorization: Annotated[str | None, Header()] = None) -> dict[str
 def stats() -> dict[str, int]:
     with _counter_lock:
         count = _authenticated_protected_requests
-    return {"authenticated_protected_requests": count}
+        redirects = _host_redirect_requests
+    return {"authenticated_protected_requests": count, "host_redirect_requests": redirects}
+
+
+@app.get("/host-redirect", include_in_schema=False)
+def host_redirect(to: str) -> RedirectResponse:
+    """CI-only network probe: issue a redirect to its short-lived host marker."""
+
+    global _host_redirect_requests
+    with _counter_lock:
+        _host_redirect_requests += 1
+    return RedirectResponse(url=to, status_code=302)

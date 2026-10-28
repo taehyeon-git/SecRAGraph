@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -36,6 +37,8 @@ _OPENAPI_PATH = re.compile(r"/[A-Za-z0-9/._~-]{1,255}\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,63}\Z")
 _LABEL = "io.secragraph.dast.disposable"
 _ALIAS = "secragraph-target"
+_GATEWAY_MODE_IPV4 = "com.docker.network.bridge.gateway_mode_ipv4"
+_GATEWAY_MODE_IPV6 = "com.docker.network.bridge.gateway_mode_ipv6"
 _FETCH_SCRIPT = """
 import sys
 import urllib.request
@@ -169,7 +172,12 @@ def _result(
     findings: tuple[Finding, ...] = (),
     reason: str | None = None,
 ) -> DastScanResult:
-    warnings = ("dast_passive_only",) if reason is None else ("dast_passive_only", reason)
+    warnings: tuple[str, ...] = (
+        "dast_passive_only",
+        "dast_redirects_within_isolated_network_possible",
+    )
+    if reason is not None:
+        warnings = (*warnings, reason)
     return DastScanResult(
         findings=findings,
         warnings=warnings,
@@ -184,6 +192,44 @@ def _cleanup(args: list[str]) -> bool:
         return _docker(args, timeout=_DOCKER_CLEANUP_SECONDS).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def _network_isolated(network: str, deadline: float) -> bool:
+    """Fail closed unless Docker confirms an internal bridge without a host gateway."""
+
+    try:
+        inspected = _docker(
+            ["network", "inspect", network],
+            timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
+            capture=True,
+        )
+        if inspected.returncode != 0 or not inspected.stdout or len(inspected.stdout) > 65_536:
+            return False
+        payload = json.loads(inspected.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError, RecursionError):
+        return False
+    if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+        return False
+    details = payload[0]
+    options = details.get("Options")
+    ipam = details.get("IPAM")
+    if (
+        details.get("Driver") != "bridge"
+        or details.get("Internal") is not True
+        or not isinstance(options, dict)
+        or options.get(_GATEWAY_MODE_IPV4) != "isolated"
+        or options.get(_GATEWAY_MODE_IPV6) != "isolated"
+        or not isinstance(ipam, dict)
+    ):
+        return False
+    configs = ipam.get("Config")
+    return (
+        isinstance(configs, list)
+        and bool(configs)
+        and all(
+            isinstance(config, dict) and config.get("Gateway") in (None, "") for config in configs
+        )
+    )
 
 
 def run_zap_api_scan(
@@ -217,11 +263,26 @@ def run_zap_api_scan(
         try:
             network_attempted = True
             created = _docker(
-                ["network", "create", "--internal", "--driver", "bridge", network],
+                [
+                    "network",
+                    "create",
+                    "--internal",
+                    "--driver",
+                    "bridge",
+                    "--opt",
+                    f"{_GATEWAY_MODE_IPV4}=isolated",
+                    "--opt",
+                    f"{_GATEWAY_MODE_IPV6}=isolated",
+                    network,
+                ],
                 timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
             )
             if created.returncode != 0:
                 outcome = _result(started=started, status="error", reason="dast_network_failed")
+            elif not _network_isolated(network, deadline):
+                outcome = _result(
+                    started=started, status="error", reason="dast_network_isolation_failed"
+                )
             else:
                 connect_attempted = True
                 connected = _docker(

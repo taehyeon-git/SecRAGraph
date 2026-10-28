@@ -42,3 +42,7 @@ def test_fixture_has_one_missing_header_alert_and_authenticated_route(monkeypatc
 
     assert module.protected("Session fixture-secret") == {"ok": True}
     assert module.stats()["authenticated_protected_requests"] == 1
+    response = module.host_redirect("http://172.17.0.1:12345/marker")
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://172.17.0.1:12345/marker"
+    assert module.stats()["host_redirect_requests"] == 1
