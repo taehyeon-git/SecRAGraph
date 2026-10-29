@@ -24,7 +24,7 @@ jobs:
       - run: uv sync --frozen --dev
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py
+      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py scripts/run_history_evidence.py
       - run: uv run bandit -q -r src apps
       - name: Run keyless RAG evidence
         run: uv run python -m scripts.run_rag_evidence
@@ -178,5 +178,68 @@ jobs:
             build/evidence/dast.json
             build/evidence/dast.md
             build/evidence/dast.sarif
+          if-no-files-found: error
+          retention-days: 14
+
+  git-history-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch the event's exact PR head from GitHub's numeric PR ref
+        id: history_pr_head
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          case "$PR_NUMBER" in
+            ''|*[!0-9]*) exit 1 ;;
+          esac
+          git fetch --quiet --no-tags --no-recurse-submodules origin \
+            "refs/pull/$PR_NUMBER/head:refs/remotes/origin/history-pr-head"
+          fetched_head="$(git rev-parse --verify 'refs/remotes/origin/history-pr-head^{commit}')"
+          test "$fetched_head" = "$PR_HEAD_SHA"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.12"
+      - run: uv python install 3.11
+      - run: uv sync --frozen --dev
+      - name: Install SHA-verified Gitleaks only
+        run: |
+          case "$(uname -m)" in
+            x86_64) scanner_arch=amd64 ;;
+            aarch64) scanner_arch=arm64 ;;
+            *) exit 1 ;;
+          esac
+          python infra/scanners/install_tools.py build/tools "$scanner_arch" --gitleaks-only
+          test -x build/tools/gitleaks
+      - name: Generate validated Git-history evidence
+        id: history_generate
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: uv run python -m scripts.run_history_evidence generate --binary "$PWD/build/tools/gitleaks"
+      - name: Block on historical secret findings
+        id: history_gate
+        run: uv run python -m scripts.run_history_evidence gate
+      - name: Publish clean main history evidence
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          steps.history_generate.outcome == 'success' && steps.history_gate.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secragraph-history-evidence
+          path: |
+            build/evidence/history.json
+            build/evidence/history.md
+            build/evidence/history.sarif
           if-no-files-found: error
           retention-days: 14

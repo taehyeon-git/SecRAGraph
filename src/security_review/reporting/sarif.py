@@ -58,6 +58,12 @@ def _fingerprint(finding: Finding) -> str:
     if finding.http_path is not None:
         payload = f"{finding.rule_id}\0{finding.http_method}\0{finding.http_path}\0{finding.id}"
         return sha256(payload.encode()).hexdigest()
+    if finding.git_commit is not None:
+        payload = (
+            f"{finding.rule_id}\0{finding.git_commit}\0{finding.file_path}"
+            f"\0{finding.line_start}\0{finding.id}"
+        )
+        return sha256(payload.encode()).hexdigest()
     payload = f"{finding.rule_id}\0{finding.file_path}\0{finding.line_start}"
     if finding.rule_id == "OSV001" or finding.engine != "secragraph" or finding.trace:
         # Distinct advisories or flows can share a sink location.
@@ -139,6 +145,15 @@ def _result(
         name = f"{finding.http_method} {finding.http_path}"
         result["locations"] = [{"logicalLocations": [{"name": name, "fullyQualifiedName": name}]}]
         result["partialFingerprints"] = {"secragraph/httpLocationHash": fingerprint}
+    elif finding.git_commit is not None:
+        if finding.file_path is None or finding.line_start is None:
+            raise ValueError("historical finding requires a source path and line")
+        location = f"{finding.file_path}:{finding.line_start}@{finding.git_commit}"
+        result["locations"] = [
+            {"logicalLocations": [{"name": location, "fullyQualifiedName": location}]}
+        ]
+        result["properties"]["gitCommit"] = finding.git_commit
+        result["partialFingerprints"] = {"secragraph/historyLocationHash": fingerprint}
     else:
         if finding.file_path is None:
             raise ValueError("source finding requires a file path")

@@ -20,15 +20,23 @@ from security_review.domain.risk import calculate_risk
 RULE_SET_VERSION = "2026.10.27-multiengine.1"
 
 
-def finding_sort_key(finding: Finding) -> tuple[int, str, int, str, str]:
+def finding_sort_key(finding: Finding) -> tuple[int, str, int, str, str, str]:
     """Order source and HTTP findings without comparing nullable locations."""
 
     if finding.file_path is not None:
-        return (0, finding.file_path, finding.line_start or 0, finding.rule_id, finding.id)
+        return (
+            0,
+            finding.file_path,
+            finding.line_start or 0,
+            finding.git_commit or "",
+            finding.rule_id,
+            finding.id,
+        )
     return (
         1,
         f"{finding.http_method} {finding.http_path}",
         0,
+        "",
         finding.rule_id,
         finding.id,
     )

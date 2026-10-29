@@ -55,6 +55,8 @@ def _render_finding(finding: Finding) -> list[str]:
         f"- Evidence: {_escape(finding.redacted_evidence)}",
         f"- Remediation: {_escape(finding.remediation)}",
     ]
+    if finding.git_commit is not None:
+        lines.insert(6, f"- Git commit: {_escape(finding.git_commit)}")
     if finding.trace:
         lines.append("- Source-to-sink trace:")
         lines.extend(
@@ -100,6 +102,19 @@ def _render_execution(execution: ScanExecution) -> list[str]:
                 "redirects within the isolated network may be followed.",
             ]
         )
+    elif execution.engine == "gitleaks-history" or execution.revision_head is not None:
+        if execution.revision_head is None:
+            lines.append("- Git history range: unavailable")
+        else:
+            base_label = execution.revision_base or "Full reachable history"
+            lines.extend(
+                [
+                    f"- Base revision: {_escape(base_label)}",
+                    f"- Head revision: {_escape(execution.revision_head)}",
+                    f"- Selected commits: {execution.selected_commit_count}",
+                ]
+            )
+        lines.append("- Git history inspection does not provide an inspected-file inventory.")
     elif execution.engine == "gitleaks":
         lines.extend(
             [

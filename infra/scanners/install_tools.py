@@ -57,6 +57,17 @@ def install(destination: Path, architecture: str) -> None:
     opengrep_path.write_bytes(opengrep)
     opengrep_path.chmod(0o755)
 
+    install_gitleaks(destination, architecture)
+
+
+def install_gitleaks(destination: Path, architecture: str) -> None:
+    """Install only the SHA-verified Gitleaks asset for the history CI gate."""
+
+    assets = _ASSETS.get(architecture)
+    if assets is None:
+        raise ValueError("unsupported scanner architecture")
+    destination.mkdir(parents=True, exist_ok=True)
+
     archive = _verified_download(*assets["gitleaks"])
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as source:
         member = source.getmember("gitleaks")
@@ -70,7 +81,16 @@ def install(destination: Path, architecture: str) -> None:
     (destination / "gitleaks").chmod(0o755)
 
 
+def main(arguments: list[str] | None = None) -> int:
+    args = sys.argv[1:] if arguments is None else arguments
+    if len(args) == 2:
+        install(Path(args[0]), args[1])
+        return 0
+    if len(args) == 3 and args[2] == "--gitleaks-only":
+        install_gitleaks(Path(args[0]), args[1])
+        return 0
+    raise SystemExit("usage: install_tools.py OUTPUT_DIRECTORY ARCHITECTURE [--gitleaks-only]")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: install_tools.py OUTPUT_DIRECTORY ARCHITECTURE")
-    install(Path(sys.argv[1]), sys.argv[2])
+    raise SystemExit(main())
