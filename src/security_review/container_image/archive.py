@@ -238,7 +238,11 @@ def inspect_image_tar(path: Path, *, expected_local_id: str) -> ImageTarIdentity
                     raise ImageScanError("image_archive_identity_mismatch")
                 with _get_file(archive, members, "index.json") as handle:
                     index_id = f"sha256:{_hash_stream(handle)}"
-                valid_ids.update((manifest_id, index_id))
+                # OCI layers may be compressed. Their blobs bind to the
+                # manifest/index, but not directly to the config digest's
+                # uncompressed rootfs diff_ids. Do not accept a config-only
+                # local ID for an OCI archive.
+                valid_ids = {manifest_id, index_id}
             if expected_local_id not in valid_ids:
                 raise ImageScanError("image_archive_identity_mismatch")
         return ImageTarIdentity(tar_sha256, expected_local_id, legacy_config)

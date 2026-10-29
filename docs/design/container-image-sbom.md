@@ -14,14 +14,15 @@ executed by the member-facing API.
 The local operator command accepts a **trusted local** OCI/Docker image tar
 and a locally installed pinned Trivy binary. It never calls Docker or pulls a
 registry image. CI builds this repository's runtime target, saves by the exact
-local image ID, and invokes the same command on that tar. The Docker image ID
-may identify an OCI index, manifest or config, while Trivy's
+local image ID, and invokes the same command on that tar. An OCI archive's
+local image ID must identify its index or manifest; a legacy Docker archive's
+local ID is its config digest. Trivy's
 `Metadata.ImageID` is the image **config** digest. We verify the saved tar's
 OCI index/manifest/config references and blob hashes, or its Docker archive
 manifest/config if the runner emits that format. The archive must contain
 exactly one runnable manifest and no ambiguous platform/attestation choice.
 The expected local image ID
-must match a verified digest in that chain, and Trivy's JSON and CycloneDX
+must match the verified digest for that archive format, and Trivy's JSON and CycloneDX
 outputs must agree on the config digest. We record the tar SHA-256, local ID
 and config digest as separate identities. None is called a registry digest.
 
@@ -111,6 +112,13 @@ are safe. The README and evidence document state the unresolved counts and
 the remediation priority. Main-branch artifacts include normalized JSON,
 Markdown, SARIF, CycloneDX SBOM and a manifest with tool, DB and image
 provenance. A changed PR's raw scanner output is never uploaded.
+
+This gate runs from the PR's own workflow and script. It detects accidental
+policy drift in trusted contributions, but a malicious PR can edit the gate or
+the workflow itself. At this phase the repository's `main` branch has no
+protection rule, so a failed job does not independently prohibit a merge or a
+direct push. Enforced adversarial PR screening needs a protected branch and a
+separately trusted verification workflow/check outside PR-controlled code.
 
 ## Verification
 

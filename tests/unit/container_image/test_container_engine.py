@@ -145,6 +145,12 @@ def test_tar_identity_rejects_wrong_local_id_and_ambiguous_manifest(tmp_path: Pa
         inspect_image_tar(path, expected_local_id=local_id)
 
 
+def test_oci_tar_rejects_config_digest_as_local_id(tmp_path: Path) -> None:
+    path, _, config_id = _archive(tmp_path)
+    with pytest.raises(ImageScanError, match="image_archive_identity_mismatch"):
+        inspect_image_tar(path, expected_local_id=config_id)
+
+
 def test_tar_identity_rejects_wrong_platform(tmp_path: Path) -> None:
     path, local_id, _ = _archive(tmp_path, platform="linux/arm64")
     with pytest.raises(ImageScanError):
