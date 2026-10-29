@@ -58,6 +58,9 @@ def _fingerprint(finding: Finding) -> str:
     if finding.http_path is not None:
         payload = f"{finding.rule_id}\0{finding.http_method}\0{finding.http_path}\0{finding.id}"
         return sha256(payload.encode()).hexdigest()
+    if finding.image_resource is not None:
+        payload = f"{finding.rule_id}\0{finding.image_id}\0{finding.image_resource}\0{finding.id}"
+        return sha256(payload.encode()).hexdigest()
     if finding.git_commit is not None:
         payload = (
             f"{finding.rule_id}\0{finding.git_commit}\0{finding.file_path}"
@@ -119,7 +122,7 @@ def _result(
     finding: Finding, rule_index: int, path_prefix: str, fingerprint: str
 ) -> dict[str, Any]:
     message = {"text": finding.message}
-    properties = {
+    properties: dict[str, Any] = {
         "findingId": finding.id,
         "engine": finding.engine,
         "category": finding.category,
@@ -128,6 +131,11 @@ def _result(
         "redactedEvidence": finding.redacted_evidence,
         "severity": finding.severity.value,
     }
+    if finding.image_id is not None:
+        properties["imageId"] = finding.image_id
+        properties["upstreamSeverity"] = finding.upstream_severity
+        if finding.severity_source is not None:
+            properties["severitySource"] = finding.severity_source
     osv_url = _osv_advisory_url(finding)
     if osv_url is not None:
         message["markdown"] = (
@@ -141,7 +149,11 @@ def _result(
         "message": message,
         "properties": properties,
     }
-    if finding.http_path is not None:
+    if finding.image_resource is not None:
+        name = finding.image_resource
+        result["locations"] = [{"logicalLocations": [{"name": name, "fullyQualifiedName": name}]}]
+        result["partialFingerprints"] = {"secragraph/imageLocationHash": fingerprint}
+    elif finding.http_path is not None:
         name = f"{finding.http_method} {finding.http_path}"
         result["locations"] = [{"logicalLocations": [{"name": name, "fullyQualifiedName": name}]}]
         result["partialFingerprints"] = {"secragraph/httpLocationHash": fingerprint}

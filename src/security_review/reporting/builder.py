@@ -21,7 +21,7 @@ RULE_SET_VERSION = "2026.10.27-multiengine.1"
 
 
 def finding_sort_key(finding: Finding) -> tuple[int, str, int, str, str, str]:
-    """Order source and HTTP findings without comparing nullable locations."""
+    """Order source, HTTP and image findings without comparing nullable locations."""
 
     if finding.file_path is not None:
         return (
@@ -32,14 +32,16 @@ def finding_sort_key(finding: Finding) -> tuple[int, str, int, str, str, str]:
             finding.rule_id,
             finding.id,
         )
-    return (
-        1,
-        f"{finding.http_method} {finding.http_path}",
-        0,
-        "",
-        finding.rule_id,
-        finding.id,
-    )
+    if finding.http_path is not None:
+        return (
+            1,
+            f"{finding.http_method} {finding.http_path}",
+            0,
+            "",
+            finding.rule_id,
+            finding.id,
+        )
+    return (2, finding.image_resource or "", 0, finding.image_id or "", finding.rule_id, finding.id)
 
 
 def normalize_target_name(target_name: str) -> str:
