@@ -12,6 +12,7 @@ from security_review.domain.models import (
 )
 
 COMMIT = "a" * 40
+BASE_COMMIT = "b" * 40
 SHA256_COMMIT = "b" * 64
 
 
@@ -72,9 +73,9 @@ def _history_execution(**changes: object) -> ScanExecution:
 
 
 def test_history_execution_tracks_selected_revision_range_without_file_inventory() -> None:
-    execution = _history_execution(revision_base=SHA256_COMMIT)
+    execution = _history_execution(revision_base=BASE_COMMIT)
 
-    assert execution.revision_base == SHA256_COMMIT
+    assert execution.revision_base == BASE_COMMIT
     assert execution.revision_head == COMMIT
     assert execution.selected_commit_count == 2
     assert execution.scanned_files == ()
@@ -89,6 +90,7 @@ def test_history_execution_tracks_selected_revision_range_without_file_inventory
         {"selected_commit_count": 0},
         {"revision_head": "a" * 8},
         {"revision_base": "A" * 40},
+        {"revision_base": SHA256_COMMIT},
         {"kind": "sast"},
         {"eligible_files": ("settings.py",)},
         {"scanned_files": ("settings.py",)},

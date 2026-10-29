@@ -89,3 +89,25 @@ def test_full_history_execution_displays_reachability_without_implied_base() -> 
     markdown = render_markdown(report)
     assert "Base revision: Full reachable history" in markdown
     assert "Selected commits: 7" in markdown
+
+
+def test_failed_history_execution_does_not_claim_file_coverage() -> None:
+    report = build_report(
+        "repo",
+        [],
+        executions=(
+            ScanExecution(
+                engine="gitleaks-history",
+                kind="secret",
+                status="error",
+                elapsed_ms=10,
+                reason="history_timeout",
+            ),
+        ),
+    )
+
+    markdown = render_markdown(report)
+
+    assert "Git history range: unavailable" in markdown
+    assert "Eligible files" not in markdown
+    assert "Scanned files" not in markdown

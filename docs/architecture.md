@@ -7,6 +7,8 @@ SecRAGraph는 Python 모듈형 단일 서비스입니다. 정적 스캔과 지�
 ```mermaid
 flowchart TB
   FILE[CLI file or directory] --> SCAN[ScanService]
+  HISTORY[Trusted local or CI Git checkout] --> HSCAN[Bounded Gitleaks Git history scan]
+  HSCAN --> SGRAPH
   UPLOAD[FastAPI file or ZIP] --> AUTH[Member Session or optional operator Bearer]
   AUTH --> TEMP[Validated temporary workspace]
   TEMP --> SCAN
@@ -34,6 +36,8 @@ flowchart TB
 ```
 
 CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없고 PostgreSQL에 보고서를 저장하지 않지만, 지원되는 잠금 파일이 있으면 OSV 자동 감사를 연결합니다. API의 `ScanService`는 영속 보고서 저장소와 기본 OSV 감사를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
+
+`scan-history`는 별도의 신뢰된 로컬/CI Git 체크아웃을 대상으로 합니다. 커밋 집합을 사전 확인한 뒤 Gitleaks가 반환한 비밀 없는 메타데이터를 같은 스캔 LangGraph에 넘깁니다. 회원 업로드, ZIP, FastAPI 요청으로는 이력 스캔을 시작할 수 없습니다. 역사적 finding은 과거 커밋 SHA를 보존하며 SARIF에는 현재 파일의 물리적 위치 대신 논리적 위치를 기록합니다.
 
 CLI와 API 스캔 모두 기본적으로 finding에 나타난 CWE ID로 공식 문서를 확인합니다. CLI에는 Qdrant retriever가 없으므로 공식 출처를 보고서에 연결하고, 임베딩 제공자가 구성된 API는 같은 문서를 검색 코퍼스에도 추가합니다. RAG 질문의 자동 수집은 ChatModel이 연결된 지식 API에서만 동작합니다.
 
@@ -76,6 +80,7 @@ classify_intent ─┬→ general_answer → END
 | --- | --- |
 | `src/security_review/domain/models.py`, `risk.py` | 검증된 `Finding`, `SourceReference`, `ScanReport`와 결정적 위험 점수. FastAPI·DB·모델 SDK에 의존하지 않습니다. |
 | `scanner/files.py`, `snapshot.py`, `opengrep_adapter.py`, `external_detectors.py` | 지원 파일 탐색·한도, 별도 비실행 스냅샷, 신뢰된 검사기 호출과 결과 정규화. 소스 줄이나 비밀 원문을 보고서에 복사하지 않습니다. |
+| `history/engine.py`, `history_review.py` | 신뢰된 Git 체크아웃의 유한 커밋 집합을 검증하고 Gitleaks Git 모드의 비밀 없는 결과를 같은 LangGraph 보고서로 보냅니다. |
 | `uploads/service.py`, `archive.py` | 파일명·MIME·크기 검증, ZIP 경로·링크·개수·압축 해제량 검사 후 임시 디렉터리 사용. |
 | `application.py` | CLI의 `scan_path`와 API의 `ScanService`; 같은 스캔 그래프를 조립하고 API 경로에서는 보고서를 저장합니다. |
 | `orchestrator/scan_graph.py`, `knowledge_graph.py`, `state.py` | 각 LangGraph의 상태, 노드, 조건부 분기와 결과 계약. |
@@ -107,6 +112,8 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 공개 SecRAGraph 소스 자체는 [CodeQL `security-extended`](../.github/workflows/security-scan.yml)를 GitHub Actions에서 실행합니다. CodeQL의 무료 허용 범위에 맞춰 공개 소스에만 적용하며 비공개 회원 업로드에는 사용하지 않습니다. [별도 FastAPI 흐름 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 `tests/fixtures/codeql_flow`에서 여러 파일 흐름과 차단 함수를 검증하는 테스트 자료입니다. 공개 코드에 대한 실제 경고는 `security-extended`에서 생성합니다. 이 규칙군은 기본 쿼리보다 낮은 정밀도의 쿼리도 포함하므로 결과를 사람이 검토해야 합니다.
 
 `ScanExecution`은 엔진별 성공·부분·건너뜀·미실행·오류, 도구 버전, 입력 후보, 확인된 검사 파일과 소요 시간을 보존합니다. Gitleaks JSON은 파일별 전체 검사 목록을 주지 않으므로 확인 파일은 finding이 발생한 경로만 표시합니다. 입력 파일 제한·지원 언어·시간 초과로 제외된 부분을 성공으로 취급하지 않습니다. [평가 문서](demo.md)는 작성자 회귀 자료, 독립 라벨 코퍼스, 라벨 없는 실제 저장소를 분리해 설명합니다. 과거 자체 규칙의 수치는 [역사적 기록](evidence/expanded-scanner-2026-10-27.md)에만 보존합니다.
+
+Git 이력 검사의 `ScanExecution`은 선택한 base/head SHA와 커밋 수를 별도로 기록합니다. 이 수치는 이력 선택 범위이며 파일별 검사 완료를 뜻하지 않습니다. CI는 PR의 실제 head 또는 push의 before/after 범위를 검사하고 발견 건을 별도 단계에서 실패로 처리합니다. 공개 Actions 아티팩트는 완료·검증된 발견 건 없는 `main` 결과에만 게시합니다.
 
 ## 회원 인증과 취약점 조회
 

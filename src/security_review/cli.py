@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from security_review.application import UnsupportedTargetError, scan_path
 from security_review.config import Settings
 from security_review.domain.models import ScanReport
+from security_review.history_review import scan_history_path
 from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
 from security_review.intelligence.ingestion import (
     DocumentIngestionError,
@@ -36,14 +37,14 @@ from security_review.storage.intelligence import IntelligenceImportError, import
 
 app = typer.Typer(
     name="security-review",
-    help="Scan source without executing it and inspect disposable running test APIs.",
+    help="Review source, trusted Git history, and disposable running test APIs.",
     no_args_is_help=True,
 )
 
 
 @app.callback()
 def main() -> None:
-    """Run SecRAGraph's source and isolated test-API review tools."""
+    """Run SecRAGraph's source, history, and isolated test-API review tools."""
 
 
 class MembershipAdmin(Protocol):
@@ -270,6 +271,64 @@ def scan(
     except OSError as error:
         typer.echo(f"Could not write report: {error}", err=True)
         raise typer.Exit(code=1) from error
+
+
+@app.command("scan-history")
+def scan_history(
+    root: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            resolve_path=True,
+            help="Trusted local Git checkout",
+        ),
+    ],
+    base_sha: Annotated[
+        str | None, typer.Option("--base", help="Exclusive full commit SHA")
+    ] = None,
+    head_sha: Annotated[
+        str | None, typer.Option("--head", help="Inclusive full commit SHA")
+    ] = None,
+    report_format: Annotated[
+        ReportFormat, typer.Option("--format", case_sensitive=False)
+    ] = ReportFormat.MARKDOWN,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Scan selected Git history for redacted secret candidates."""
+
+    try:
+        report = scan_history_path(root, base_sha=base_sha, head_sha=head_sha)
+    except ValueError:
+        typer.echo("Git history scan selection is invalid.", err=True)
+        raise typer.Exit(code=2) from None
+    rendered = render_report(report, report_format)
+    if output is None:
+        typer.echo(rendered, nl=False)
+    else:
+        try:
+            _write_atomically(output, rendered)
+        except OSError as error:
+            typer.echo("Could not write history report.", err=True)
+            raise typer.Exit(code=1) from error
+    if len(report.executions) != 1:
+        raise typer.Exit(code=1)
+    execution = report.executions[0]
+    if (
+        execution.engine != "gitleaks-history"
+        or execution.kind != "secret"
+        or execution.status != "completed"
+        or execution.version != "8.30.1"
+        or execution.revision_head is None
+        or execution.selected_commit_count is None
+        or execution.selected_commit_count < 1
+        or execution.checks != ("git-history", "builtin-default")
+    ):
+        raise typer.Exit(code=1)
+    if report.findings:
+        raise typer.Exit(code=3)
 
 
 @app.command("import-intelligence")

@@ -102,15 +102,19 @@ def _render_execution(execution: ScanExecution) -> list[str]:
                 "redirects within the isolated network may be followed.",
             ]
         )
-    elif execution.revision_head is not None:
-        lines.extend(
-            [
-                f"- Base revision: {_escape(execution.revision_base or 'Full reachable history')}",
-                f"- Head revision: {_escape(execution.revision_head)}",
-                f"- Selected commits: {execution.selected_commit_count}",
-                "- Git history inspection does not provide an inspected-file inventory.",
-            ]
-        )
+    elif execution.engine == "gitleaks-history" or execution.revision_head is not None:
+        if execution.revision_head is None:
+            lines.append("- Git history range: unavailable")
+        else:
+            base_label = execution.revision_base or "Full reachable history"
+            lines.extend(
+                [
+                    f"- Base revision: {_escape(base_label)}",
+                    f"- Head revision: {_escape(execution.revision_head)}",
+                    f"- Selected commits: {execution.selected_commit_count}",
+                ]
+            )
+        lines.append("- Git history inspection does not provide an inspected-file inventory.")
     elif execution.engine == "gitleaks":
         lines.extend(
             [

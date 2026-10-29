@@ -190,6 +190,9 @@ class ScanExecution(BaseModel):
             raise ValueError("HTTP endpoint coverage requires DAST kind")
         if self.revision_base is not None and self.revision_head is None:
             raise ValueError("revision_base requires revision_head")
+        if self.revision_base is not None and self.revision_head is not None:
+            if len(self.revision_base) != len(self.revision_head):
+                raise ValueError("Git revision bounds must use the same object ID width")
         if (self.revision_head is None) != (self.selected_commit_count is None):
             raise ValueError("revision_head and selected_commit_count are required together")
         if self.kind != "secret" and self.revision_head is not None:

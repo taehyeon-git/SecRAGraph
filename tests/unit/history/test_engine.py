@@ -293,9 +293,7 @@ def test_selected_commit_cap_fails_before_gitleaks(
     assert not calls
 
 
-def test_report_finding_cap_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_report_finding_cap_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import security_review.history.engine as engine
 
     root, _, secret_commit, _ = _repo(tmp_path)
@@ -362,9 +360,7 @@ def test_subprocess_timeout_is_fail_closed(tmp_path: Path, monkeypatch: pytest.M
     assert result.findings == ()
 
 
-def test_report_byte_cap_is_fail_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_report_byte_cap_is_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import security_review.history.engine as engine
 
     root, _, secret_commit, _ = _repo(tmp_path)
