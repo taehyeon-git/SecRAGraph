@@ -337,7 +337,9 @@ def _invoke_gitleaks(
             cwd=str(cwd),
             env=env,
             start_new_session=os.name != "nt",
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+            creationflags=(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+            ),
         )
     except OSError as error:
         raise _HistoryError("scanner_failed") from error
