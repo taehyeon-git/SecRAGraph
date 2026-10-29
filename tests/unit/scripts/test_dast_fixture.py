@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 from pathlib import Path
 
 import pytest
 import yaml
 from fastapi import HTTPException
+from starlette.requests import Request
+from starlette.responses import Response
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -47,3 +50,27 @@ def test_fixture_has_one_missing_header_alert_and_authenticated_route(monkeypatc
     assert response.status_code == 302
     assert response.headers["location"] == "http://172.17.0.1:12345/marker"
     assert module.stats()["host_redirect_requests"] == 1
+
+
+def test_only_public_response_omits_nosniff_header(monkeypatch) -> None:
+    monkeypatch.setenv("SECRAGRAPH_DAST_TEST_TOKEN", "fixture-secret")
+    module = importlib.import_module("apps.dast_fixture.main")
+    module = importlib.reload(module)
+
+    async def response_for(path: str, status_code: int) -> Response:
+        request = Request(
+            {"type": "http", "method": "GET", "path": path, "headers": [], "server": ("test", 80)}
+        )
+
+        async def call_next(_request: Request) -> Response:
+            return Response(status_code=status_code)
+
+        return await module.add_nosniff_except_public(request, call_next)
+
+    public = asyncio.run(response_for("/public", 200))
+    protected_ok = asyncio.run(response_for("/protected", 200))
+    protected_unauthorized = asyncio.run(response_for("/protected", 401))
+
+    assert "x-content-type-options" not in public.headers
+    assert protected_ok.headers["x-content-type-options"] == "nosniff"
+    assert protected_unauthorized.headers["x-content-type-options"] == "nosniff"

@@ -7,8 +7,9 @@ from hmac import compare_digest
 from threading import Lock
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from starlette.middleware.base import RequestResponseEndpoint
 
 _TOKEN = os.environ.get("SECRAGRAPH_DAST_TEST_TOKEN")
 if not _TOKEN:
@@ -23,6 +24,18 @@ _counter_lock = Lock()
 _public_requests = 0
 _authenticated_protected_requests = 0
 _host_redirect_requests = 0
+
+
+@app.middleware("http")
+async def add_nosniff_except_public(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    """Keep `/public` as the sole intentional missing-header canary."""
+
+    response = await call_next(request)
+    if request.url.path != "/public":
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/health", include_in_schema=False)
