@@ -24,6 +24,8 @@ from security_review.orchestrator.scan_graph import (
     build_scan_graph,
 )
 from security_review.ports import ReportRepository
+from security_review.scanner.compose_adapter import ComposePolicyAdapter
+from security_review.scanner.compose_files import is_compose_file
 from security_review.scanner.external_common import ExternalExecution, ExternalScanResult
 from security_review.scanner.external_detectors import (
     CheckovAdapter,
@@ -68,10 +70,14 @@ def _eligible_snapshot_files(scanner: str, paths: tuple[str, ...]) -> tuple[str,
         return tuple(path for path in paths if Path(path).suffix.lower() in _SOURCE_EXTENSIONS)
     if scanner == "checkov":
         return tuple(path for path in paths if _config_candidate(path))
+    if scanner == "compose-policy":
+        return tuple(path for path in paths if is_compose_file(path))
     raise ValueError(f"unknown scanner: {scanner}")
 
 
 def _language_for_path(path: str) -> str | None:
+    if is_compose_file(path):
+        return "docker-compose"
     name = Path(path).name.lower()
     if name in {"dockerfile", "containerfile"} or name.startswith(
         ("dockerfile.", "containerfile.")
@@ -87,7 +93,12 @@ def _language_for_path(path: str) -> str | None:
 
 
 def _execution_record(execution: ExternalExecution) -> ScanExecution:
-    kind_by_engine = {"opengrep": "sast", "gitleaks": "secret", "checkov": "configuration"}
+    kind_by_engine = {
+        "opengrep": "sast",
+        "gitleaks": "secret",
+        "checkov": "configuration",
+        "compose-policy": "configuration",
+    }
     kind = kind_by_engine[execution.scanner]
     reason = next((item for item in execution.warnings if _REASON_CODE.fullmatch(item)), None)
     languages = tuple(
@@ -119,6 +130,7 @@ def _deterministic_scan(
     sast_adapter: _SnapshotAdapter | None = None,
     secret_adapter: _SnapshotAdapter | None = None,
     config_adapter: _SnapshotAdapter | None = None,
+    compose_adapter: _SnapshotAdapter | None = None,
 ) -> DeterministicScanResult:
     """Scan a bounded, non-executable snapshot with specialized local engines."""
 
@@ -155,8 +167,14 @@ def _deterministic_scan(
         ("opengrep", sast_adapter or OpengrepAdapter()),
         ("gitleaks", secret_adapter or GitleaksAdapter()),
         ("checkov", config_adapter or CheckovAdapter()),
+        ("compose-policy", compose_adapter or ComposePolicyAdapter()),
     )
-    engine_time_limits = {"opengrep": 45.0, "gitleaks": 10.0, "checkov": 20.0}
+    engine_time_limits = {
+        "opengrep": 45.0,
+        "gitleaks": 10.0,
+        "checkov": 20.0,
+        "compose-policy": 20.0,
+    }
     with safe_snapshot(discovery, request.limits) as snapshot:
         warnings.extend(f"{path}:{reason}" for path, reason in snapshot.skipped)
         for scanner, adapter in adapters:
