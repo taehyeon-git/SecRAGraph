@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from security_review.domain.models import Finding, ScanReport
+from security_review.reporting.builder import finding_sort_key
 
 _NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
@@ -85,7 +86,7 @@ class ScanReportRow(Base):
     def to_domain(self) -> ScanReport:
         ordered = sorted(
             (item.to_domain() for item in self.findings),
-            key=lambda item: (item.file_path, item.line_start, item.rule_id, item.id),
+            key=finding_sort_key,
         )
         return ScanReport.model_validate(
             {
@@ -150,9 +151,11 @@ class FindingRow(Base):
     rule_id: Mapped[str] = mapped_column(String(128), nullable=False)
     category: Mapped[str] = mapped_column(String(128), nullable=False)
     severity: Mapped[str] = mapped_column(String(32), nullable=False)
-    file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
-    line_start: Mapped[int] = mapped_column(nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    line_start: Mapped[int | None] = mapped_column(nullable=True)
     line_end: Mapped[int | None] = mapped_column(nullable=True)
+    http_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    http_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     redacted_evidence: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -174,6 +177,8 @@ class FindingRow(Base):
             file_path=finding.file_path,
             line_start=finding.line_start,
             line_end=finding.line_end,
+            http_method=finding.http_method,
+            http_path=finding.http_path,
             message=finding.message,
             redacted_evidence=finding.redacted_evidence,
             confidence=finding.confidence.value,
@@ -194,6 +199,8 @@ class FindingRow(Base):
                 "file_path": self.file_path,
                 "line_start": self.line_start,
                 "line_end": self.line_end,
+                "http_method": self.http_method,
+                "http_path": self.http_path,
                 "message": self.message,
                 "redacted_evidence": self.redacted_evidence,
                 "confidence": self.confidence,

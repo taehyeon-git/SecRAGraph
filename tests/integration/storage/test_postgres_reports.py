@@ -116,6 +116,39 @@ def test_postgres_repository_round_trips_execution_coverage_and_trace(
     assert repository.get(report.scan_id) == report
 
 
+def test_postgres_repository_round_trips_http_finding_without_source_location(
+    session_factory: sessionmaker[Session],
+) -> None:
+    http = Finding(
+        id="zap:10021:GET:/public",
+        rule_id="ZAP/10021",
+        category="dast",
+        severity=Severity.MEDIUM,
+        http_method="GET",
+        http_path="/public",
+        message="Missing security header.",
+        redacted_evidence="Response header presence only.",
+        confidence=Confidence.HIGH,
+        remediation="Set the header.",
+        engine="zap",
+    )
+    execution = ScanExecution(
+        engine="zap",
+        kind="dast",
+        status="completed",
+        elapsed_ms=20,
+        eligible_endpoints=("GET /public",),
+        observed_alert_endpoints=("GET /public",),
+        checks=("passive",),
+    )
+    report = build_report("api", [http, sample_finding()], executions=(execution,))
+    repository = SqlAlchemyReportRepository(session_factory)
+
+    repository.save(report)
+
+    assert repository.get(report.scan_id) == report
+
+
 def test_persisted_scan_never_restores_unrecognized_source_line_content(
     session_factory: sessionmaker[Session],
     tmp_path: Path,

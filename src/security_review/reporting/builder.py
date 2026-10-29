@@ -20,8 +20,18 @@ from security_review.domain.risk import calculate_risk
 RULE_SET_VERSION = "2026.10.27-multiengine.1"
 
 
-def _finding_key(finding: Finding) -> tuple[str, int, str, str]:
-    return (finding.file_path, finding.line_start, finding.rule_id, finding.id)
+def finding_sort_key(finding: Finding) -> tuple[int, str, int, str, str]:
+    """Order source and HTTP findings without comparing nullable locations."""
+
+    if finding.file_path is not None:
+        return (0, finding.file_path, finding.line_start or 0, finding.rule_id, finding.id)
+    return (
+        1,
+        f"{finding.http_method} {finding.http_path}",
+        0,
+        finding.rule_id,
+        finding.id,
+    )
 
 
 def normalize_target_name(target_name: str) -> str:
@@ -48,7 +58,7 @@ def normalize_findings(findings: Sequence[Finding]) -> tuple[Finding, ...]:
         if existing is not None and existing != finding:
             raise ValueError(f"finding ID collision for {finding.id}")
         unique[finding.id] = finding
-    return tuple(sorted(unique.values(), key=_finding_key))
+    return tuple(sorted(unique.values(), key=finding_sort_key))
 
 
 def normalize_warnings(warnings: Sequence[str]) -> tuple[str, ...]:

@@ -152,3 +152,38 @@ def test_report_row_round_trips_engine_coverage_and_source_free_trace() -> None:
     assert restored == report
     assert restored.findings[0].trace == (source, sink)
     assert restored.executions == (execution,)
+
+
+def test_report_row_round_trips_mixed_source_and_http_locations() -> None:
+    http = Finding(
+        id="zap:10021:GET:/public",
+        rule_id="ZAP/10021",
+        category="dast",
+        severity=Severity.MEDIUM,
+        http_method="GET",
+        http_path="/public",
+        message="Missing security header.",
+        redacted_evidence="Response header presence only.",
+        confidence=Confidence.HIGH,
+        remediation="Set the header.",
+        engine="zap",
+    )
+    execution = ScanExecution(
+        engine="zap",
+        kind="dast",
+        status="completed",
+        elapsed_ms=12,
+        eligible_endpoints=("GET /public",),
+        observed_alert_endpoints=("GET /public",),
+    )
+    report = build_report("api", [http, sample_finding()], executions=(execution,))
+    row = ScanReportRow.from_domain(report)
+    row.findings = list(reversed(row.findings))
+
+    restored = row.to_domain()
+
+    assert restored == report
+    assert [finding.id for finding in restored.findings] == ["GITLEAKS:stable", http.id]
+    assert restored.findings[1].file_path is None
+    assert restored.findings[1].http_path == "/public"
+    assert restored.executions[0].eligible_endpoints == ("GET /public",)

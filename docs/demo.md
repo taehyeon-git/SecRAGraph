@@ -47,3 +47,21 @@ python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_
 ## 6. 코드 흐름 검증
 
 공개 저장소의 [CodeQL 워크플로](../.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 로컬 [교차 파일 검증 기록](evidence/codeql-cross-file-smoke.md)에서 내장 `py/command-line-injection` 쿼리는 FastAPI 입력→다른 파일의 명령 실행 경로를 확인했지만 사용자 정의 허용 목록을 거친 안전 경로에도 경고를 냈습니다. [FastAPI 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 여러 파일을 거치는 합성 source→sink와 명시적 차단 함수를 검증하기 위한 테스트 자료이며 제품 경고 규칙은 아닙니다. 회원의 비공개 업로드는 CodeQL 라이선스 범위 밖이므로 Opengrep의 파일 내부 taint 분석을 사용합니다.
+
+## 7. 격리 테스트 API DAST
+
+Docker가 실행 중인 환경에서 다음 평가 명령을 실행합니다. 이는 서비스를 시작하는 명령이 아니라 **일회용 테스트 API의 DAST 증거**를 만드는 명령입니다.
+
+```text
+uv run python -m scripts.run_dast_evidence
+```
+
+스크립트는 임의 이름의 Compose 프로젝트에서 [고정 테스트 API](../apps/dast_fixture/main.py)를 실행합니다. 테스트 API는 호스트 포트를 열지 않고 `io.secragraph.dast.disposable=true` 표시가 붙습니다. 검사기는 호스트 게이트웨이 주소가 없는 Docker 내부 전용 네트워크에 접속하고 OpenAPI에서 GET/HEAD/OPTIONS만 남긴 뒤 ZAP `-S` 패시브 검사 모드로 요청합니다. 임시 세션 토큰으로 `/protected`에 인증 요청이 도달한 횟수를 확인합니다. 이 API의 `/public`에는 의도적으로 `X-Content-Type-Options`가 빠져 있어 ZAP 규칙 `10021`을 확인할 수 있습니다. 검사·검증이 실패해도 Compose 프로젝트와 볼륨을 정리합니다.
+
+Linux CI에서는 별도의 일회용 네트워크 시험도 실행합니다. 같은 숨겨진 테스트 API 리디렉션 경로를 일반 내부 브리지와 격리 브리지에서 각각 호출합니다. 일반 브리지에서는 브리지 게이트웨이에만 바인딩한 임시 마커 서버에 실제로 도달해야 하고, 격리 브리지에서는 같은 리디렉션을 따라가도 마커에 도달하지 못해야 합니다. 모든 네트워크·마커를 정리합니다. 이 시험은 **스캐너의 호스트 게이트웨이 경계**를 검증하며, 동일 격리 네트워크 안의 다른 경로나 포트 또는 원래 Compose 네트워크를 유지하는 테스트 API 자신의 외부 연결까지 차단한다는 뜻은 아닙니다. Windows 로컬 실행은 Docker 네트워크 구성 검증과 ZAP 스캔을 실행하고 이 Linux 전용 마커 시험은 건너뜁니다.
+
+성공 시 `build/evidence/dast.json`, `dast.md`, `dast.sarif`가 생성됩니다. 셋은 **같은 ScanReport**에서 렌더링됩니다. JSON의 `eligible_endpoints`는 정리한 OpenAPI의 **시작 경로**이고 모든 실제 요청의 목록은 아닙니다. ZAP이 리디렉션을 따라 격리 네트워크 안의 다른 경로나 포트로 요청할 수 있다는 경고도 포함됩니다. Markdown은 사람이 읽는 결과입니다. DAST SARIF는 파일 줄이 아닌 논리적 HTTP 위치를 사용하며 GitHub Code Scanning에 올리지 않습니다. 원시 ZAP 보고서와 인증 토큰은 아티팩트로 보관하지 않습니다. CI의 별도 DAST 작업은 예상 경고와 인증된 경로 접근이 없으면 실패합니다.
+
+2026-10-28 로컬 실행에서는 ZAP 검사 실행 상태가 `completed`였고 `/public`의 `ZAP/10021` 경고 1건을 반환했습니다. 보고서 상태는 `dast_passive_only` 범위 경고를 포함해 `completed_with_warnings`였으며, SARIF에는 파일 위치 없이 논리적 HTTP 위치만 있었습니다. 이 값은 의도적으로 보안 헤더를 뺀 **합성 테스트 API 한 개**의 결과입니다.
+
+이 시험은 응답 헤더 같은 **패시브 검사**의 실행 증거입니다. SQL 주입·명령 주입에 대한 능동 요청을 하지 않으며, 실제 운영 API의 탐지율을 의미하지 않습니다. 현재 회원 API에는 URL을 받는 DAST 엔드포인트가 없습니다. 다른 일회용 컨테이너를 검사할 때는 `security-review dast --help`의 대상 컨테이너·포트·OpenAPI 경로 옵션을 확인하세요.

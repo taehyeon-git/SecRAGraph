@@ -15,6 +15,19 @@ from uuid import UUID, uuid4
 import httpx
 
 _ROOT = Path(__file__).resolve().parents[1]
+_SAFE_FAILURE_CODES = frozenset(
+    {
+        "synthetic_member_creation_failed",
+        "api_not_ready",
+        "web_not_ready",
+        "synthetic_member_login_failed",
+        "synthetic_scan_failed",
+        "synthetic_finding_missing",
+        "sast_coverage_missing",
+        "synthetic_report_unavailable",
+        "api_auth_gate_missing",
+    }
+)
 
 
 def _docker_executable() -> str | None:
@@ -111,6 +124,7 @@ def _smoke_endpoints(api_port: int, web_port: int, username: str, password: str)
         upload = client.post(
             f"{api}/v1/scans/file",
             headers=headers,
+            timeout=120,  # Cold first-run detector startup can exceed the 15s request default.
             files={
                 "file": (
                     "synthetic.py",
@@ -177,6 +191,7 @@ def main() -> int:
     environment.pop("SECRAGRAPH_API_TOKEN", None)
     environment.pop("SECRAGRAPH_OPENAI_API_KEY", None)
     status = 1
+    stage = "start"
     try:
         started = _run_compose(
             docker,
@@ -188,12 +203,26 @@ def main() -> int:
         if started.returncode != 0:
             print("Isolated Compose stack did not become healthy.", file=sys.stderr)
         else:
+            stage = "member"
             _create_synthetic_member(docker, project, environment, username, password)
+            stage = "endpoints"
             _smoke_endpoints(api_port, web_port, username, password)
             print("Compose smoke passed: API, web, authentication, and synthetic scan.")
             status = 0
-    except (OSError, subprocess.TimeoutExpired, httpx.HTTPError, ValueError, KeyError, TypeError):
-        print("Compose smoke failed before all checks completed.", file=sys.stderr)
+    except (
+        OSError,
+        subprocess.TimeoutExpired,
+        httpx.HTTPError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as error:
+        code = (
+            str(error)
+            if isinstance(error, ValueError) and str(error) in _SAFE_FAILURE_CODES
+            else f"{stage}_exception"
+        )
+        print(f"Compose smoke failed ({code}).", file=sys.stderr)
     finally:
         try:
             stopped = _run_compose(

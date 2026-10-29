@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -71,6 +72,29 @@ def _relative_report_path(value: str) -> str:
     return path.as_posix()
 
 
+_HTTP_METHOD = re.compile(r"[A-Z]{1,16}\Z")
+
+
+def _http_path(value: str) -> str:
+    """Accept an origin-free URL path without query, fragment or raw controls."""
+
+    if (
+        len(value) > 2_048
+        or not value.startswith("/")
+        or value.startswith("//")
+        or any(character in "\\?#" or not 33 <= ord(character) <= 126 for character in value)
+    ):
+        raise ValueError("http_path must be a bounded origin-free URL path")
+    return value
+
+
+def _http_endpoint(value: str) -> str:
+    method, separator, path = value.partition(" ")
+    if not separator or not _HTTP_METHOD.fullmatch(method):
+        raise ValueError("endpoint must contain an HTTP method and path")
+    return f"{method} {_http_path(path)}"
+
+
 class TraceLocation(BaseModel):
     """Source-free location in an optional cross-file source-to-sink flow."""
 
@@ -99,7 +123,7 @@ class ScanExecution(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     engine: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-    kind: Literal["sast", "dependency", "secret", "configuration"]
+    kind: Literal["sast", "dependency", "secret", "configuration", "dast"]
     status: Literal["completed", "partial", "not_run", "error", "skipped"]
     version: str | None = Field(default=None, max_length=128)
     elapsed_ms: int = Field(ge=0)
@@ -107,6 +131,8 @@ class ScanExecution(BaseModel):
     scanned_files: tuple[str, ...] = ()
     languages: tuple[str, ...] = ()
     checks: tuple[str, ...] = ()
+    eligible_endpoints: tuple[str, ...] = ()
+    observed_alert_endpoints: tuple[str, ...] = ()
     reason: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
 
     @field_validator("eligible_files", "scanned_files")
@@ -131,6 +157,24 @@ class ScanExecution(BaseModel):
             raise ValueError("coverage labels must be bounded printable text")
         return value
 
+    @field_validator("eligible_endpoints", "observed_alert_endpoints")
+    @classmethod
+    def require_http_endpoints(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) > 2_000:
+            raise ValueError("too many HTTP endpoints")
+        normalized = tuple(_http_endpoint(endpoint) for endpoint in value)
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("HTTP endpoints must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_coverage_kind(self) -> Self:
+        if self.kind == "dast" and (self.eligible_files or self.scanned_files):
+            raise ValueError("DAST coverage cannot claim source files")
+        if self.kind != "dast" and (self.eligible_endpoints or self.observed_alert_endpoints):
+            raise ValueError("HTTP endpoint coverage requires DAST kind")
+        return self
+
 
 class Finding(BaseModel):
     """One normalized security issue with already-redacted evidence."""
@@ -141,9 +185,11 @@ class Finding(BaseModel):
     rule_id: str
     category: str
     severity: Severity
-    file_path: str
-    line_start: int = Field(ge=1)
+    file_path: str | None = None
+    line_start: int | None = Field(default=None, ge=1)
     line_end: int | None = Field(default=None, ge=1)
+    http_method: str | None = Field(default=None, pattern=r"^[A-Z]{1,16}$")
+    http_path: str | None = None
     message: str
     redacted_evidence: str
     confidence: Confidence
@@ -155,13 +201,31 @@ class Finding(BaseModel):
 
     @field_validator("file_path")
     @classmethod
-    def require_relative_path(cls, value: str) -> str:
-        return _relative_report_path(value)
+    def require_relative_path(cls, value: str | None) -> str | None:
+        return _relative_report_path(value) if value is not None else None
+
+    @field_validator("http_path")
+    @classmethod
+    def require_origin_free_http_path(cls, value: str | None) -> str | None:
+        return _http_path(value) if value is not None else None
 
     @model_validator(mode="after")
     def validate_line_range(self) -> Self:
-        if self.line_end is not None and self.line_end < self.line_start:
-            raise ValueError("line_end must be greater than or equal to line_start")
+        has_source = self.file_path is not None
+        has_http = self.http_method is not None and self.http_path is not None
+        if has_source == has_http:
+            raise ValueError("finding requires exactly one source or HTTP location")
+        if has_source:
+            if (
+                self.line_start is None
+                or self.http_method is not None
+                or self.http_path is not None
+            ):
+                raise ValueError("source location requires a line and no HTTP location")
+            if self.line_end is not None and self.line_end < self.line_start:
+                raise ValueError("line_end must be greater than or equal to line_start")
+        elif self.line_start is not None or self.line_end is not None or self.trace:
+            raise ValueError("HTTP location cannot claim a source line or trace")
         if len(self.trace) > 64:
             raise ValueError("trace must contain at most 64 locations")
         return self

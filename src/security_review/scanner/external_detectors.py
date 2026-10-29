@@ -359,7 +359,11 @@ class GitleaksAdapter:
                 version=version,
                 status=status,
                 eligible_files=files,
-                inspected_files=tuple(sorted({finding.file_path for finding in findings})),
+                inspected_files=tuple(
+                    sorted(
+                        {path for finding in findings if (path := finding.file_path) is not None}
+                    )
+                ),
                 checks=("builtin-default",),
                 warnings=warnings,
                 findings=findings,
