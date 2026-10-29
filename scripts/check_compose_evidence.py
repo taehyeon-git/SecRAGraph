@@ -11,7 +11,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from security_review.evaluation.multiengine_benchmark import (
+    EvaluationInputError,
+    LabeledCorpus,
+    load_labeled_corpus,
+)
+
 _ENGINE = "compose-policy"
+_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_CASES = _ROOT / "data/evaluation/multiengine_cases.json"
+_EXPECTED_COMPOSE_CASES = 11
 _RULES = frozenset(
     {
         "COMPOSE/PRIVILEGED",
@@ -130,7 +139,67 @@ def _summary_map(value: object) -> dict[str, tuple[int, int, int, int]]:
     return {key: _metric_counts(metrics) for key, metrics in value.items()}
 
 
-def check_evidence(payload: object) -> tuple[int, int]:
+def _expected_compose(manifest: LabeledCorpus) -> dict[tuple[str, str, str, str], int]:
+    expected: dict[tuple[str, str, str, str], int] = {}
+    positive_rules: set[str] = set()
+    compose_cases = [
+        case
+        for case in manifest.cases
+        if any(truth.engine == _ENGINE for truth in case.assessments)
+    ]
+    if (
+        len(compose_cases) != _EXPECTED_COMPOSE_CASES
+        or sum(case.case_id == "compose-benign" for case in compose_cases) != 1
+    ):
+        raise EvidenceError("invalid_cases")
+    for case in compose_cases:
+        truths = [truth for truth in case.assessments if truth.engine == _ENGINE]
+        if (
+            len(case.files) != 1
+            or len(truths) != len(_RULES)
+            or {truth.rule_id for truth in truths} != _RULES
+            or any(truth.file_path != case.files[0][0] for truth in truths)
+        ):
+            raise EvidenceError("invalid_cases")
+        positives = [truth for truth in truths if truth.expected_lines]
+        if len(positives) != (0 if case.case_id == "compose-benign" else 1):
+            raise EvidenceError("invalid_cases")
+        positive_rules.update(truth.rule_id for truth in positives)
+        for truth in truths:
+            expected[(case.case_id, truth.engine, truth.rule_id, truth.file_path)] = len(
+                truth.expected_lines
+            )
+    if positive_rules != _RULES:
+        raise EvidenceError("invalid_cases")
+    return expected
+
+
+def _check_compose_coverage(
+    payload: Mapping[str, Any], *, case_count: int, compose_case_count: int
+) -> None:
+    engine_coverage = payload["engine_coverage"]
+    record = engine_coverage.get(_ENGINE)
+    expected = {
+        "runs": case_count,
+        "completed": compose_case_count,
+        "partial": 0,
+        "not_run": 0,
+        "error": 0,
+        "skipped": case_count - compose_case_count,
+        "eligible_files": compose_case_count,
+        "scanned_files": compose_case_count,
+    }
+    if (
+        not isinstance(record, dict)
+        or any(not _nonnegative_int(record.get(field)) for field in (*expected, "elapsed_ms"))
+        or any(record[field] != value for field, value in expected.items())
+        or not _nonnegative_int(payload["engine_elapsed_ms"].get(_ENGINE))
+        or payload["engine_elapsed_ms"][_ENGINE] != record["elapsed_ms"]
+    ):
+        raise EvidenceError("invalid_compose_coverage")
+
+
+def check_evidence(payload: object, manifest: LabeledCorpus) -> tuple[int, int]:
     """Return Compose assessment and TP counts, or raise a stable failure code."""
     if not isinstance(payload, dict) or payload.get("scope") != "synthetic_regression":
         raise EvidenceError("invalid_schema")
@@ -158,6 +227,9 @@ def check_evidence(payload: object) -> tuple[int, int]:
         or not isinstance(payload.get("engine_coverage"), dict)
     ):
         raise EvidenceError("invalid_schema")
+    if corpus["manifest_sha256"] != manifest.manifest_sha256 or corpus["name"] != manifest.name:
+        raise EvidenceError("manifest_mismatch")
+    expected_compose = _expected_compose(manifest)
     rows = _assessments(payload.get("assessments"))
     by_rule = _summary_map(payload.get("by_rule"))
     by_engine = _summary_map(payload.get("by_engine"))
@@ -169,6 +241,19 @@ def check_evidence(payload: object) -> tuple[int, int]:
         or coverage["assessments_unscored"] != sum(row["status"] == "unscored" for row in rows)
     ):
         raise EvidenceError("invalid_schema")
+    if coverage["cases_total"] != len(manifest.cases) or coverage["cases_scanned"] != len(
+        manifest.cases
+    ):
+        raise EvidenceError("invalid_case_coverage")
+    if not _nonnegative_int(coverage.get("unassessed_finding_count")):
+        raise EvidenceError("invalid_schema")
+    if coverage["unassessed_finding_count"]:
+        raise EvidenceError("unassessed_findings")
+    _check_compose_coverage(
+        payload,
+        case_count=len(manifest.cases),
+        compose_case_count=_EXPECTED_COMPOSE_CASES,
+    )
 
     compose = [row for row in rows if row["engine"] == _ENGINE]
     assessed_rules = {row["rule_id"] for row in compose}
@@ -217,6 +302,20 @@ def check_evidence(payload: object) -> tuple[int, int]:
     }
     if no_negative:
         raise EvidenceError(f"missing_negative_coverage: {', '.join(sorted(no_negative))}")
+    observed_compose = {
+        (row["case_id"], row["engine"], row["rule_id"], row["file_path"]): row for row in compose
+    }
+    if set(observed_compose) != set(expected_compose):
+        missing_count = len(set(expected_compose) - set(observed_compose))
+        extra_count = len(set(observed_compose) - set(expected_compose))
+        raise EvidenceError(
+            f"assessment_layout_mismatch: missing={missing_count} extra={extra_count}"
+        )
+    if any(
+        row["tp"] + row["fn"] != expected_compose[identity]
+        for identity, row in observed_compose.items()
+    ):
+        raise EvidenceError("expected_line_count")
     return len(compose), tp
 
 
@@ -256,9 +355,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--evidence", required=True, type=Path, help="multi-engine benchmark JSON result"
     )
+    parser.add_argument(
+        "--cases", type=Path, default=_DEFAULT_CASES, help="labeled corpus manifest"
+    )
     args = parser.parse_args(argv)
     try:
-        count, tp = check_evidence(_load(args.evidence))
+        try:
+            manifest = load_labeled_corpus(args.cases)
+        except EvaluationInputError as error:
+            raise EvidenceError("invalid_cases") from error
+        count, tp = check_evidence(_load(args.evidence), manifest)
     except EvidenceError as error:
         print(f"compose_evidence_error: {error}", file=sys.stderr)
         return 1

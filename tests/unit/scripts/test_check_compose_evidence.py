@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from collections import defaultdict
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from security_review.evaluation.multiengine_benchmark import load_labeled_corpus
 
 _ROOT = Path(__file__).resolve().parents[3]
+_CASES = _ROOT / "data/evaluation/multiengine_cases.json"
 _RULES = (
     "COMPOSE/PRIVILEGED",
     "COMPOSE/HOST_NETWORK",
@@ -85,31 +87,36 @@ def _refresh(evidence: dict) -> None:
 
 
 def _evidence() -> dict:
+    corpus = load_labeled_corpus(_CASES)
     assessments = [
-        _assessment(rule, f"compose-{index}", tp=1) for index, rule in enumerate(_RULES, start=1)
+        _assessment(truth.rule_id, case.case_id, tp=len(truth.expected_lines))
+        for case in corpus.cases
+        for truth in case.assessments
+        if truth.engine == "compose-policy"
     ]
-    assessments.extend(_assessment(rule, "compose-benign") for rule in _RULES)
+    noncompose = corpus.cases[0].assessments[0]
     assessments.append(
         {
-            **_assessment("OG/unrelated", "python-existing", fp=2, fn=1),
-            "engine": "opengrep",
-            "file_path": "app.py",
+            **_assessment(noncompose.rule_id, corpus.cases[0].case_id, fp=2, fn=1),
+            "engine": noncompose.engine,
+            "file_path": noncompose.file_path,
         }
     )
+    compose_cases = {row["case_id"] for row in assessments if row["engine"] == "compose-policy"}
     evidence = {
         "scope": "synthetic_regression",
         "interpretation": (
             "Author-written regression cases; results do not estimate real-world detection."
         ),
         "corpus": {
-            "name": "test fixtures",
-            "manifest_sha256": "a" * 64,
+            "name": corpus.name,
+            "manifest_sha256": corpus.manifest_sha256,
             "source_revision": None,
             "ground_truth_sha256": None,
         },
         "coverage": {
-            "cases_total": 12,
-            "cases_scanned": 12,
+            "cases_total": len(corpus.cases),
+            "cases_scanned": len(corpus.cases),
             "assessments_total": 0,
             "assessments_scored": 0,
             "assessments_unscored": 0,
@@ -126,14 +133,14 @@ def _evidence() -> dict:
         "engine_elapsed_ms": {"compose-policy": 12, "opengrep": 3},
         "engine_coverage": {
             "compose-policy": {
-                "runs": 11,
-                "completed": 11,
+                "runs": len(corpus.cases),
+                "completed": len(compose_cases),
                 "partial": 0,
                 "not_run": 0,
                 "error": 0,
-                "skipped": 0,
-                "eligible_files": 11,
-                "scanned_files": 11,
+                "skipped": len(corpus.cases) - len(compose_cases),
+                "eligible_files": len(compose_cases),
+                "scanned_files": len(compose_cases),
                 "elapsed_ms": 12,
             },
             "opengrep": {
@@ -155,11 +162,16 @@ def _evidence() -> dict:
     return evidence
 
 
-def _run(tmp_path: Path, evidence: object) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, evidence: object, *, cases: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     path = tmp_path / "multiengine-scanner.json"
     path.write_text(json.dumps(evidence), encoding="utf-8")
+    arguments = [sys.executable, "-m", "scripts.check_compose_evidence", "--evidence", str(path)]
+    if cases is not None:
+        arguments.extend(("--cases", str(cases)))
     return subprocess.run(  # noqa: S603 - fixed interpreter, module, and controlled path
-        [sys.executable, "-m", "scripts.check_compose_evidence", "--evidence", str(path)],
+        arguments,
         cwd=_ROOT,
         capture_output=True,
         text=True,
@@ -167,12 +179,31 @@ def _run(tmp_path: Path, evidence: object) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _row(assessments: list[dict], case_id: str, rule: str) -> dict:
+    return next(row for row in assessments if row["case_id"] == case_id and row["rule_id"] == rule)
+
+
 def test_valid_compose_evidence_passes_despite_unrelated_fp_fn(tmp_path: Path) -> None:
     result = _run(tmp_path, _evidence())
 
     assert result.returncode == 0, result.stderr
     assert "compose_evidence_ok" in result.stdout
-    assert "assessments=20" in result.stdout
+    assert "assessments=110" in result.stdout
+
+
+def test_cases_option_uses_selected_manifest_digest(tmp_path: Path) -> None:
+    alternate = tmp_path / "cases.json"
+    body = _CASES.read_bytes() + b"\n"
+    alternate.write_bytes(body)
+    evidence = _evidence()
+    evidence["corpus"]["manifest_sha256"] = sha256(body).hexdigest()
+
+    default_result = _run(tmp_path, evidence)
+    selected_result = _run(tmp_path, evidence, cases=alternate)
+
+    assert default_result.returncode != 0
+    assert "manifest_mismatch" in default_result.stderr
+    assert selected_result.returncode == 0, selected_result.stderr
 
 
 @pytest.mark.parametrize(
@@ -182,10 +213,18 @@ def test_valid_compose_evidence_passes_despite_unrelated_fp_fn(tmp_path: Path) -
         ("missing_by_rule", "missing_rules"),
         ("unknown_rule", "unexpected_rules"),
         ("no_positive", "missing_positive_coverage"),
-        ("no_negative", "missing_negative_coverage"),
+        ("omit_benign_case", "assessment_layout_mismatch"),
         ("unscored", "unscored_assessments"),
         ("false_positive", "compose_mismatch"),
         ("false_negative", "compose_mismatch"),
+        ("wrong_positive_line_count", "expected_line_count"),
+        ("extra_identity", "assessment_layout_mismatch"),
+        ("forged_digest", "manifest_mismatch"),
+        ("forged_case_coverage", "invalid_case_coverage"),
+        ("forged_completed", "invalid_compose_coverage"),
+        ("forged_eligible", "invalid_compose_coverage"),
+        ("forged_scanned", "invalid_compose_coverage"),
+        ("unassessed_finding", "unassessed_findings"),
         ("wrong_scope", "invalid_schema"),
         ("missing_assessments", "invalid_schema"),
         ("malformed_counter", "invalid_schema"),
@@ -207,32 +246,53 @@ def test_gate_rejects_bad_evidence(tmp_path: Path, mutation: str, diagnostic: st
         assessments.append(_assessment("COMPOSE/UNKNOWN", "compose-benign"))
         _refresh(evidence)
     elif mutation == "no_positive":
-        assessments[0]["tp"] = 0
+        _row(assessments, "compose-privileged", _RULES[0])["tp"] = 0
         _refresh(evidence)
-    elif mutation == "no_negative":
+    elif mutation == "omit_benign_case":
         assessments[:] = [row for row in assessments if row["case_id"] != "compose-benign"]
         _refresh(evidence)
     elif mutation == "unscored":
-        assessments[10]["status"] = "unscored"
-        assessments[10]["reason"] = "engine_partial"
+        benign = _row(assessments, "compose-benign", _RULES[0])
+        benign["status"] = "unscored"
+        benign["reason"] = "engine_partial"
         _refresh(evidence)
     elif mutation == "false_positive":
-        assessments[10]["fp"] = 1
+        _row(assessments, "compose-benign", _RULES[0])["fp"] = 1
         _refresh(evidence)
     elif mutation == "false_negative":
-        assessments[0]["tp"] = 0
-        assessments[0]["fn"] = 1
+        positive = _row(assessments, "compose-privileged", _RULES[0])
+        positive["tp"] = 0
+        positive["fn"] = 1
         _refresh(evidence)
+    elif mutation == "wrong_positive_line_count":
+        _row(assessments, "compose-explicit-root-user", "COMPOSE/EXPLICIT_ROOT_USER")["tp"] = 1
+        _refresh(evidence)
+    elif mutation == "extra_identity":
+        assessments.append(_assessment(_RULES[0], "compose-phantom"))
+        _refresh(evidence)
+    elif mutation == "forged_digest":
+        evidence["corpus"]["manifest_sha256"] = "b" * 64
+    elif mutation == "forged_case_coverage":
+        evidence["coverage"]["cases_total"] -= 1
+        evidence["coverage"]["cases_scanned"] -= 1
+    elif mutation == "forged_completed":
+        evidence["engine_coverage"]["compose-policy"]["completed"] -= 1
+    elif mutation == "forged_eligible":
+        evidence["engine_coverage"]["compose-policy"]["eligible_files"] -= 1
+    elif mutation == "forged_scanned":
+        evidence["engine_coverage"]["compose-policy"]["scanned_files"] -= 1
+    elif mutation == "unassessed_finding":
+        evidence["coverage"]["unassessed_finding_count"] = 1
     elif mutation == "wrong_scope":
         evidence["scope"] = "unlabeled_repository"
     elif mutation == "missing_assessments":
         del evidence["assessments"]
     elif mutation == "malformed_counter":
-        assessments[0]["tp"] = True
+        _row(assessments, "compose-privileged", _RULES[0])["tp"] = True
     elif mutation == "missing_trace_field":
-        del assessments[0]["expected_trace"]
+        del _row(assessments, "compose-privileged", _RULES[0])["expected_trace"]
     elif mutation == "duplicate_assessment":
-        assessments.append(dict(assessments[0]))
+        assessments.append(dict(_row(assessments, "compose-privileged", _RULES[0])))
         _refresh(evidence)
     elif mutation == "summary_disagrees":
         evidence["by_rule"][f"compose-policy:{_RULES[0]}"]["tp"] = 9
