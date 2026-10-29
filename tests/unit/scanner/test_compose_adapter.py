@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 from pathlib import Path
@@ -27,6 +28,7 @@ def _scan(tmp_path: Path, source: str, *, name: str = "compose.yaml"):
         ("pid: host", "HOST_PID", Severity.HIGH),
         ("ipc: host", "HOST_IPC", Severity.MEDIUM),
         ("cap_add: [SYS_ADMIN]", "CAP_ADD_DANGEROUS", Severity.HIGH),
+        ("cap_add: [CAP_SYS_ADMIN]", "CAP_ADD_DANGEROUS", Severity.HIGH),
         ("cap_add: [ALL]", "CAP_ADD_DANGEROUS", Severity.HIGH),
         ("security_opt: [seccomp=unconfined]", "UNCONFINED_PROFILE", Severity.HIGH),
         ('security_opt: ["apparmor:unconfined"]', "UNCONFINED_PROFILE", Severity.HIGH),
@@ -265,6 +267,48 @@ def test_candidate_cap_preserves_first_checked_file(
     assert result.execution.eligible_files == ("a/compose.yaml", "b/compose.yaml")
     assert result.execution.inspected_files == ("a/compose.yaml",)
     assert result.execution.skipped == (("b/compose.yaml", "candidate_limit_exceeded"),)
+    assert "candidate_inventory_incomplete" in result.execution.warnings
+
+
+def test_discovery_entry_cap_does_not_report_no_eligible_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(compose_adapter, "_MAX_DISCOVERY_ENTRIES", 1, raising=False)
+    (tmp_path / "readme-one.txt").write_text("one", encoding="utf-8")
+    (tmp_path / "readme-two.txt").write_text("two", encoding="utf-8")
+    result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=5)
+    assert result.execution.status == "partial"
+    assert result.execution.eligible_files == ()
+    assert "candidate_inventory_incomplete" in result.execution.warnings
+    assert "snapshot_entry_limit_exceeded" in result.execution.warnings
+
+
+def test_discovery_deadline_at_end_of_walk_does_not_claim_empty_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [0.0]
+    monkeypatch.setattr(compose_adapter, "monotonic", lambda: now[0])
+    real_scandir = os.scandir
+
+    class TimedScandir:
+        def __init__(self, path: object) -> None:
+            self._iterator = real_scandir(path)
+
+        def __enter__(self) -> TimedScandir:
+            self._iterator.__enter__()
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self._iterator.__exit__(None, None, None)
+            now[0] = 2.0
+
+        def __iter__(self):
+            return iter(self._iterator)
+
+    monkeypatch.setattr(compose_adapter.os, "scandir", TimedScandir)
+    result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=1)
+    assert result.execution.status == "not_run"
+    assert result.execution.warnings == ("scanner_timeout", "candidate_inventory_incomplete")
 
 
 def test_total_byte_cap_preserves_first_checked_file(
@@ -322,10 +366,100 @@ def test_expired_deadline_and_invalid_timeout_are_honest(tmp_path: Path) -> None
     expired = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=0)
     invalid = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=float("nan"))
     assert expired.execution.status == "not_run"
-    assert expired.execution.warnings == ("scanner_timeout",)
-    assert expired.execution.eligible_files == ("compose.yaml",)
+    assert expired.execution.warnings == ("scanner_timeout", "candidate_inventory_incomplete")
+    assert expired.execution.eligible_files == ()
     assert invalid.execution.status == "error"
     assert invalid.execution.warnings == ("invalid_timeout",)
+
+
+def test_zero_deadline_does_not_walk_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "compose.yaml").write_text("services: {web: {}}\n", encoding="utf-8")
+
+    def forbidden_scandir(_path: object) -> None:
+        raise AssertionError("expired scan traversed snapshot")
+
+    monkeypatch.setattr(compose_adapter.os, "scandir", forbidden_scandir)
+    result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=0)
+    assert result.execution.status == "not_run"
+    assert result.execution.eligible_files == ()
+    assert "candidate_inventory_incomplete" in result.execution.warnings
+
+
+def test_parent_directory_symlink_swap_cannot_read_outside_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "compose.yaml").write_text("services: {web: {}}\n", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "compose.yaml").write_text("services: {web: {privileged: true}}\n", encoding="utf-8")
+    original_link_check = compose_adapter._is_link_like
+    from security_review.scanner import external_detectors
+
+    original_directory = tmp_path / "project-original"
+    seen_final = 0
+    swapped = False
+
+    def swap_before_read(path: Path) -> bool:
+        nonlocal seen_final, swapped
+        if path.name == "compose.yaml":
+            seen_final += 1
+            if seen_final == 2:
+                project.rename(original_directory)
+                try:
+                    os.symlink(outside, project, target_is_directory=True)
+                except (NotImplementedError, OSError):
+                    original_directory.rename(project)
+                    pytest.skip("directory symlinks unavailable on this host")
+                swapped = True
+        return original_link_check(path)
+
+    monkeypatch.setattr(compose_adapter, "_is_link_like", swap_before_read)
+    monkeypatch.setattr(external_detectors, "_is_link_like", swap_before_read)
+    try:
+        result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=5)
+    finally:
+        if swapped:
+            project.unlink()
+            original_directory.rename(project)
+    assert swapped
+    assert result.execution.status in {"partial", "error"}
+    assert result.findings == ()
+    assert result.execution.inspected_files == ()
+    assert any(
+        reason in result.execution.warnings
+        for reason in ("snapshot_contains_link", "snapshot_changed", "unsafe_snapshot_path")
+    )
+
+
+def test_resolved_parent_escape_is_rejected_before_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    source = project / "compose.yaml"
+    source.write_text("services: {web: {}}\n", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    outside_source = outside / "compose.yaml"
+    outside_source.write_text("services: {web: {privileged: true}}\n", encoding="utf-8")
+    real_resolve = Path.resolve
+
+    def escaped_resolution(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == source:
+            return outside_source
+        return real_resolve(path, *args, **kwargs)
+
+    with monkeypatch.context() as context:
+        context.setattr(Path, "resolve", escaped_resolution)
+        result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=5)
+    assert result.execution.status == "partial"
+    assert result.execution.inspected_files == ()
+    assert result.execution.skipped == (("project/compose.yaml", "unsafe_snapshot_path"),)
+    assert result.findings == ()
 
 
 def test_deadline_elapsed_during_service_evaluation_is_not_completed(
@@ -377,6 +511,6 @@ def test_referenced_paths_are_not_opened_or_executed(
     monkeypatch.setattr(socket, "create_connection", forbidden)
     result = ComposePolicyAdapter().scan_snapshot(tmp_path, timeout=5)
     assert result.execution.status == "completed"
-    assert len(opened) == 1
-    assert opened[0].endswith("compose.yaml")
+    assert any(path.endswith("compose.yaml") for path in opened)
+    assert not any(path.endswith("outside.env") for path in opened)
     assert canary not in str(result)

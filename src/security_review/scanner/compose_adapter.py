@@ -35,7 +35,6 @@ from security_review.scanner.external_common import (
 )
 from security_review.scanner.external_detectors import (
     _is_link_like,
-    _snapshot_files,
     _UnsafeSnapshot,
 )
 
@@ -43,6 +42,7 @@ _ENGINE = "compose-policy"
 _MAX_FILE_BYTES = 1_000_000
 _MAX_TOTAL_BYTES = 20_000_000
 _MAX_CANDIDATE_FILES = 500
+_MAX_DISCOVERY_ENTRIES = 10_000
 _MAX_NODES = 10_000
 _MAX_DEPTH = 64
 _MAX_FINDINGS = 2_000
@@ -123,12 +123,95 @@ def _check_deadline(deadline: float) -> None:
         raise _PolicyIssue("scanner_timeout")
 
 
+def _confined_path(root: Path, path: Path) -> None:
+    """Check observed parent links and path containment before reading."""
+    if _is_link_like(root):
+        raise _PolicyIssue("snapshot_contains_link")
+    try:
+        relative = path.relative_to(root)
+        resolved_root = root.resolve(strict=True)
+    except (OSError, ValueError) as error:
+        raise _PolicyIssue("unsafe_snapshot_path") from error
+    current = root
+    for part in relative.parts:
+        current /= part
+        if _is_link_like(current):
+            raise _PolicyIssue("snapshot_contains_link")
+    try:
+        path.resolve(strict=True).relative_to(resolved_root)
+    except (OSError, ValueError) as error:
+        raise _PolicyIssue("unsafe_snapshot_path") from error
+
+
+def _open_confined(root: Path, relative: PurePosixPath, flags: int) -> int:
+    """Use descriptor-relative, no-follow traversal where the OS supports it."""
+    if (
+        os.open not in os.supports_dir_fd
+        or not hasattr(os, "O_DIRECTORY")
+        or not hasattr(os, "O_NOFOLLOW")
+    ):
+        return os.open(root / relative, flags)
+
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open(root, directory_flags)
+    try:
+        for part in relative.parts[:-1]:
+            next_fd = os.open(part, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        return os.open(relative.name, flags, dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _discover_candidates(root: Path, deadline: float) -> tuple[tuple[str, ...], str | None]:
+    """Bound whole-tree discovery; a truncated inventory is explicitly partial."""
+    if _is_link_like(root) or not root.is_dir():
+        raise _UnsafeSnapshot("invalid_snapshot")
+    found: list[str] = []
+    directories = [root]
+    entries = 0
+    while directories:
+        if monotonic() >= deadline:
+            return tuple(sorted(found)), "scanner_timeout"
+        current = directories.pop()
+        _confined_path(root, current)
+        try:
+            with os.scandir(current) as iterator:
+                for entry in iterator:
+                    if monotonic() >= deadline:
+                        return tuple(sorted(found)), "scanner_timeout"
+                    if entries >= _MAX_DISCOVERY_ENTRIES:
+                        return tuple(sorted(found)), "snapshot_entry_limit_exceeded"
+                    entries += 1
+                    path = Path(entry.path)
+                    if _is_link_like(path):
+                        raise _UnsafeSnapshot("snapshot_contains_link")
+                    if entry.is_dir(follow_symlinks=False):
+                        directories.append(path)
+                    elif entry.is_file(follow_symlinks=False):
+                        relative = path.relative_to(root).as_posix()
+                        if is_compose_file(relative):
+                            found.append(relative)
+                            if len(found) > _MAX_CANDIDATE_FILES:
+                                return tuple(sorted(found)), "candidate_limit_exceeded"
+                    else:
+                        raise _UnsafeSnapshot("snapshot_contains_link")
+        except OSError as error:
+            raise _UnsafeSnapshot("invalid_snapshot") from error
+    if monotonic() >= deadline:
+        return tuple(sorted(found)), "scanner_timeout"
+    return tuple(sorted(found)), None
+
+
 def _read_file(root: Path, relative: str, deadline: float, remaining_bytes: int) -> bytes:
     """Read at most one file cap from a still-regular snapshot member."""
     _check_deadline(deadline)
-    path = root / PurePosixPath(relative)
-    if _is_link_like(path):
-        raise _PolicyIssue("snapshot_contains_link")
+    pure = PurePosixPath(relative)
+    if pure.is_absolute() or ".." in pure.parts or not pure.parts:
+        raise _PolicyIssue("unsafe_snapshot_path")
+    path = root / pure
+    _confined_path(root, path)
     try:
         before = path.stat(follow_symlinks=False)
         if not stat.S_ISREG(before.st_mode):
@@ -138,7 +221,7 @@ def _read_file(root: Path, relative: str, deadline: float, remaining_bytes: int)
         if before.st_size > remaining_bytes:
             raise _PolicyIssue("total_byte_limit_exceeded")
         flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(path, flags)
+        descriptor = _open_confined(root, pure, flags)
         try:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode) or (
@@ -146,6 +229,7 @@ def _read_file(root: Path, relative: str, deadline: float, remaining_bytes: int)
                 opened.st_ino,
             ) != (before.st_dev, before.st_ino):
                 raise _PolicyIssue("snapshot_changed")
+            _confined_path(root, path)
             if opened.st_size > _MAX_FILE_BYTES:
                 raise _PolicyIssue("file_too_large")
             if opened.st_size > remaining_bytes:
@@ -154,6 +238,7 @@ def _read_file(root: Path, relative: str, deadline: float, remaining_bytes: int)
                 payload = source.read(opened.st_size)
             if len(payload) != opened.st_size or os.fstat(descriptor).st_size != opened.st_size:
                 raise _PolicyIssue("snapshot_changed")
+            _confined_path(root, path)
         finally:
             os.close(descriptor)
     except OSError as error:
@@ -385,7 +470,7 @@ def _inspect_service(
     if capabilities is not None:
         for item in capabilities.value:
             literal = _string(item)
-            if literal in {"ALL", "SYS_ADMIN"}:
+            if literal in {"ALL", "SYS_ADMIN", "CAP_SYS_ADMIN"}:
                 _add(findings, "COMPOSE/CAP_ADD_DANGEROUS", path, service, item)
                 break
             if literal is None:
@@ -469,24 +554,37 @@ class ComposePolicyAdapter:
 
     def scan_snapshot(self, root: Path, timeout: float) -> ExternalScanResult:
         started = monotonic()
-        try:
-            paths = _snapshot_files(root)
-        except _UnsafeSnapshot as error:
-            return _result(started, "error", warnings=(str(error),))
-        eligible = tuple(path for path in paths if is_compose_file(path))
-        if not eligible:
-            return _result(started, "skipped", warnings=("no_eligible_files",))
         if not math.isfinite(timeout) or timeout < 0:
-            return _result(started, "error", eligible=eligible, warnings=("invalid_timeout",))
+            return _result(started, "error", warnings=("invalid_timeout",))
         if timeout == 0:
-            return _result(started, "not_run", eligible=eligible, warnings=("scanner_timeout",))
+            return _result(
+                started,
+                "not_run",
+                warnings=("scanner_timeout", "candidate_inventory_incomplete"),
+            )
 
         deadline = started + timeout
         root = root.absolute()
+        try:
+            eligible, discovery_reason = _discover_candidates(root, deadline)
+        except (_UnsafeSnapshot, _PolicyIssue) as error:
+            return _result(started, "error", warnings=(str(error),))
+        if discovery_reason == "scanner_timeout":
+            return _result(
+                started,
+                "not_run",
+                eligible=eligible,
+                skipped=tuple((path, "scanner_timeout") for path in eligible),
+                warnings=("scanner_timeout", "candidate_inventory_incomplete"),
+            )
+        if not eligible and discovery_reason is None:
+            return _result(started, "skipped", warnings=("no_eligible_files",))
         findings: list[Finding] = []
         inspected: list[str] = []
         skipped: list[tuple[str, str]] = []
-        warnings: list[str] = []
+        warnings: list[str] = (
+            [discovery_reason, "candidate_inventory_incomplete"] if discovery_reason else []
+        )
         total_bytes = 0
         checked_any = False
         grouped: dict[str, int] = {}
