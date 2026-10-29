@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import re
 import tarfile
+import zlib
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path, PurePosixPath
+from time import monotonic
 from typing import IO, Any
 
 from security_review.container_image.errors import ImageScanError
@@ -15,12 +18,23 @@ from security_review.container_image.errors import ImageScanError
 MAX_TAR_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 100_000
 MAX_METADATA_BYTES = 1024 * 1024
+MAX_UNCOMPRESSED_LAYER_BYTES = 2 * 1024 * 1024 * 1024
+MAX_UNCOMPRESSED_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+MAX_DIFF_ID_SECONDS = 120.0
 _DIGEST = re.compile(r"sha256:([0-9a-f]{64})\Z")
 _BLOB = re.compile(r"blobs/sha256/([0-9a-f]{64})\Z")
 _LEGACY_CONFIG = re.compile(r"([0-9a-f]{64})\.json\Z")
 _OCI_MANIFEST_TYPES = {
     "application/vnd.oci.image.manifest.v1+json",
     "application/vnd.docker.distribution.manifest.v2+json",
+}
+_GZIP_LAYER_TYPES = {
+    "application/vnd.oci.image.layer.v1.tar+gzip",
+    "application/vnd.docker.image.rootfs.diff.tar.gzip",
+}
+_TAR_LAYER_TYPES = {
+    "application/vnd.oci.image.layer.v1.tar",
+    "application/vnd.docker.image.rootfs.diff.tar",
 }
 
 
@@ -119,7 +133,7 @@ def _config_identity(config: object) -> str:
 
 def _inspect_oci(
     archive: tarfile.TarFile, members: dict[str, tarfile.TarInfo]
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, list[tuple[str, str]], dict[str, Any]]:
     index = _small_json(archive, members, "index.json")
     if not isinstance(index, dict) or index.get("schemaVersion") != 2:
         raise ImageScanError("image_archive_invalid_index")
@@ -150,16 +164,76 @@ def _inspect_oci(
     config_name = _verified_blob(
         archive, members, config_descriptor.get("digest"), config_descriptor.get("size")
     )
-    _config_identity(_small_json(archive, members, config_name))
+    config = _small_json(archive, members, config_name)
+    _config_identity(config)
+    if not isinstance(config, dict):
+        raise ImageScanError("image_archive_invalid_config")
     layers = manifest.get("layers")
     if not isinstance(layers, list) or len(layers) > MAX_ARCHIVE_ENTRIES:
         raise ImageScanError("image_archive_invalid_layers")
-    layer_names: list[str] = []
+    layer_entries: list[tuple[str, str]] = []
     for layer in layers:
-        if not isinstance(layer, dict):
+        if not isinstance(layer, dict) or not isinstance(layer.get("mediaType"), str):
             raise ImageScanError("image_archive_invalid_layers")
-        layer_names.append(_verified_blob(archive, members, layer.get("digest"), layer.get("size")))
-    return str(descriptor["digest"]), str(config_descriptor["digest"]), layer_names
+        layer_entries.append(
+            (
+                _verified_blob(archive, members, layer.get("digest"), layer.get("size")),
+                layer["mediaType"],
+            )
+        )
+    return str(descriptor["digest"]), str(config_descriptor["digest"]), layer_entries, config
+
+
+def _verify_oci_diff_ids(
+    archive: tarfile.TarFile,
+    members: dict[str, tarfile.TarInfo],
+    layers: list[tuple[str, str]],
+    config: dict[str, Any],
+) -> None:
+    """Bind a config local ID to bounded, uncompressed OCI layer contents."""
+
+    rootfs = config.get("rootfs")
+    if not isinstance(rootfs, dict) or rootfs.get("type") != "layers":
+        raise ImageScanError("image_archive_invalid_layers")
+    diff_ids = rootfs.get("diff_ids")
+    if not isinstance(diff_ids, list) or len(diff_ids) != len(layers):
+        raise ImageScanError("image_archive_invalid_layers")
+    deadline = monotonic() + MAX_DIFF_ID_SECONDS
+    total_bytes = 0
+    for (name, media_type), expected in zip(layers, diff_ids, strict=True):
+        expected_hex = _hex_digest(expected)
+        if media_type not in _GZIP_LAYER_TYPES | _TAR_LAYER_TYPES:
+            raise ImageScanError("image_archive_invalid_layers")
+        if media_type in _TAR_LAYER_TYPES and members[name].size > MAX_UNCOMPRESSED_LAYER_BYTES:
+            raise ImageScanError("image_archive_invalid_layers")
+        layer_bytes = 0
+        digest = sha256()
+        try:
+            with _get_file(archive, members, name) as handle:
+                source = (
+                    gzip.GzipFile(fileobj=handle, mode="rb")
+                    if media_type in _GZIP_LAYER_TYPES
+                    else handle
+                )
+                with source:
+                    while True:
+                        if monotonic() >= deadline:
+                            raise ImageScanError("image_archive_invalid_layers")
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        layer_bytes += len(chunk)
+                        total_bytes += len(chunk)
+                        if (
+                            layer_bytes > MAX_UNCOMPRESSED_LAYER_BYTES
+                            or total_bytes > MAX_UNCOMPRESSED_TOTAL_BYTES
+                        ):
+                            raise ImageScanError("image_archive_invalid_layers")
+                        digest.update(chunk)
+        except (OSError, EOFError, zlib.error) as error:
+            raise ImageScanError("image_archive_invalid_layers") from error
+        if digest.hexdigest() != expected_hex:
+            raise ImageScanError("image_archive_invalid_layers")
 
 
 def _inspect_legacy(
@@ -233,16 +307,19 @@ def inspect_image_tar(path: Path, *, expected_local_id: str) -> ImageTarIdentity
             )
             valid_ids = {legacy_config}
             if "index.json" in members:
-                manifest_id, oci_config, oci_layers = _inspect_oci(archive, members)
-                if oci_config != legacy_config or oci_layers != legacy_layers:
+                manifest_id, oci_config, oci_layers, oci_config_data = _inspect_oci(
+                    archive, members
+                )
+                if oci_config != legacy_config or [name for name, _ in oci_layers] != legacy_layers:
                     raise ImageScanError("image_archive_identity_mismatch")
                 with _get_file(archive, members, "index.json") as handle:
                     index_id = f"sha256:{_hash_stream(handle)}"
-                # OCI layers may be compressed. Their blobs bind to the
-                # manifest/index, but not directly to the config digest's
-                # uncompressed rootfs diff_ids. Do not accept a config-only
-                # local ID for an OCI archive.
                 valid_ids = {manifest_id, index_id}
+                if expected_local_id == oci_config:
+                    # Docker's classic store can report a config digest as
+                    # the local ID even when docker save emits an OCI index.
+                    _verify_oci_diff_ids(archive, members, oci_layers, oci_config_data)
+                    valid_ids.add(oci_config)
             if expected_local_id not in valid_ids:
                 raise ImageScanError("image_archive_identity_mismatch")
         return ImageTarIdentity(tar_sha256, expected_local_id, legacy_config)

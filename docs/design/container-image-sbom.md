@@ -14,9 +14,13 @@ executed by the member-facing API.
 The local operator command accepts a **trusted local** OCI/Docker image tar
 and a locally installed pinned Trivy binary. It never calls Docker or pulls a
 registry image. CI builds this repository's runtime target, saves by the exact
-local image ID, and invokes the same command on that tar. An OCI archive's
-local image ID must identify its index or manifest; a legacy Docker archive's
-local ID is its config digest. Trivy's
+local image ID, and invokes the same command on that tar. Docker's local ID
+can be an OCI index/manifest digest or a config digest depending on its image
+store. When an OCI local ID is a config digest, we additionally verify each
+compressed layer against the config's uncompressed `rootfs.diff_ids`, with
+2 GiB per layer, 4 GiB total decompressed data and a 120-second limit. A
+legacy Docker archive's config ID receives an uncompressed diff-ID check.
+Trivy's
 `Metadata.ImageID` is the image **config** digest. We verify the saved tar's
 OCI index/manifest/config references and blob hashes, or its Docker archive
 manifest/config if the runner emits that format. The archive must contain
@@ -137,3 +141,5 @@ API image upload or arbitrary registry scanning is claimed in this phase.
 - [Trivy SBOM generation](https://trivy.dev/docs/latest/guide/supply-chain/sbom/)
 - [Trivy vulnerability DB lifecycle](https://trivy.dev/docs/latest/guide/configuration/db/)
 - [Trivy 0.76.1 release](https://github.com/aquasecurity/trivy/releases/tag/v0.76.1)
+- [OCI image config and DiffID specification](https://github.com/opencontainers/image-spec/blob/main/config.md)
+- [Docker image inspect ID semantics](https://github.com/moby/moby/blob/master/api/types/image/image_inspect.go)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import io
 import json
 import subprocess
@@ -20,6 +21,7 @@ from security_review.container_image import (
     validate_db_metadata,
     validate_sbom,
 )
+from security_review.container_image import archive as archive_module
 from security_review.domain.models import Severity
 
 
@@ -145,9 +147,137 @@ def test_tar_identity_rejects_wrong_local_id_and_ambiguous_manifest(tmp_path: Pa
         inspect_image_tar(path, expected_local_id=local_id)
 
 
-def test_oci_tar_rejects_config_digest_as_local_id(tmp_path: Path) -> None:
-    path, _, config_id = _archive(tmp_path)
-    with pytest.raises(ImageScanError, match="image_archive_identity_mismatch"):
+def _gzip_oci_archive(
+    tmp_path: Path,
+    *,
+    actual_layer: bytes,
+    expected_layer: bytes,
+    media_type: str = "application/vnd.oci.image.layer.v1.tar+gzip",
+    rootfs_type: str = "layers",
+) -> tuple[Path, str]:
+    compressed = gzip.compress(actual_layer, mtime=0)
+    layer_hash = sha256(compressed).hexdigest()
+    config = _json(
+        {
+            "architecture": "amd64",
+            "os": "linux",
+            "config": {},
+            "rootfs": {
+                "type": rootfs_type,
+                "diff_ids": [f"sha256:{sha256(expected_layer).hexdigest()}"],
+            },
+        }
+    )
+    config_hash = sha256(config).hexdigest()
+    manifest = _json(
+        {
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": f"sha256:{config_hash}",
+                "size": len(config),
+            },
+            "layers": [
+                {"mediaType": media_type, "digest": f"sha256:{layer_hash}", "size": len(compressed)}
+            ],
+        }
+    )
+    manifest_hash = sha256(manifest).hexdigest()
+    index = _json(
+        {
+            "schemaVersion": 2,
+            "manifests": [
+                {
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "digest": f"sha256:{manifest_hash}",
+                    "size": len(manifest),
+                    "platform": {"os": "linux", "architecture": "amd64"},
+                }
+            ],
+        }
+    )
+    legacy = _json(
+        [
+            {
+                "Config": f"blobs/sha256/{config_hash}",
+                "RepoTags": None,
+                "Layers": [f"blobs/sha256/{layer_hash}"],
+            }
+        ]
+    )
+    path = tmp_path / "gzip-oci.tar"
+    with tarfile.open(path, "w") as archive:
+        for name, contents in (
+            (f"blobs/sha256/{config_hash}", config),
+            (f"blobs/sha256/{manifest_hash}", manifest),
+            (f"blobs/sha256/{layer_hash}", compressed),
+            ("index.json", index),
+            ("manifest.json", legacy),
+        ):
+            entry = tarfile.TarInfo(name)
+            entry.size = len(contents)
+            archive.addfile(entry, io.BytesIO(contents))
+    return path, f"sha256:{config_hash}"
+
+
+def test_oci_config_local_id_verifies_gzip_layer_diff_id(tmp_path: Path) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path, actual_layer=b"expected layer bytes", expected_layer=b"expected layer bytes"
+    )
+    identity = inspect_image_tar(path, expected_local_id=config_id)
+    assert identity.config_digest == config_id
+
+
+def test_oci_config_local_id_rejects_changed_gzip_layer(tmp_path: Path) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path, actual_layer=b"changed layer bytes", expected_layer=b"expected layer bytes"
+    )
+    with pytest.raises(ImageScanError, match="image_archive_invalid_layers"):
+        inspect_image_tar(path, expected_local_id=config_id)
+
+
+def test_oci_config_local_id_rejects_wrong_rootfs_type(tmp_path: Path) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path,
+        actual_layer=b"expected layer bytes",
+        expected_layer=b"expected layer bytes",
+        rootfs_type="overlay",
+    )
+    with pytest.raises(ImageScanError, match="image_archive_invalid_layers"):
+        inspect_image_tar(path, expected_local_id=config_id)
+
+
+def test_oci_config_local_id_rejects_unsupported_layer_compression(tmp_path: Path) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path,
+        actual_layer=b"expected layer bytes",
+        expected_layer=b"expected layer bytes",
+        media_type="application/vnd.oci.image.layer.v1.tar+zstd",
+    )
+    with pytest.raises(ImageScanError, match="image_archive_invalid_layers"):
+        inspect_image_tar(path, expected_local_id=config_id)
+
+
+def test_oci_config_local_id_bounds_gzip_expansion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path, actual_layer=b"x" * 100, expected_layer=b"x" * 100
+    )
+    monkeypatch.setattr(archive_module, "MAX_UNCOMPRESSED_LAYER_BYTES", 32)
+    with pytest.raises(ImageScanError, match="image_archive_invalid_layers"):
+        inspect_image_tar(path, expected_local_id=config_id)
+
+
+def test_oci_config_local_id_bounds_verification_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, config_id = _gzip_oci_archive(
+        tmp_path, actual_layer=b"expected layer bytes", expected_layer=b"expected layer bytes"
+    )
+    monkeypatch.setattr(archive_module, "MAX_DIFF_ID_SECONDS", 0.0)
+    with pytest.raises(ImageScanError, match="image_archive_invalid_layers"):
         inspect_image_tar(path, expected_local_id=config_id)
 
 

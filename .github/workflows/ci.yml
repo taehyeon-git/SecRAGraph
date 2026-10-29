@@ -162,6 +162,7 @@ jobs:
             echo 'invalid local image ID' >&2
             exit 1
           fi
+          printf 'local_image_id=%s\n' "$image_id"
           mkdir -p build/evidence
           docker image save --output build/evidence/container-image.tar "$image_id"
           printf '%s' "$image_id" > build/evidence/container-image-id.txt
