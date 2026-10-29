@@ -20,6 +20,7 @@ app = FastAPI(
     redoc_url=None,
 )
 _counter_lock = Lock()
+_public_requests = 0
 _authenticated_protected_requests = 0
 _host_redirect_requests = 0
 
@@ -33,6 +34,9 @@ def health() -> dict[str, str]:
 def public() -> dict[str, bool]:
     """Intentionally omit X-Content-Type-Options for one passive ZAP alert."""
 
+    global _public_requests
+    with _counter_lock:
+        _public_requests += 1
     return {"ok": True}
 
 
@@ -51,9 +55,14 @@ def protected(authorization: Annotated[str | None, Header()] = None) -> dict[str
 @app.get("/stats", include_in_schema=False)
 def stats() -> dict[str, int]:
     with _counter_lock:
+        public_requests = _public_requests
         count = _authenticated_protected_requests
         redirects = _host_redirect_requests
-    return {"authenticated_protected_requests": count, "host_redirect_requests": redirects}
+    return {
+        "public_requests": public_requests,
+        "authenticated_protected_requests": count,
+        "host_redirect_requests": redirects,
+    }
 
 
 @app.get("/host-redirect", include_in_schema=False)

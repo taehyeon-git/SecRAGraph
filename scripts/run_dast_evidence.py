@@ -25,6 +25,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
 _CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}\Z")
+_UNSET = object()
 _SAFE_FAILURE_CODES = frozenset(
     {
         "authenticated_route_not_tested",
@@ -45,6 +46,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "dast_zap_image_unavailable",
         "docker_unavailable",
         "expected_alert_missing",
+        "public_route_not_tested",
         "fixture_cleanup_failed",
         "fixture_container_unavailable",
         "fixture_probe_failed",
@@ -353,7 +355,7 @@ def _scan(container: str, port: int, openapi_path: str, *, auth_header_env: str)
     return scan_dast_container(container, port, openapi_path, auth_header_env=auth_header_env)
 
 
-def _require_evidence(report: ScanReport) -> None:
+def _require_evidence(report: ScanReport, *, public_requests: object = _UNSET) -> None:
     if not any(
         item.engine == "zap" and item.kind == "dast" and item.status == "completed"
         for item in report.executions
@@ -364,6 +366,12 @@ def _require_evidence(report: ScanReport) -> None:
                 if reason in _SAFE_FAILURE_CODES:
                     raise RuntimeError(reason)
         raise RuntimeError("dast_incomplete")
+    if public_requests is not _UNSET and (
+        not isinstance(public_requests, int)
+        or isinstance(public_requests, bool)
+        or public_requests < 1
+    ):
+        raise RuntimeError("public_route_not_tested")
     if not any(
         finding.engine == "zap"
         and finding.rule_id == "ZAP/10021"
@@ -371,6 +379,31 @@ def _require_evidence(report: ScanReport) -> None:
         and finding.http_path == "/public"
         for finding in report.findings
     ):
+        public_seed = any(
+            item.engine == "zap"
+            and item.kind == "dast"
+            and "GET /public" in getattr(item, "eligible_endpoints", ())
+            for item in report.executions
+        )
+        public_alert = any(
+            finding.engine == "zap"
+            and finding.http_method == "GET"
+            and finding.http_path == "/public"
+            for finding in report.findings
+        )
+        rule_ids = sorted(
+            {
+                finding.rule_id
+                for finding in report.findings
+                if finding.engine == "zap" and re.fullmatch(r"ZAP/[0-9]{1,6}", finding.rule_id)
+            }
+        )[:16]
+        print(
+            "DAST alert diagnostic: "
+            f"public_seed={int(public_seed)} public_alert={int(public_alert)} "
+            f"rule_ids={','.join(rule_ids) if rule_ids else 'none'}",
+            file=sys.stderr,
+        )
         raise RuntimeError("expected_alert_missing")
     if any(
         finding.file_path is not None
@@ -415,8 +448,9 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
             else:
                 os.environ["ZAP_AUTH_HEADER_VALUE"] = previous_header
 
-        _require_evidence(report)
-        count = _fetch_fixture_json(container, "/stats").get("authenticated_protected_requests")
+        stats = _fetch_fixture_json(container, "/stats")
+        _require_evidence(report, public_requests=stats.get("public_requests"))
+        count = stats.get("authenticated_protected_requests")
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             raise RuntimeError("authenticated_route_not_tested")
         _assert_host_redirect_isolated(container)

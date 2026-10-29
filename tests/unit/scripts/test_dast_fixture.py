@@ -32,6 +32,7 @@ def test_fixture_has_one_missing_header_alert_and_authenticated_route(monkeypatc
     assert all(set(operations) == {"get"} for operations in schema["paths"].values())
 
     assert module.public() == {"ok": True}
+    assert module.stats()["public_requests"] == 1
     with pytest.raises(HTTPException) as missing:
         module.protected(None)
     assert missing.value.status_code == 401

@@ -425,6 +425,8 @@ def run_zap_api_scan(
                                     "-S",
                                     "-J",
                                     "/zap/wrk/zap.json",
+                                    "-D",
+                                    "5",
                                     "-T",
                                     "3",
                                     "-z",

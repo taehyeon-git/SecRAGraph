@@ -179,6 +179,7 @@ def test_dast_runner_isolated_auth_and_sanitized_result(monkeypatch: pytest.Monk
     zap_run = next(args for args in commands if args[0] == "run" and "-S" in args)
     assert "ZAP_AUTH_HEADER_VALUE" in zap_run
     assert ("-z", "-silent") == zap_run[zap_run.index("-z") : zap_run.index("-z") + 2]
+    assert ("-D", "5") == zap_run[zap_run.index("-D") : zap_run.index("-D") + 2]
     assert "-O" not in zap_run
     zap_env = next(env for args, env in fake.calls if args == zap_run)
     assert zap_env is not None and zap_env["ZAP_AUTH_HEADER_VALUE"] == "Session do-not-save"

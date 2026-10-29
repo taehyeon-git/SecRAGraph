@@ -40,6 +40,7 @@ def _install_fakes(
     *,
     report: Any | None = None,
     authenticated_requests: int = 1,
+    public_requests: int = 1,
 ) -> tuple[list[tuple[str, tuple[str, ...]]], list[Any]]:
     calls: list[tuple[str, tuple[str, ...]]] = []
     scans: list[Any] = []
@@ -62,7 +63,10 @@ def _install_fakes(
         lambda _container, path: (
             {"status": "ok"}
             if path == "/health"
-            else {"authenticated_protected_requests": authenticated_requests}
+            else {
+                "authenticated_protected_requests": authenticated_requests,
+                "public_requests": public_requests,
+            }
         ),
     )
     monkeypatch.setattr(run_dast_evidence, "_scan", scan)
@@ -200,6 +204,46 @@ def test_incomplete_report_surfaces_only_known_runner_reason() -> None:
     report.executions[0].reason = "Session secret-value"
     with pytest.raises(RuntimeError, match="dast_incomplete"):
         run_dast_evidence._require_evidence(report)
+
+
+def test_public_route_must_be_requested_before_expected_alert_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fakes(monkeypatch, report=_report(finding=False), public_requests=0)
+    with pytest.raises(RuntimeError, match="public_route_not_tested"):
+        run_dast_evidence.run_evidence(tmp_path)
+
+
+def test_missing_alert_logs_only_bounded_rule_metadata(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report = _report(finding=False)
+    report.executions[0].eligible_endpoints = ("GET /public",)
+    report.findings = (
+        SimpleNamespace(
+            engine="zap",
+            rule_id="ZAP/10020",
+            http_method="GET",
+            http_path="/public",
+            file_path=None,
+        ),
+        SimpleNamespace(
+            engine="zap",
+            rule_id="Session secret-must-not-log",
+            http_method="GET",
+            http_path="/public",
+            file_path=None,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="expected_alert_missing"):
+        run_dast_evidence._require_evidence(report, public_requests=1)
+
+    output = capsys.readouterr().err
+    assert "public_seed=1" in output
+    assert "public_alert=1" in output
+    assert "ZAP/10020" in output
+    assert "secret-must-not-log" not in output
 
 
 def test_main_prints_only_allowlisted_failure_code(
