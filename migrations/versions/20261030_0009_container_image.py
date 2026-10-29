@@ -49,7 +49,8 @@ def upgrade() -> None:
             AND image_id IS NOT NULL AND image_resource IS NOT NULL
             AND upstream_severity IS NOT NULL
             AND image_id ~ '^sha256:[0-9a-f]{64}$'
-            AND image_resource ~ '^[!-~]{1,1024}$'
+            AND char_length(image_resource) BETWEEN 1 AND 1024
+            AND image_resource ~ '^[!-~]+$'
             AND upstream_severity IN ('UNKNOWN', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL')
         )""",
         schema="app",
