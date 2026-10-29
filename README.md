@@ -125,7 +125,7 @@ flowchart LR
 
 ## 테스트와 CI
 
-[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 도구가 설치된 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 기존 결과는 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 결과의 정규화된 보고서를 검증한 뒤 발견 건을 차단합니다. 과거 파일명에도 비밀이 있을 수 있어 공개 Actions 아티팩트는 검사가 완료되고 발견 건이 없는 `main` push에서만 올립니다. DAST 작업은 보호된 경로에 인증 요청이 도달했는지, 예상 보안 헤더 경고가 있는지 확인하고 정규화한 JSON·Markdown·SARIF만 아티팩트로 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
+[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 도구가 설치된 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 새 이미지에서 실제로 발견된 기존 결과만 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 결과의 정규화된 보고서를 검증한 뒤 발견 건을 차단합니다. 과거 파일명에도 비밀이 있을 수 있어 공개 Actions 아티팩트는 검사가 완료되고 발견 건이 없는 `main` push에서만 올립니다. DAST 작업은 보호된 경로에 인증 요청이 도달했는지, 예상 보안 헤더 경고가 있는지 확인하고 정규화한 JSON·Markdown·SARIF만 아티팩트로 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
 
 이 CI 범위를 적용하기 전에 `main`의 기존 전체 이력도 한 번 확인했습니다. 고정 커밋의 19개 커밋에서 Gitleaks 후보 20건이 나왔으며, 값·파일명을 공개하지 않고 맥락과 체크섬을 확인했습니다. 기존 후보를 숨기는 허용 목록은 두지 않습니다. [검사 범위와 분류 기록](docs/evidence/git-history-baseline-2026-10-30.md)을 참고하세요.
 

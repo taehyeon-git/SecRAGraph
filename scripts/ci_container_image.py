@@ -451,6 +451,14 @@ def main(argv: list[str] | None = None) -> int:
         f"new_severe={len(decision.new_severe)} "
         f"blocking_config={len(decision.blocking_config)}"
     )
+    print(
+        "container_evidence: "
+        f"image_id={manifest['image_id']} "
+        f"vulnerabilities={manifest['image_vulnerability_count']} "
+        f"config={manifest['image_config_count']} "
+        f"sbom_components={manifest['sbom_component_count']} "
+        f"db_updated_at={manifest['db_updated_at']}"
+    )
     if decision.blocked:
         # Advisory/package IDs are already in the public normalized report.
         for item in (*decision.new_severe, *decision.blocking_config)[:20]:

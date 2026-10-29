@@ -122,7 +122,7 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 
 Git 이력 검사의 `ScanExecution`은 선택한 base/head SHA와 커밋 수를 별도로 기록합니다. 이 수치는 이력 선택 범위이며 파일별 검사 완료를 뜻하지 않습니다. CI는 PR의 실제 head 또는 push의 before/after 범위를 검사하고 발견 건을 별도 단계에서 실패로 처리합니다. 공개 Actions 아티팩트는 완료·검증된 발견 건 없는 `main` 결과에만 게시합니다.
 
-이미지 검사의 `ScanExecution`은 tar·config digest, Trivy/DB 버전·시각, 취약점과 설정 결과 수, SBOM 구성요소 수와 해시를 기록합니다. CI는 완료·신원·DB 신선도를 확인하고 [검토된 기존 이미지 기준선](evidence/container-image-2026-10-30.md)을 넘는 HIGH·CRITICAL·UNKNOWN 취약점 및 위험한 이미지 설정을 차단합니다. 기준선의 기존 결과도 보고서에 포함하며 원본 Trivy JSON의 이미지 환경변수와 전체 tar는 공개 아티팩트로 올리지 않습니다. 소스 잠금 파일 OSV 조회, Dockerfile IaC 검사와 최종 이미지 패키지 검사는 서로 다른 대상입니다.
+이미지 검사의 `ScanExecution`은 tar·config digest, Trivy/DB 버전·시각, 취약점과 설정 결과 수, SBOM 구성요소 수와 해시를 기록합니다. CI는 완료·신원·DB 신선도를 확인하고 [검토된 기존 이미지 기준선](evidence/container-image-2026-10-30.md)을 넘는 HIGH·CRITICAL·UNKNOWN 취약점 및 위험한 이미지 설정을 차단합니다. 현재 이미지에서 여전히 발견되는 기준선 결과만 보고서에 포함하며 원본 Trivy JSON의 이미지 환경변수와 전체 tar는 공개 아티팩트로 올리지 않습니다. 소스 잠금 파일 OSV 조회, Dockerfile IaC 검사와 최종 이미지 패키지 검사는 서로 다른 대상입니다.
 
 ## 회원 인증과 취약점 조회
 

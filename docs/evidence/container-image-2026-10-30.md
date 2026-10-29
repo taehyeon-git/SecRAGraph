@@ -5,9 +5,10 @@
 이 기록은 `main`의 `c8f7800ebd740298478a6c705e51f0c0e04b51f3`에서
 시작한 SecRAGraph 런타임 Dockerfile을 로컬 Docker Desktop Linux 엔진
 29.9.2로 `--provenance=false --platform linux/amd64 --target runtime` 빌드한
-**한 이미지**의 결과입니다. CI는 PR과 `main`에서도 동일한 검사 절차를
-실행하도록 구성했습니다. 회원 업로드 이미지나 다른 아키텍처의 결과가
-아닙니다.
+**수정 전 한 이미지**의 결과입니다. CI는 PR과 `main`에서도 동일한 검사
+절차를 실행하도록 구성했습니다. 회원 업로드 이미지나 다른 아키텍처의
+결과가 아닙니다. 아래 수치는 현재 Dockerfile에 Debian 보안 업데이트를
+적용하기 전의 로컬 기준선 스냅샷입니다.
 
 | 항목 | 검증값 |
 | --- | --- |
@@ -27,7 +28,7 @@ SBOM의 이미지 ID가 config digest와 같은지 검증했습니다. 태그나
 실행마다 새 UUID가 될 수 있어 SBOM 파일 해시는 **해당 실행의 바이트**를
 묶는 값이지 재실행 때 같은 해시가 나온다는 뜻은 아닙니다.
 
-## 실측 결과
+## 수정 전 로컬 실측 결과
 
 Trivy JSON의 `Vulnerabilities` 기록 **384건**, 이미지 설정
 `Misconfigurations` **0건**을 정규화했습니다. `Results`에는 Debian
@@ -57,7 +58,26 @@ Trivy JSON 기록과 달라 225와 384를 동일 분모로 비교하지 않습�
 0건입니다. 별도 합성 신규 HIGH 사례를 추가했을 때 게이트가 실패하는
 테스트를 확인했습니다. 이후 CI는 기준선 파일의 PR 변경을 실제 base
 커밋과 비교해 막고, 새로운 HIGH·CRITICAL·UNKNOWN 식별자 또는 위험한
-이미지 설정을 차단합니다. 기존 118건은 모든 보고서에 계속 표시됩니다.
+이미지 설정을 차단합니다. 기준선 파일에는 118개 식별자가 남지만 수정된
+취약점은 새 이미지의 보고서에 나타나지 않습니다.
+
+## 새 권고와 수정
+
+새 Trivy DB (`UpdatedAt` `2026-10-29T19:18:50.96912695Z`)로 같은
+수정 전 이미지를 다시 검사했을 때 `tzdata 2026c-0+deb12u1`에 대한
+`DLA-4867-1`이 1건 추가됐습니다. 원본 심각도는 `UNKNOWN`이고
+Trivy가 기록한 수정 버전은 `2026f-0+deb12u1`입니다. 기존
+`DLA-4854-1`의 수정 버전은 `2026e-0+deb12u1`입니다. 새 권고는
+게이트가 의도대로 차단했습니다.
+
+[Debian 보안 저장소의 bookworm-security Packages.xz](https://deb.debian.org/debian-security/dists/bookworm-security/main/binary-amd64/Packages.xz)에
+`tzdata 2026f-0+deb12u1`과 패키지 SHA-256
+`3254eb870c8a949518214805aee5e4276af7699988ea8b9a3a583cd0f1eab31c`가
+기재돼 있고, [Debian 패키지 뉴스](https://tracker.debian.org/pkg/tzdata/news/)는
+2026-10-29 oldstable-security 반입을 기록합니다. 그래서 Dockerfile의
+runtime 단계에서 동일 배포판의 해당 버전을 정확히 설치하도록 수정했습니다.
+설치가 실패하면 빌드도 실패합니다. 아래 CI 결과로 새 이미지의 실제
+검사 수치와 게이트 결과를 별도로 확인합니다.
 
 심각도는 Trivy가 선택한 데이터 원천의 권고 수준이며 실제 서비스에서
 악용 가능한 113개 취약점이 확인됐다는 뜻은 아닙니다. 6개 CRITICAL
