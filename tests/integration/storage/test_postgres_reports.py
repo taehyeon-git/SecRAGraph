@@ -149,6 +149,67 @@ def test_postgres_repository_round_trips_http_finding_without_source_location(
     assert repository.get(report.scan_id) == report
 
 
+def test_postgres_repository_persists_historical_commit_provenance(
+    session_factory: sessionmaker[Session],
+) -> None:
+    commit = "a" * 40
+    finding = sample_finding().model_copy(update={"git_commit": commit})
+    execution = ScanExecution(
+        engine="gitleaks",
+        kind="secret",
+        status="completed",
+        elapsed_ms=15,
+        revision_head=commit,
+        selected_commit_count=1,
+    )
+    report = build_report("repo", [finding], executions=(execution,))
+    repository = SqlAlchemyReportRepository(session_factory)
+
+    repository.save(report)
+
+    assert repository.get(report.scan_id) == report
+    with session_factory() as session:
+        assert (
+            session.scalar(
+                text("SELECT git_commit FROM app.findings WHERE scan_id = :scan_id"),
+                {"scan_id": report.scan_id},
+            )
+            == commit
+        )
+
+
+def test_database_rejects_http_location_with_historical_commit(
+    session_factory: sessionmaker[Session],
+) -> None:
+    report = build_report("repo", [sample_finding()])
+    SqlAlchemyReportRepository(session_factory).save(report)
+
+    with pytest.raises(IntegrityError):
+        with session_factory.begin() as session:
+            session.execute(
+                text(
+                    "UPDATE app.findings SET file_path = NULL, line_start = NULL, "
+                    "http_method = 'GET', http_path = '/api', git_commit = :commit "
+                    "WHERE scan_id = :scan_id"
+                ),
+                {"commit": "a" * 40, "scan_id": report.scan_id},
+            )
+
+
+def test_database_rejects_abbreviated_historical_commit(
+    session_factory: sessionmaker[Session],
+) -> None:
+    report = build_report("repo", [sample_finding()])
+    SqlAlchemyReportRepository(session_factory).save(report)
+
+    with pytest.raises(IntegrityError):
+        with session_factory.begin() as session:
+            session.execute(
+                text("UPDATE app.findings SET git_commit = 'abc123' WHERE scan_id = :scan_id"),
+                {"scan_id": report.scan_id},
+            )
+
+
 def test_persisted_scan_never_restores_unrecognized_source_line_content(
     session_factory: sessionmaker[Session],
     tmp_path: Path,

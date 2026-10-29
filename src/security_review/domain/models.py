@@ -73,6 +73,13 @@ def _relative_report_path(value: str) -> str:
 
 
 _HTTP_METHOD = re.compile(r"[A-Z]{1,16}\Z")
+_FULL_GIT_COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+
+
+def _git_commit(value: str | None) -> str | None:
+    if value is not None and not _FULL_GIT_COMMIT.fullmatch(value):
+        raise ValueError("git_commit must be a full lowercase SHA-1 or SHA-256 object ID")
+    return value
 
 
 def _http_path(value: str) -> str:
@@ -133,7 +140,15 @@ class ScanExecution(BaseModel):
     checks: tuple[str, ...] = ()
     eligible_endpoints: tuple[str, ...] = ()
     observed_alert_endpoints: tuple[str, ...] = ()
+    revision_base: str | None = None
+    revision_head: str | None = None
+    selected_commit_count: int | None = Field(default=None, ge=1)
     reason: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,127}$")
+
+    @field_validator("revision_base", "revision_head")
+    @classmethod
+    def require_full_commit(cls, value: str | None) -> str | None:
+        return _git_commit(value)
 
     @field_validator("eligible_files", "scanned_files")
     @classmethod
@@ -173,6 +188,14 @@ class ScanExecution(BaseModel):
             raise ValueError("DAST coverage cannot claim source files")
         if self.kind != "dast" and (self.eligible_endpoints or self.observed_alert_endpoints):
             raise ValueError("HTTP endpoint coverage requires DAST kind")
+        if self.revision_base is not None and self.revision_head is None:
+            raise ValueError("revision_base requires revision_head")
+        if (self.revision_head is None) != (self.selected_commit_count is None):
+            raise ValueError("revision_head and selected_commit_count are required together")
+        if self.kind != "secret" and self.revision_head is not None:
+            raise ValueError("Git history coverage requires secret kind")
+        if self.revision_head is not None and (self.eligible_files or self.scanned_files):
+            raise ValueError("Git history coverage cannot claim an inspected-file inventory")
         return self
 
 
@@ -190,6 +213,7 @@ class Finding(BaseModel):
     line_end: int | None = Field(default=None, ge=1)
     http_method: str | None = Field(default=None, pattern=r"^[A-Z]{1,16}$")
     http_path: str | None = None
+    git_commit: str | None = None
     message: str
     redacted_evidence: str
     confidence: Confidence
@@ -209,6 +233,11 @@ class Finding(BaseModel):
     def require_origin_free_http_path(cls, value: str | None) -> str | None:
         return _http_path(value) if value is not None else None
 
+    @field_validator("git_commit")
+    @classmethod
+    def require_full_commit(cls, value: str | None) -> str | None:
+        return _git_commit(value)
+
     @model_validator(mode="after")
     def validate_line_range(self) -> Self:
         has_source = self.file_path is not None
@@ -226,6 +255,11 @@ class Finding(BaseModel):
                 raise ValueError("line_end must be greater than or equal to line_start")
         elif self.line_start is not None or self.line_end is not None or self.trace:
             raise ValueError("HTTP location cannot claim a source line or trace")
+        if self.git_commit is not None:
+            if not has_source:
+                raise ValueError("git_commit requires a source path and line")
+            if self.trace:
+                raise ValueError("historical finding cannot claim an unversioned trace")
         if len(self.trace) > 64:
             raise ValueError("trace must contain at most 64 locations")
         return self

@@ -156,6 +156,7 @@ class FindingRow(Base):
     line_end: Mapped[int | None] = mapped_column(nullable=True)
     http_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     http_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    git_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     redacted_evidence: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -179,6 +180,7 @@ class FindingRow(Base):
             line_end=finding.line_end,
             http_method=finding.http_method,
             http_path=finding.http_path,
+            git_commit=finding.git_commit,
             message=finding.message,
             redacted_evidence=finding.redacted_evidence,
             confidence=finding.confidence.value,
@@ -201,6 +203,7 @@ class FindingRow(Base):
                 "line_end": self.line_end,
                 "http_method": self.http_method,
                 "http_path": self.http_path,
+                "git_commit": self.git_commit,
                 "message": self.message,
                 "redacted_evidence": self.redacted_evidence,
                 "confidence": self.confidence,

@@ -111,6 +111,30 @@ def test_finding_row_round_trips_every_canonical_field() -> None:
     assert row.references[0]["id"] == "owasp-secrets"
 
 
+def test_history_finding_and_execution_round_trip_with_full_commit() -> None:
+    commit = "a" * 40
+    historical = sample_finding(identifier=f"GITLEAKS:{commit}:src/settings.py:7").model_copy(
+        update={"git_commit": commit}
+    )
+    execution = ScanExecution(
+        engine="gitleaks",
+        kind="secret",
+        status="completed",
+        elapsed_ms=10,
+        revision_head=commit,
+        selected_commit_count=1,
+    )
+    report = build_report("repo", [historical], executions=(execution,))
+
+    row = ScanReportRow.from_domain(report)
+    restored = row.to_domain()
+
+    assert row.findings[0].git_commit == commit
+    assert restored == report
+    assert restored.findings[0].git_commit == commit
+    assert restored.executions[0].selected_commit_count == 1
+
+
 def test_report_row_round_trips_json_fields_and_orders_findings() -> None:
     report = sample_report()
 
