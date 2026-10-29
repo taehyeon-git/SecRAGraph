@@ -6,8 +6,9 @@ import json
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
+from hashlib import sha256
 from pathlib import Path
-from tempfile import NamedTemporaryFile, gettempdir
+from tempfile import NamedTemporaryFile, TemporaryDirectory, gettempdir
 from typing import Annotated, Protocol
 
 import typer
@@ -15,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from security_review.application import UnsupportedTargetError, scan_path
 from security_review.config import Settings
+from security_review.container_review import scan_image_path
 from security_review.domain.models import ScanReport
 from security_review.history_review import scan_history_path
 from security_review.intelligence.dynamic_cwe import CweEvidenceProvider
@@ -37,14 +39,14 @@ from security_review.storage.intelligence import IntelligenceImportError, import
 
 app = typer.Typer(
     name="security-review",
-    help="Review source, trusted Git history, and disposable running test APIs.",
+    help="Review source, trusted Git history and image tar, or disposable test APIs.",
     no_args_is_help=True,
 )
 
 
 @app.callback()
 def main() -> None:
-    """Run SecRAGraph's source, history, and isolated test-API review tools."""
+    """Run SecRAGraph's source, history, image and isolated test-API tools."""
 
 
 class MembershipAdmin(Protocol):
@@ -329,6 +331,118 @@ def scan_history(
         raise typer.Exit(code=1)
     if report.findings:
         raise typer.Exit(code=3)
+
+
+@app.command("scan-image")
+def scan_image(
+    tar_path: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            resolve_path=True,
+            help="Trusted local OCI/Docker image tar; never a member upload",
+        ),
+    ],
+    image_id: Annotated[str, typer.Option("--image-id", help="Exact local Docker image ID")],
+    cache_dir: Annotated[
+        Path, typer.Option("--cache-dir", help="Trivy cache with a fresh downloaded DB")
+    ],
+    output_dir: Annotated[
+        Path, typer.Option("--output-dir", help="New directory for normalized image evidence")
+    ],
+    trivy_binary: Annotated[str, typer.Option("--trivy-binary")] = "trivy",
+    offline_evidence: Annotated[
+        bool, typer.Option("--offline-evidence", help="Do not fetch CWE evidence")
+    ] = False,
+) -> None:
+    """Scan a trusted image tar without building or pulling any image."""
+
+    from security_review.container_image import ImageScanError
+    from security_review.orchestrator.scan_graph import ScanWorkflowError
+
+    if output_dir.exists():
+        typer.echo("Image evidence output directory already exists.", err=True)
+        raise typer.Exit(code=2)
+    try:
+        review = scan_image_path(
+            tar_path,
+            expected_local_id=image_id,
+            trivy_binary=trivy_binary,
+            cache_dir=cache_dir,
+            cwe_evidence=None if offline_evidence else _cwe_evidence_factory(),
+        )
+    except ImageScanError as error:
+        typer.echo(f"Image scan failed: {error}", err=True)
+        raise typer.Exit(code=1) from None
+    except ScanWorkflowError:
+        typer.echo("Image report workflow failed.", err=True)
+        raise typer.Exit(code=1) from None
+
+    report = review.report
+    if len(report.executions) != 1:
+        typer.echo("Image scan did not complete.", err=True)
+        raise typer.Exit(code=1)
+    execution = report.executions[0]
+    if (
+        execution.kind != "container"
+        or execution.status != "completed"
+        or execution.image_id is None
+        or execution.image_local_id is None
+        or execution.image_tar_sha256 is None
+        or execution.image_db_updated_at is None
+        or execution.sbom_sha256 is None
+        or execution.sbom_component_count is None
+        or execution.sbom_component_count < 1
+        or sha256(review.sbom_bytes).hexdigest() != execution.sbom_sha256
+    ):
+        typer.echo("Image scan did not complete.", err=True)
+        raise typer.Exit(code=1)
+
+    artifacts = {
+        "container.json": render_report(report, ReportFormat.JSON).encode("utf-8"),
+        "container.md": render_report(report, ReportFormat.MARKDOWN).encode("utf-8"),
+        "container.sarif": render_report(report, ReportFormat.SARIF).encode("utf-8"),
+        "container.cdx.json": review.sbom_bytes,
+    }
+    manifest = {
+        "schema_version": 1,
+        "execution_status": execution.status,
+        "trivy_version": execution.version,
+        "image_id": execution.image_id,
+        "image_local_id": execution.image_local_id,
+        "image_tar_sha256": execution.image_tar_sha256,
+        "db_updated_at": execution.image_db_updated_at.isoformat(),
+        "image_vulnerability_count": execution.image_vulnerability_count,
+        "image_config_count": execution.image_config_count,
+        "sbom_sha256": execution.sbom_sha256,
+        "sbom_component_count": execution.sbom_component_count,
+        "gate_identities": [asdict(identity) for identity in review.gate_identities],
+        "artifacts": {name: sha256(content).hexdigest() for name, content in artifacts.items()},
+    }
+    manifest_bytes = (
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+
+    try:
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        parent = output_dir.parent.resolve()
+        with TemporaryDirectory(prefix=".sr-image-", dir=parent) as temporary:
+            stage = Path(temporary)
+            if stage.resolve().parent != parent:
+                raise OSError("unsafe image evidence staging directory")
+            for name, content in artifacts.items():
+                (stage / name).write_bytes(content)
+            (stage / "container.manifest.json").write_bytes(manifest_bytes)
+            if output_dir.exists():
+                raise FileExistsError("image evidence output directory already exists")
+            stage.rename(output_dir)
+    except OSError:
+        typer.echo("Could not write image evidence.", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo("Image evidence written.")
 
 
 @app.command("import-intelligence")

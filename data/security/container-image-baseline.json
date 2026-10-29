@@ -1,0 +1,952 @@
+{
+  "schema_version": 1,
+  "scanner": "trivy",
+  "scanner_version": "0.76.1",
+  "source_revision": "c8f7800ebd740298478a6c705e51f0c0e04b51f3",
+  "identities": [
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2023-45853",
+      "package_identity": "pkg:deb/debian/zlib1g@1.2.13.dfsg-1?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:1.2.13.dfsg-1",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2025-69720",
+      "package_identity": "pkg:deb/debian/libncursesw6@6.4-4?arch=amd64&distro=debian-12.15",
+      "installed_version": "6.4-4",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2025-69720",
+      "package_identity": "pkg:deb/debian/libtinfo6@6.4-4?arch=amd64&distro=debian-12.15",
+      "installed_version": "6.4-4",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2025-69720",
+      "package_identity": "pkg:deb/debian/ncurses-base@6.4-4?arch=all&distro=debian-12.15",
+      "installed_version": "6.4-4",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2025-69720",
+      "package_identity": "pkg:deb/debian/ncurses-bin@6.4-4?arch=amd64&distro=debian-12.15",
+      "installed_version": "6.4-4",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2025-7458",
+      "package_identity": "pkg:deb/debian/libsqlite3-0@3.40.1-2%2Bdeb12u2?arch=amd64&distro=debian-12.15",
+      "installed_version": "3.40.1-2+deb12u2",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-103111",
+      "package_identity": "pkg:deb/debian/libpcre2-8-0@10.42-1%2Bdeb12u1?arch=amd64&distro=debian-12.15",
+      "installed_version": "10.42-1+deb12u1",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-11822",
+      "package_identity": "pkg:deb/debian/libsqlite3-0@3.40.1-2%2Bdeb12u2?arch=amd64&distro=debian-12.15",
+      "installed_version": "3.40.1-2+deb12u2",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-11824",
+      "package_identity": "pkg:deb/debian/libsqlite3-0@3.40.1-2%2Bdeb12u2?arch=amd64&distro=debian-12.15",
+      "installed_version": "3.40.1-2+deb12u2",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-13221",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-16742",
+      "package_identity": "pkg:deb/debian/libsystemd0@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "installed_version": "252.39-1~deb12u2",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-16742",
+      "package_identity": "pkg:deb/debian/libudev1@252.39-1~deb12u2?arch=amd64&distro=debian-12.15",
+      "installed_version": "252.39-1~deb12u2",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-41992",
+      "package_identity": "pkg:deb/debian/gzip@1.12-1?arch=amd64&distro=debian-12.15",
+      "installed_version": "1.12-1",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-42496",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-42497",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-48962",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53613",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-53615",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-54369",
+      "package_identity": "pkg:deb/debian/libacl1@2.3.1-3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.3.1-3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-57432",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-57433",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-76642",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78408",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78409",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/bsdutils@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15&epoch=1",
+      "installed_version": "1:2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/libblkid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/libmount1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/libsmartcols1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/libuuid1@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/mount@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/util-linux-extra@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-78410",
+      "package_identity": "pkg:deb/debian/util-linux@2.38.1-5%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "2.38.1-5+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-82560",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "UNKNOWN",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-8376",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-84782",
+      "package_identity": "pkg:deb/debian/libssl3@3.0.22-1~deb12u1?arch=amd64&distro=debian-12.15",
+      "installed_version": "3.0.22-1~deb12u1",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-84782",
+      "package_identity": "pkg:deb/debian/openssl@3.0.22-1~deb12u1?arch=amd64&distro=debian-12.15",
+      "installed_version": "3.0.22-1~deb12u1",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "CVE-2026-9538",
+      "package_identity": "pkg:deb/debian/perl-base@5.36.0-7%2Bdeb12u3?arch=amd64&distro=debian-12.15",
+      "installed_version": "5.36.0-7+deb12u3",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "DLA-4845-1",
+      "package_identity": "pkg:deb/debian/ca-certificates@20250419~deb12u1?arch=all&distro=debian-12.15",
+      "installed_version": "20250419~deb12u1",
+      "upstream_severity": "UNKNOWN",
+      "is_config": false
+    },
+    {
+      "result_type": "debian",
+      "advisory_id": "DLA-4854-1",
+      "package_identity": "pkg:deb/debian/tzdata@2026c-0%2Bdeb12u1?arch=all&distro=debian-12.15",
+      "installed_version": "2026c-0+deb12u1",
+      "upstream_severity": "UNKNOWN",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2025-47913",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2025-61726",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2025-68121",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "CRITICAL",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-111943",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-25679",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-27145",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-32280",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-32281",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-32283",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-33811",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-33814",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-33818",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39820",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39821",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39822",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39824",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/sys@v0.30.0",
+      "installed_version": "v0.30.0",
+      "upstream_severity": "UNKNOWN",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39828",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39829",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39830",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39831",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39832",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39835",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-39836",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-42499",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-42504",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-42508",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-46595",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-46597",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56851",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/text@v0.22.0",
+      "installed_version": "v0.22.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56852",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/text@v0.22.0",
+      "installed_version": "v0.22.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56853",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56854",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56858",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56859",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56860",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-56862",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-63209",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/github.com/klauspost/compress@v1.17.11",
+      "installed_version": "v1.17.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-78667",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-78669",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "CVE-2026-97031",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/stdlib@v1.24.11",
+      "installed_version": "v1.24.11",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "gobinary",
+      "advisory_id": "GO-2026-5932",
+      "package_identity": "binary:opt/scanners/gitleaks#pkg:golang/golang.org/x/crypto@v0.35.0",
+      "installed_version": "v0.35.0",
+      "upstream_severity": "UNKNOWN",
+      "is_config": false
+    },
+    {
+      "result_type": "python-pkg",
+      "advisory_id": "CVE-2024-23342",
+      "package_identity": "pkg:pypi/ecdsa@0.19.2",
+      "installed_version": "0.19.2",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "python-pkg",
+      "advisory_id": "CVE-2026-23949",
+      "package_identity": "pkg:pypi/jaraco.context@5.3.0",
+      "installed_version": "5.3.0",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    },
+    {
+      "result_type": "python-pkg",
+      "advisory_id": "CVE-2026-24049",
+      "package_identity": "pkg:pypi/wheel@0.45.1",
+      "installed_version": "0.45.1",
+      "upstream_severity": "HIGH",
+      "is_config": false
+    }
+  ]
+}

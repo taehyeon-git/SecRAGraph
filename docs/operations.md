@@ -29,6 +29,37 @@ The published API and web ports default to 8000 and 8501; all four published por
 
 Normal scans detect supported public lockfile coordinates and query OSV.dev automatically. For a package outside the supported lockfiles, the CLI can still query an explicit version without an API key: `docker compose -p secragraph --env-file build/local/runtime.env exec api /app/.venv/bin/security-review osv-query --ecosystem PyPI --package jinja2 --version 2.4.1`. The authenticated endpoint and Dependency CVEs UI tab use the same live adapter. See [OSV lookup details](osv.md) for response bounds and the privacy boundary.
 
+## Runtime image evidence
+
+GitHub Actions builds the SecRAGraph runtime image, saves the exact local
+image ID, refreshes the Trivy 0.76.1 advisory DB, scans the tar, and creates
+a CycloneDX SBOM automatically. This is an audit of the built platform image;
+member uploads never invoke Docker or accept an image. The CI job fails on an
+incomplete scan, stale DB, mismatched image identities, new severe package
+advisories or medium-or-higher image configuration findings. The checked-in
+baseline is not an allowlist that removes existing findings from the report.
+
+For an advanced local reproduction, install the SHA-verified Trivy 0.76.1
+release and run the same steps from a trusted checkout. The `--output-dir`
+must name a directory that does not yet exist. In PowerShell:
+
+~~~powershell
+docker build --provenance=false --platform linux/amd64 --target runtime --tag secragraph:image-review .
+$imageId = docker image inspect --format '{{.Id}}' secragraph:image-review
+New-Item -ItemType Directory -Force build | Out-Null
+docker image save --output build/container-image.tar $imageId
+trivy image --download-db-only --cache-dir build/trivy-cache
+uv run --frozen security-review scan-image build/container-image.tar --image-id $imageId --trivy-binary trivy --cache-dir build/trivy-cache --output-dir build/evidence/container --offline-evidence
+~~~
+
+The command writes `container.json`, `container.md`, `container.sarif`,
+`container.cdx.json`, and `container.manifest.json` together. The manifest
+binds normalized evidence and SBOM hashes to the tar, local image ID, image
+config digest and DB time. The raw Trivy JSON may include image configuration
+environment variables, so it is never a public Actions artifact. See the
+[image evidence record](evidence/container-image-2026-10-30.md) for actual
+counts, SHA values and the scope of the current high severity backlog.
+
 ## On-demand CWE evidence
 
 Normal API and CLI scans inspect the CWE IDs of findings produced by the current scan, fetch missing official MITRE records by ID, verify them, and attach official source references to the report. A model-backed RAG question can additionally propose relevant CWE IDs during its normal intent classification; explicit IDs in the question take priority. The provider checks those candidates against MITRE before optional Qdrant indexing. General-answer and Text2SQL routes do not fetch CWE documents. No source file or full question is sent to MITRE, and a CWE label is never converted into a guessed CVE.

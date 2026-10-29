@@ -157,6 +157,10 @@ class FindingRow(Base):
     http_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     http_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     git_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    image_id: Mapped[str | None] = mapped_column(String(71), nullable=True)
+    image_resource: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    upstream_severity: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    severity_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     redacted_evidence: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -181,6 +185,10 @@ class FindingRow(Base):
             http_method=finding.http_method,
             http_path=finding.http_path,
             git_commit=finding.git_commit,
+            image_id=finding.image_id,
+            image_resource=finding.image_resource,
+            upstream_severity=finding.upstream_severity,
+            severity_source=finding.severity_source,
             message=finding.message,
             redacted_evidence=finding.redacted_evidence,
             confidence=finding.confidence.value,
@@ -204,6 +212,10 @@ class FindingRow(Base):
                 "http_method": self.http_method,
                 "http_path": self.http_path,
                 "git_commit": self.git_commit,
+                "image_id": self.image_id,
+                "image_resource": self.image_resource,
+                "upstream_severity": self.upstream_severity,
+                "severity_source": self.severity_source,
                 "message": self.message,
                 "redacted_evidence": self.redacted_evidence,
                 "confidence": self.confidence,

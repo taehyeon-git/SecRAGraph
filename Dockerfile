@@ -29,6 +29,12 @@ RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
 
 FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS runtime
 
+# The pinned base predates Debian's bookworm-security tzdata update.
+# Keep the fix on the same distribution and fail the build if it is unavailable.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata=2026f-0+deb12u1 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV PATH="/opt/scanners:/opt/checkov-venv/bin:/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

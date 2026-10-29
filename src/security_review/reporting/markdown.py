@@ -41,6 +41,8 @@ def _render_reference(reference: SourceReference) -> str:
 def _render_finding(finding: Finding) -> list[str]:
     if finding.http_path is not None:
         location = f"{finding.http_method} {finding.http_path}"
+    elif finding.image_resource is not None:
+        location = finding.image_resource
     else:
         location = f"{finding.file_path}:{finding.line_start}"
     lines = [
@@ -57,6 +59,14 @@ def _render_finding(finding: Finding) -> list[str]:
     ]
     if finding.git_commit is not None:
         lines.insert(6, f"- Git commit: {_escape(finding.git_commit)}")
+    if finding.image_id is not None:
+        lines.extend(
+            [
+                f"- Image config digest: {_escape(finding.image_id)}",
+                f"- Upstream severity: {_escape(finding.upstream_severity)}",
+                f"- Severity source: {_escape(finding.severity_source or 'Unknown')}",
+            ]
+        )
     if finding.trace:
         lines.append("- Source-to-sink trace:")
         lines.extend(
@@ -83,7 +93,22 @@ def _render_execution(execution: ScanExecution) -> list[str]:
         f"- Version: {_escape(execution.version or 'Unknown')}",
         f"- Elapsed: {execution.elapsed_ms} ms",
     ]
-    if execution.kind == "dast":
+    if execution.kind == "container":
+        lines.extend(
+            [
+                f"- Image config digest: {_escape(execution.image_id or 'Unavailable')}",
+                f"- Local image ID: {_escape(execution.image_local_id or 'Unavailable')}",
+                f"- Image tar SHA-256: {_escape(execution.image_tar_sha256 or 'Unavailable')}",
+                f"- Vulnerability records: {_escape(execution.image_vulnerability_count)}",
+                f"- Image configuration records: {_escape(execution.image_config_count)}",
+                f"- SBOM SHA-256: {_escape(execution.sbom_sha256 or 'Unavailable')}",
+                f"- SBOM components: {_escape(execution.sbom_component_count)}",
+                "- Vulnerability DB updated: "
+                f"{_escape(execution.image_db_updated_at or 'Unavailable')}",
+                "- Container coverage does not claim source files or HTTP endpoints.",
+            ]
+        )
+    elif execution.kind == "dast":
         eligible = ", ".join(_escape(endpoint) for endpoint in execution.eligible_endpoints[:50])
         observed = ", ".join(
             _escape(endpoint) for endpoint in execution.observed_alert_endpoints[:50]

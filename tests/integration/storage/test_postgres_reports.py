@@ -178,6 +178,69 @@ def test_postgres_repository_persists_historical_commit_provenance(
         )
 
 
+def test_postgres_repository_round_trips_image_finding_and_execution(
+    session_factory: sessionmaker[Session],
+) -> None:
+    from datetime import UTC, datetime
+
+    image_id = "sha256:" + "a" * 64
+    finding = Finding(
+        id="trivy:pkg:apt:cve",
+        rule_id="CVE-2026-12345",
+        category="container_vulnerability",
+        severity=Severity.HIGH,
+        image_id=image_id,
+        image_resource="pkg:deb/debian/apt@2.6.1",
+        upstream_severity="HIGH",
+        severity_source="debian",
+        message="Installed package has an advisory.",
+        redacted_evidence="apt 2.6.1",
+        confidence=Confidence.HIGH,
+        remediation="Upgrade the package.",
+        engine="trivy",
+    )
+    execution = ScanExecution(
+        engine="trivy",
+        kind="container",
+        status="completed",
+        version="0.76.1",
+        elapsed_ms=1200,
+        image_id=image_id,
+        image_local_id="sha256:" + "b" * 64,
+        image_tar_sha256="c" * 64,
+        image_db_updated_at=datetime(2026, 10, 29, 13, 9, tzinfo=UTC),
+        image_vulnerability_count=1,
+        image_config_count=0,
+        sbom_sha256="d" * 64,
+        sbom_component_count=386,
+        checks=("os-pkgs", "lang-pkgs", "image-config"),
+    )
+    report = build_report("image", [finding], executions=(execution,))
+    repository = SqlAlchemyReportRepository(session_factory)
+
+    repository.save(report)
+
+    assert repository.get(report.scan_id) == report
+
+
+def test_database_rejects_image_identity_on_source_location(
+    session_factory: sessionmaker[Session],
+) -> None:
+    report = build_report("repo", [sample_finding()])
+    SqlAlchemyReportRepository(session_factory).save(report)
+
+    with pytest.raises(IntegrityError):
+        with session_factory.begin() as session:
+            session.execute(
+                text(
+                    "UPDATE app.findings SET image_id = :image_id, "
+                    "image_resource = 'pkg:deb/debian/apt@1', upstream_severity = 'HIGH' "
+                    "WHERE scan_id = :scan_id"
+                ),
+                {"image_id": "sha256:" + "a" * 64, "scan_id": report.scan_id},
+            )
+
+
 def test_database_rejects_http_location_with_historical_commit(
     session_factory: sessionmaker[Session],
 ) -> None:

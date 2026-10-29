@@ -9,6 +9,10 @@ flowchart TB
   FILE[CLI file or directory] --> SCAN[ScanService]
   HISTORY[Trusted local or CI Git checkout] --> HSCAN[Bounded Gitleaks Git history scan]
   HSCAN --> SGRAPH
+  IMAGE[CI built runtime image ID] --> ITAR[Exact-ID OCI/Docker tar]
+  ITAR --> ISCANNER[Trivy OS/library/config scan]
+  ISCANNER --> SGRAPH
+  ITAR --> SBOM[CycloneDX SBOM]
   UPLOAD[FastAPI file or ZIP] --> AUTH[Member Session or optional operator Bearer]
   AUTH --> TEMP[Validated temporary workspace]
   TEMP --> SCAN
@@ -36,6 +40,8 @@ flowchart TB
 ```
 
 CLI는 `scan_path`로 로컬 파일·디렉터리를 스캔하고 그 자리에서 보고서를 렌더링합니다. 기본 CLI 그래프에는 retriever가 없고 PostgreSQL에 보고서를 저장하지 않지만, 지원되는 잠금 파일이 있으면 OSV 자동 감사를 연결합니다. API의 `ScanService`는 영속 보고서 저장소와 기본 OSV 감사를 받고, 설정된 키와 인프라가 있으면 Qdrant retriever도 연결합니다. API는 한 파일 또는 검증한 ZIP을 동기적으로 처리하고 PostgreSQL에 보고서를 저장합니다. `/v1/*` 보호 경계는 본문 읽기 전에 회원 Session 또는 설정된 경우 선택적 운영 Bearer 토큰을 확인합니다. Streamlit은 회원 로그인을 제공하고 Session 자격 증명을 서버 측 세션 상태에 보관합니다. 보고서의 소유자 필터는 JSON, Markdown, SARIF 조회에 적용됩니다. [회원 인증과 운영자 권한](membership.md)을 참고하세요.
+
+이미지 경로는 이 저장소의 CI 또는 신뢰된 로컬 운영자가 만든 tar만 받습니다. `scan-image`는 tar를 빌드·실행·다운로드하지 않으며 회원 API에 이미지 업로드 경로가 없습니다. Trivy 0.76.1이 최종 이미지의 OS·언어 패키지와 이미지 설정을 읽고 CycloneDX SBOM을 생성합니다. tar SHA-256, 로컬 Docker ID, OCI manifest/config 연결, Trivy JSON과 SBOM의 config digest를 확인한 뒤 정규화된 finding을 스캔 LangGraph에 전달합니다. 이미지 finding은 패키지의 논리적 위치를 갖고 소스 줄을 주장하지 않습니다. [이미지 검사 설계](design/container-image-sbom.md)를 참고하세요.
 
 `scan-history`는 별도의 신뢰된 로컬/CI Git 체크아웃을 대상으로 합니다. 커밋 집합을 사전 확인한 뒤 Gitleaks가 반환한 비밀 없는 메타데이터를 같은 스캔 LangGraph에 넘깁니다. 회원 업로드, ZIP, FastAPI 요청으로는 이력 스캔을 시작할 수 없습니다. 역사적 finding은 과거 커밋 SHA를 보존하며 SARIF에는 현재 파일의 물리적 위치 대신 논리적 위치를 기록합니다.
 
@@ -92,6 +98,7 @@ classify_intent ─┬→ general_answer → END
 | `storage/database.py`, `reports.py`, `memory.py`, `models.py` | SQLAlchemy 연결·스캔 보고서 영속화·테스트용 메모리 저장소·테이블. |
 | `storage/intelligence.py`, `audit.py` | 합성 CSV 형식 검증과 `intel` 적재, 읽기 전용 쿼리 실행, 내용 없는 감사 이벤트 저장. |
 | `reporting/builder.py`, `types.py`, `json_report.py`, `markdown.py`, `sarif.py` | 하나의 `ScanReport` 정규화와 JSON/Markdown/SARIF 2.1.0 렌더링. |
+| `container_image/`, `container_review.py` | 신뢰된 로컬 tar의 Trivy 결과와 SBOM을 검증·정규화하고 동일 LangGraph 보고 경로에 연결. |
 | `evaluation/offline_rag.py`, `rag_models.py`, `rag_render.py` | 고정 매니페스트·인덱싱된 chunk digest·실제 RAG 그래프 경로를 평가하고 제한된 증거를 렌더링. |
 | `scripts/run_rag_evidence.py` | 키 없는 RAG 평가를 실행하고 JSON/Markdown 파일을 원자적으로 기록하며 라벨 불일치를 실패로 반환. |
 | `evaluation/live_rag.py`, `scripts/run_live_rag_evidence.py` | 명시적 모델 키가 있을 때만 동일 지식 그래프의 제공자 경로를 관찰하고 지표 분모·모델 ID·해시·사람 검토 필요성을 로컬에 기록. |
@@ -114,6 +121,8 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 `ScanExecution`은 엔진별 성공·부분·건너뜀·미실행·오류, 도구 버전, 입력 후보, 확인된 검사 파일과 소요 시간을 보존합니다. Gitleaks JSON은 파일별 전체 검사 목록을 주지 않으므로 확인 파일은 finding이 발생한 경로만 표시합니다. 입력 파일 제한·지원 언어·시간 초과로 제외된 부분을 성공으로 취급하지 않습니다. [평가 문서](demo.md)는 작성자 회귀 자료, 독립 라벨 코퍼스, 라벨 없는 실제 저장소를 분리해 설명합니다. 과거 자체 규칙의 수치는 [역사적 기록](evidence/expanded-scanner-2026-10-27.md)에만 보존합니다.
 
 Git 이력 검사의 `ScanExecution`은 선택한 base/head SHA와 커밋 수를 별도로 기록합니다. 이 수치는 이력 선택 범위이며 파일별 검사 완료를 뜻하지 않습니다. CI는 PR의 실제 head 또는 push의 before/after 범위를 검사하고 발견 건을 별도 단계에서 실패로 처리합니다. 공개 Actions 아티팩트는 완료·검증된 발견 건 없는 `main` 결과에만 게시합니다.
+
+이미지 검사의 `ScanExecution`은 tar·config digest, Trivy/DB 버전·시각, 취약점과 설정 결과 수, SBOM 구성요소 수와 해시를 기록합니다. CI는 완료·신원·DB 신선도를 확인하고 [검토된 기존 이미지 기준선](evidence/container-image-2026-10-30.md)을 넘는 HIGH·CRITICAL·UNKNOWN 취약점 및 위험한 이미지 설정을 차단합니다. 현재 이미지에서 여전히 발견되는 기준선 결과만 보고서에 포함하며 원본 Trivy JSON의 이미지 환경변수와 전체 tar는 공개 아티팩트로 올리지 않습니다. 소스 잠금 파일 OSV 조회, Dockerfile IaC 검사와 최종 이미지 패키지 검사는 서로 다른 대상입니다.
 
 ## 회원 인증과 취약점 조회
 
