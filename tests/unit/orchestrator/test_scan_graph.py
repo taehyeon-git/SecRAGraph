@@ -166,8 +166,53 @@ def test_runtime_cwe_evidence_deduplicates_ids_and_preserves_rag_and_osv_sources
     assert provider_calls == [("CWE-22",)]
     assert findings["first"].references == (official, _chunk().to_source_reference())
     assert findings["second"].references == (official, _chunk().to_source_reference())
-    assert findings["OSV001:match"] == osv
+    assert findings["OSV001:match"].references == (_chunk().to_source_reference(),)
     assert result["report"].warnings == ()
+
+
+def test_dependency_only_finding_can_receive_rag_evidence() -> None:
+    audited = _finding(identifier="OSV001:match", path="uv.lock").model_copy(
+        update={"rule_id": "OSV001", "category": "dependency", "cwe_ids": ()}
+    )
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        return SimpleNamespace(findings=(audited,), warnings=())
+
+    retriever = FakeDocumentRetriever(results=(_chunk(),))
+    result = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner(()),
+            dependency_auditor=audit,
+            retriever=retriever,
+        )
+    ).invoke({"target": Path("scan-target"), "limits": ScanLimits()})
+
+    assert len(retriever.calls) == 1
+    assert result["report"].findings[0].references == (_chunk().to_source_reference(),)
+
+
+def test_rag_limit_prioritizes_deterministic_finding_before_osv_addition() -> None:
+    code = _finding(identifier="code")
+    dependency = _finding(identifier="dependency", path="uv.lock").model_copy(
+        update={"category": "dependency", "rule_id": "OSV001"}
+    )
+
+    def audit(_target: Path, _limits: ScanLimits) -> SimpleNamespace:
+        return SimpleNamespace(findings=(dependency,), warnings=())
+
+    result = build_scan_graph(
+        ScanGraphServices(
+            deterministic_scanner=_RecordingScanner((code,)),
+            dependency_auditor=audit,
+            retriever=FakeDocumentRetriever(results=(_chunk(),)),
+            max_enriched_findings=1,
+        )
+    ).invoke({"target": Path("scan-target"), "limits": ScanLimits()})
+
+    findings = {finding.id: finding for finding in result["report"].findings}
+    assert findings["code"].references == (_chunk().to_source_reference(),)
+    assert findings["dependency"].references == ()
+    assert "enrichment_finding_limit_reached" in result["report"].warnings
 
 
 def test_runtime_cwe_evidence_includes_cwe_ids_added_by_dependency_audit() -> None:
@@ -434,7 +479,7 @@ def test_dependency_audit_precedes_slow_rag_and_survives_its_deadline(tmp_path: 
     assert "processing_time_limit_exceeded" in result["report"].warnings
 
 
-def test_rag_enriches_code_finding_without_dropping_osv_result(tmp_path: Path) -> None:
+def test_rag_enriches_code_and_osv_findings_without_dropping_results(tmp_path: Path) -> None:
     target = tmp_path / "app.py"
     target.write_text("eval('unsafe')\n", encoding="utf-8")
     code_finding = _finding()
@@ -458,12 +503,9 @@ def test_rag_enriches_code_finding_without_dropping_osv_result(tmp_path: Path) -
     assert next(
         finding for finding in report.findings if finding.id == code_finding.id
     ).references == (_chunk().to_source_reference(),)
-    assert (
-        next(
-            finding for finding in report.findings if finding.id == dependency_finding.id
-        ).references
-        == ()
-    )
+    assert next(
+        finding for finding in report.findings if finding.id == dependency_finding.id
+    ).references == (_chunk().to_source_reference(),)
 
 
 def test_disabled_enrichment_is_a_clean_deterministic_scan() -> None:
@@ -644,10 +686,98 @@ def test_enrichment_calls_are_hard_capped_and_remaining_findings_survive() -> No
         )
     ).invoke({"findings": findings})
 
-    assert len(retriever.calls) == 2
+    assert len(retriever.calls) == 1
     assert len(result["findings"]) == 3
+    assert all(item.references for item in result["findings"][:2])
     assert result["findings"][2] == findings[2]
     assert result["warnings"] == ("enrichment_finding_limit_reached",)
+
+
+def test_identical_finding_queries_reuse_retrieval_only_within_one_invocation() -> None:
+    findings = tuple(
+        _finding(identifier=f"OG:{index}", path=f"src/{index}.py") for index in range(3)
+    )
+    retriever = FakeDocumentRetriever(results=(_chunk(),))
+    graph = build_scan_graph(ScanGraphServices(retriever=retriever))
+
+    first = graph.invoke({"findings": findings})
+
+    assert len(retriever.calls) == 1
+    assert all(item.references[0].id == "guide:1" for item in first["findings"])
+
+    second = graph.invoke({"findings": findings})
+
+    assert len(retriever.calls) == 2
+    assert all(item.references[0].id == "guide:1" for item in second["findings"])
+
+
+def test_distinct_finding_queries_keep_independent_retrieval() -> None:
+    first = _finding(identifier="OG:first")
+    second = _finding(identifier="OG:second").model_copy(update={"message": "Different sink."})
+    retriever = FakeDocumentRetriever(results=(_chunk(),))
+
+    result = build_scan_graph(ScanGraphServices(retriever=retriever)).invoke(
+        {"findings": (first, second)}
+    )
+
+    assert len(retriever.calls) == 2
+    assert all(item.references for item in result["findings"])
+
+
+def test_empty_retrieval_is_reused_without_adding_evidence() -> None:
+    findings = (_finding(identifier="first"), _finding(identifier="second"))
+    retriever = FakeDocumentRetriever(results=())
+
+    result = build_scan_graph(ScanGraphServices(retriever=retriever)).invoke({"findings": findings})
+
+    assert len(retriever.calls) == 1
+    assert result["findings"] == findings
+    assert result["warnings"] == ()
+
+
+def test_cached_retrieval_still_checks_deadline_before_each_finding() -> None:
+    findings = (_finding(identifier="first"), _finding(identifier="second"))
+    retriever = FakeDocumentRetriever(results=(_chunk(),))
+    ticks = iter((0.0, 0.0, 0.0, 2.0))
+
+    result = build_scan_graph(ScanGraphServices(retriever=retriever)).invoke(
+        {
+            "findings": findings,
+            "clock": lambda: next(ticks),
+            "enrichment_budget_seconds": 1.0,
+        }
+    )
+
+    assert len(retriever.calls) == 1
+    assert result["findings"] == findings
+    assert result["warnings"] == ("processing_time_limit_exceeded",)
+
+
+def test_later_retrieval_failure_discards_earlier_cached_evidence() -> None:
+    findings = (
+        _finding(identifier="first"),
+        _finding(identifier="first-copy"),
+        _finding(identifier="different").model_copy(update={"message": "Different sink."}),
+    )
+
+    class FailingSecondQuery:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def search(self, query: str, limit: int = 5) -> tuple[DocumentChunk, ...]:
+            del query, limit
+            self.calls += 1
+            if self.calls == 2:
+                raise IntelligenceUnavailableError("qdrant", "search_failed")
+            return (_chunk(),)
+
+    retriever = FailingSecondQuery()
+    result = build_scan_graph(ScanGraphServices(retriever=retriever)).invoke({"findings": findings})
+
+    assert retriever.calls == 2
+    assert {item.id for item in result["findings"]} == {item.id for item in findings}
+    assert all(not item.references for item in result["findings"])
+    assert result["warnings"] == ("enrichment_qdrant_unavailable",)
 
 
 def test_malformed_retrieval_response_degrades_with_a_fixed_warning() -> None:

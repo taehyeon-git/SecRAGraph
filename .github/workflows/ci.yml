@@ -27,7 +27,7 @@ jobs:
       - run: uv sync --frozen --dev
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py scripts/run_history_evidence.py scripts/ci_container_image.py scripts/check_compose_evidence.py infra/scanners/install_trivy.py
+      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py scripts/run_history_evidence.py scripts/ci_container_image.py scripts/check_compose_evidence.py scripts/compose_smoke.py scripts/aggregate_pipeline_benchmark.py scripts/run_pipeline_contract_benchmark.py infra/scanners/install_trivy.py
       - run: uv run bandit -q -r src apps
       - name: Run keyless RAG evidence
         run: uv run python -m scripts.run_rag_evidence
@@ -36,6 +36,13 @@ jobs:
           test -s build/evidence/rag.json
           test -s build/evidence/rag.md
           uv run python -m json.tool build/evidence/rag.json > /dev/null
+      - name: Run controlled graph-provider contract benchmark
+        run: uv run python -m scripts.run_pipeline_contract_benchmark
+      - name: Validate graph-provider contract evidence
+        run: |
+          test -s build/evidence/pipeline-contract.json
+          test -s build/evidence/pipeline-contract.md
+          uv run python -m json.tool build/evidence/pipeline-contract.json > /dev/null
 
       - name: Build pinned scanner runtime
         run: docker build --target runtime --tag secragraph:benchmark .
@@ -74,6 +81,8 @@ jobs:
           path: |
             build/evidence/rag.json
             build/evidence/rag.md
+            build/evidence/pipeline-contract.json
+            build/evidence/pipeline-contract.md
             build/evidence/multiengine-scanner.json
             build/evidence/multiengine-scanner.md
           if-no-files-found: error
@@ -220,6 +229,24 @@ jobs:
       - run: uv sync --frozen --dev
       - name: Run isolated authenticated full-stack smoke
         run: uv run python -m scripts.compose_smoke
+      - name: Require authenticated pipeline API benchmark evidence
+        run: |
+          test -s build/evidence/pipeline-api.json
+          test -s build/evidence/pipeline-api.md
+          uv run python -m json.tool build/evidence/pipeline-api.json > /dev/null
+      - name: Publish authenticated pipeline API evidence
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'schedule' ||
+          github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secragraph-api-evidence
+          path: |
+            build/evidence/pipeline-api.json
+            build/evidence/pipeline-api.md
+          if-no-files-found: error
+          retention-days: 14
 
   dast-evidence:
     runs-on: ubuntu-latest
@@ -330,5 +357,64 @@ jobs:
             build/evidence/history.json
             build/evidence/history.md
             build/evidence/history.sarif
+          if-no-files-found: error
+          retention-days: 14
+
+  pipeline-benchmark:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch')
+    needs: [quality, tests, dependency-security, container-build, compose-smoke, dast-evidence, git-history-secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPENDENCY_SECURITY_RESULT: ${{ needs.dependency-security.result }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.12"
+      - run: uv python install 3.11
+      - run: uv sync --frozen --dev
+      - name: Download API evidence from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secragraph-api-evidence
+          path: build/component-evidence/api
+      - name: Download scanner and RAG evidence from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secragraph-evidence
+          path: build/component-evidence/scanner
+      - name: Download DAST evidence from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secragraph-dast-evidence
+          path: build/component-evidence/dast
+      - name: Download image and SBOM evidence from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secragraph-container-evidence
+          path: build/component-evidence/container
+      - name: Download Git-history evidence from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: secragraph-history-evidence
+          path: build/component-evidence/history
+      - name: Validate and aggregate whole-tool benchmark
+        run: uv run python -m scripts.aggregate_pipeline_benchmark --evidence-root build/component-evidence
+      - name: Parse whole-tool benchmark JSON
+        run: |
+          test -s build/evidence/pipeline-benchmark.json
+          test -s build/evidence/pipeline-benchmark.md
+          uv run python -m json.tool build/evidence/pipeline-benchmark.json > /dev/null
+      - name: Publish whole-tool pipeline benchmark
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: secragraph-pipeline-benchmark
+          path: |
+            build/evidence/pipeline-benchmark.json
+            build/evidence/pipeline-benchmark.md
           if-no-files-found: error
           retention-days: 14

@@ -15,6 +15,7 @@ EXPECTED_CI_JOBS = {
     "compose-smoke",
     "dast-evidence",
     "git-history-secrets",
+    "pipeline-benchmark",
 }
 
 
@@ -76,7 +77,13 @@ def test_rescan_image_uses_current_sha_and_history_checks_main_ref() -> None:
 
 def test_normalized_evidence_uploads_cover_only_trusted_main_events() -> None:
     jobs = _workflow("ci.yml")["jobs"]
-    for name in ("quality", "container-build", "dast-evidence", "git-history-secrets"):
+    for name in (
+        "quality",
+        "container-build",
+        "compose-smoke",
+        "dast-evidence",
+        "git-history-secrets",
+    ):
         uploads = [
             step
             for step in jobs[name]["steps"]
@@ -89,3 +96,23 @@ def test_normalized_evidence_uploads_cover_only_trusted_main_events() -> None:
             assert f"github.event_name == '{event_name}'" in condition
         assert "pull_request" not in condition
         assert uploads[0]["with"]["if-no-files-found"] == "error"
+
+    aggregate = jobs["pipeline-benchmark"]
+    assert set(aggregate["needs"]) == EXPECTED_CI_JOBS - {"pipeline-benchmark"}
+    condition = aggregate["if"]
+    assert "github.ref == 'refs/heads/main'" in condition
+    assert "pull_request" not in condition
+    for event_name in ("push", "schedule", "workflow_dispatch"):
+        assert f"github.event_name == '{event_name}'" in condition
+    downloads = [
+        step for step in aggregate["steps"] if "actions/download-artifact@" in step.get("uses", "")
+    ]
+    assert len(downloads) == 5
+    assert all(
+        "run-id" not in step["with"] and "repository" not in step["with"] for step in downloads
+    )
+    uploads = [
+        step for step in aggregate["steps"] if "actions/upload-artifact@" in step.get("uses", "")
+    ]
+    assert len(uploads) == 1
+    assert uploads[0]["with"]["if-no-files-found"] == "error"
