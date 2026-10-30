@@ -85,7 +85,7 @@ severity expresses configuration risk, not proven exploitability.
 | `COMPOSE/HOST_NETWORK` | Literal `network_mode: host` | MEDIUM |
 | `COMPOSE/HOST_PID` | Literal `pid: host` | HIGH |
 | `COMPOSE/HOST_IPC` | Literal `ipc: host` | MEDIUM |
-| `COMPOSE/CAP_ADD_DANGEROUS` | `cap_add` item `ALL` or `SYS_ADMIN` | HIGH |
+| `COMPOSE/CAP_ADD_DANGEROUS` | `cap_add` item `ALL`, `SYS_ADMIN` or Docker's equivalent `CAP_SYS_ADMIN` spelling | HIGH |
 | `COMPOSE/UNCONFINED_PROFILE` | `security_opt` item disabling seccomp or AppArmor with `unconfined`, in `option=value` or `option:value` form | HIGH |
 | `COMPOSE/DOCKER_SOCKET` | Short or long bind mount whose literal host source is `/var/run/docker.sock` or `/run/docker.sock`, including `:ro` | HIGH |
 | `COMPOSE/HOST_ROOT_MOUNT` | Short or long bind mount whose literal host source is `/` | HIGH |
@@ -102,7 +102,7 @@ absence alone is too noisy for this high-precision pass. Dynamic values and
 unsupported mount syntax are reported as incomplete coverage instead of
 being silently accepted. Docker's [service reference](https://docs.docker.com/reference/compose-file/services/)
 defines these fields; its [trust model](https://docs.docker.com/compose/trust-model/)
-describes their security effects. Map only reviewed privilege-related rules
+describes their security effects. Docker's [capability reference](https://docs.docker.com/engine/containers/run/#runtime-privilege-and-linux-capabilities) explicitly accepts the `CAP_` prefix. Map only reviewed privilege-related rules
 to [CWE-250](https://cwe.mitre.org/data/definitions/250.html); leave other
 CWE IDs empty until reviewed, and never infer a CVE from a Compose setting.
 

@@ -22,9 +22,7 @@ from security_review.scanner.compose_files import COMPOSE_POLICY_VERSION, is_com
         ("compose.yaml/other.yml", False),
     ],
 )
-def test_is_compose_file_matches_only_recognized_posix_basenames(
-    path: str, expected: bool
-) -> None:
+def test_is_compose_file_matches_only_recognized_posix_basenames(path: str, expected: bool) -> None:
     assert is_compose_file(path) is expected
 
 

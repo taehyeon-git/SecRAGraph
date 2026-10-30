@@ -4,7 +4,7 @@
 
 ## 1. 작성자 회귀 사례
 
-[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다.
+[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 및 Docker Compose 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다. Compose 정책의 선언 한정 범위와 직접 대조 결과는 [전용 증거](evidence/compose-iac-2026-10-30.md)에 있습니다.
 
 - 입력 SHA-256: `682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152`
 - 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30; 잠금 파일이 없어 OSV는 이 자료에서 미채점
@@ -26,7 +26,7 @@ CI는 [고정 도구 이미지](../Dockerfile)를 빌드한 다음, 네트워크
 python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_cases.json --staging-dir /tmp/secragraph --require-complete --require-traces
 ```
 
-`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 호스트에서 직접 명령을 실행하려면 같은 세 도구가 PATH에 있어야 합니다.
+`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 이어서 `scripts.check_compose_evidence`가 같은 JSON을 실제 manifest와 대조해 Compose 사례의 완료 범위, 규칙별 양성·음성 평가, 새 미평가 finding, FP/FN을 확인합니다. 호스트에서 직접 전체 평가 명령을 실행하려면 Opengrep·Gitleaks·Checkov가 PATH에 있어야 합니다. Compose 정책에는 별도 실행 파일이 필요하지 않습니다.
 
 ## 2. 독립 라벨 코퍼스
 
