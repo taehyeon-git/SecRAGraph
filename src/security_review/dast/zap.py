@@ -272,6 +272,7 @@ def parse_zap_report(
     origin: str,
     eligible_endpoints: tuple[str, ...],
     deadline: float | None = None,
+    active: bool = False,
 ) -> tuple[Finding, ...]:
     """Normalize only scoped ZAP alert metadata, discarding all raw evidence."""
 
@@ -339,7 +340,12 @@ def parse_zap_report(
                 ):
                     raise DastReportError("invalid_zap_instance")
                 actual = _same_origin(uri, origin)
-                route = routes.route_for(method, actual, deadline)
+                try:
+                    route = routes.route_for(method, actual, deadline)
+                except DastReportError as error:
+                    if active and str(error) == "unlisted_zap_endpoint":
+                        continue
+                    raise
                 if confidence == 0:  # ZAP explicitly marked this alert false positive.
                     continue
                 rule_id = f"ZAP/{raw_plugin}"

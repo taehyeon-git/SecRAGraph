@@ -224,6 +224,7 @@ def _result(
         warnings = (
             "dast_active_scan_can_modify_target_state",
             "dast_active_seeds_not_request_allowlist",
+            "dast_active_findings_limited_to_seed_routes",
             *warnings,
         )
     else:
@@ -542,6 +543,7 @@ def run_zap_api_scan(
                                         origin=origin,
                                         eligible_endpoints=eligible,
                                         deadline=deadline,
+                                        active=active,
                                     )
                                 except DastReportError as error:
                                     timed_out = str(error) == "zap_report_timeout"
