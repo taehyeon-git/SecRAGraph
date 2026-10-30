@@ -19,11 +19,18 @@ from uuid import uuid4
 
 from security_review.dast.runner import ZAP_IMAGE, _network_isolated, prepare_zap_image
 from security_review.domain.models import ScanReport
+from security_review.evaluation.dast_benchmark import (
+    evaluate_dast_benchmark,
+    load_manifest,
+    render_benchmark_json,
+    render_benchmark_markdown,
+)
 from security_review.reporting.types import ReportFormat, render_report
 
 _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
+_BENCHMARK_MANIFEST = _ROOT / "data" / "evaluation" / "dast_cases.json"
 _ARTIFACT_NAMES = (
     "dast.json",
     "dast.md",
@@ -31,16 +38,15 @@ _ARTIFACT_NAMES = (
     "dast-active.json",
     "dast-active.md",
     "dast-active.sarif",
+    "dast-benchmark.json",
+    "dast-benchmark.md",
 )
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
-_UNSET = object()
+_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _SAFE_FAILURE_CODES = frozenset(
     {
         "active_execution_missing",
-        "active_safe_control_alert",
-        "active_safe_route_not_attacked",
-        "active_sql_alert_missing",
-        "active_vulnerable_route_not_attacked",
         "dast_active_scan_incomplete",
         "authenticated_route_not_tested",
         "credential_in_report",
@@ -60,8 +66,8 @@ _SAFE_FAILURE_CODES = frozenset(
         "dast_zap_failed",
         "dast_zap_image_unavailable",
         "docker_unavailable",
-        "expected_alert_missing",
-        "public_route_not_tested",
+        "fixture_image_unavailable",
+        "source_revision_unavailable",
         "fixture_cleanup_failed",
         "fixture_container_unavailable",
         "fixture_probe_failed",
@@ -132,6 +138,50 @@ def _fixture_container(project: str, environment: dict[str, str]) -> str:
     if completed.returncode != 0 or _CONTAINER_ID.fullmatch(container) is None:
         raise RuntimeError("fixture_container_unavailable")
     return container
+
+
+def _fixture_image_id(container: str) -> str:
+    completed = _run_docker(["inspect", "--format", "{{.Image}}", container])
+    image_id = completed.stdout.strip()
+    if completed.returncode != 0 or _IMAGE_ID.fullmatch(image_id) is None:
+        raise RuntimeError("fixture_image_unavailable")
+    return image_id
+
+
+def _source_identity() -> tuple[str, bool]:
+    git = shutil.which("git")
+    if git is None:
+        raise RuntimeError("source_revision_unavailable")
+    try:
+        head = subprocess.run(  # noqa: S603
+            [git, "rev-parse", "HEAD"],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            shell=False,  # nosec B603
+        )
+        status = subprocess.run(  # noqa: S603
+            [git, "status", "--porcelain", "--untracked-files=all"],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            shell=False,  # nosec B603
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("source_revision_unavailable") from error
+    revision = head.stdout.strip()
+    if (
+        head.returncode != 0
+        or status.returncode != 0
+        or _REVISION.fullmatch(revision) is None
+        or len(status.stdout) > 65_536
+    ):
+        raise RuntimeError("source_revision_unavailable")
+    return revision, bool(status.stdout.strip())
 
 
 def _run_docker(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[str]:
@@ -379,60 +429,26 @@ def _scan(
     )
 
 
-def _require_evidence(report: ScanReport, *, public_requests: object = _UNSET) -> None:
+def _require_evidence(report: ScanReport, *, allowed_paths: frozenset[str]) -> None:
+    """Require completed, scoped evidence while leaving detections to the scorer."""
+
     _require_completion(report)
-    if public_requests is not _UNSET and (
-        not isinstance(public_requests, int)
-        or isinstance(public_requests, bool)
-        or public_requests < 1
-    ):
-        raise RuntimeError("public_route_not_tested")
-    if not any(
-        finding.engine == "zap"
-        and finding.rule_id == "ZAP/10021"
-        and finding.http_method == "GET"
-        and finding.http_path == "/public"
-        for finding in report.findings
-    ):
-        public_seed = any(
-            item.engine == "zap"
-            and item.kind == "dast"
-            and "GET /public" in getattr(item, "eligible_endpoints", ())
-            for item in report.executions
-        )
-        public_alert = any(
-            finding.engine == "zap"
-            and finding.http_method == "GET"
-            and finding.http_path == "/public"
-            for finding in report.findings
-        )
-        rule_ids = sorted(
-            {
-                finding.rule_id
-                for finding in report.findings
-                if finding.engine == "zap" and re.fullmatch(r"ZAP/[0-9]{1,6}", finding.rule_id)
-            }
-        )[:16]
-        print(
-            "DAST alert diagnostic: "
-            f"public_seed={int(public_seed)} public_alert={int(public_alert)} "
-            f"rule_ids={','.join(rule_ids) if rule_ids else 'none'}",
-            file=sys.stderr,
-        )
-        raise RuntimeError("expected_alert_missing")
     if any(
         finding.file_path is not None
         or finding.http_method != "GET"
-        or finding.http_path not in {"/public", "/protected", "/sql-vulnerable", "/sql-safe"}
+        or finding.http_path not in allowed_paths
         for finding in report.findings
     ):
         raise RuntimeError("dast_scope_violation")
 
 
 def _require_active_evidence(
-    report: ScanReport, *, before: dict[str, object], after: dict[str, object]
+    report: ScanReport,
+    *,
+    expected_endpoints: frozenset[str],
+    allowed_paths: frozenset[str],
 ) -> None:
-    """Require a completed active scan and a distinct positive/control pair."""
+    """Require an exactly marked, scoped active scan; probe proof is scored separately."""
 
     _require_completion(report)
     active_executions = [
@@ -443,48 +459,17 @@ def _require_active_evidence(
         and item.status == "completed"
         and "openapi-active" in item.checks
     ]
-    expected = {"GET /sql-vulnerable", "GET /sql-safe"}
     if not active_executions or not any(
-        set(item.eligible_endpoints) == expected for item in active_executions
+        set(item.eligible_endpoints) == expected_endpoints for item in active_executions
     ):
         raise RuntimeError("active_execution_missing")
     if any(
         finding.file_path is not None
         or finding.http_method != "GET"
-        or finding.http_path not in {"/sql-vulnerable", "/sql-safe"}
+        or finding.http_path not in allowed_paths
         for finding in report.findings
     ):
         raise RuntimeError("dast_scope_violation")
-    if any(
-        finding.engine == "zap"
-        and finding.rule_id == "ZAP/40018"
-        and finding.http_path == "/sql-safe"
-        for finding in report.findings
-    ):
-        raise RuntimeError("active_safe_control_alert")
-    if not any(
-        finding.engine == "zap"
-        and finding.rule_id == "ZAP/40018"
-        and finding.http_method == "GET"
-        and finding.http_path == "/sql-vulnerable"
-        and "CWE-89" in finding.cwe_ids
-        for finding in report.findings
-    ):
-        raise RuntimeError("active_sql_alert_missing")
-    for key, reason in (
-        ("sql_vulnerable_mutations", "active_vulnerable_route_not_attacked"),
-        ("sql_safe_mutations", "active_safe_route_not_attacked"),
-    ):
-        previous = before.get(key)
-        current = after.get(key)
-        if (
-            not isinstance(previous, int)
-            or isinstance(previous, bool)
-            or not isinstance(current, int)
-            or isinstance(current, bool)
-            or current <= previous
-        ):
-            raise RuntimeError(reason)
 
 
 def _require_completion(report: ScanReport) -> None:
@@ -506,6 +491,14 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
 
     for name in _ARTIFACT_NAMES:
         (output_dir / name).unlink(missing_ok=True)
+    started_at = monotonic()
+    manifest = load_manifest(_BENCHMARK_MANIFEST)
+    source_revision, source_dirty = _source_identity()
+    passive_paths = frozenset(case.path for case in manifest.cases)
+    active_endpoints = frozenset(
+        f"{case.method} {case.path}" for case in manifest.cases if case.mode == "active"
+    )
+    active_paths = frozenset(case.path for case in manifest.cases if case.mode == "active")
     _docker_executable()
     _prepare_zap_image()
     print("DAST stage: image-ready", flush=True)
@@ -523,9 +516,12 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         if started.returncode != 0:
             raise RuntimeError("fixture_start_failed")
         container = _fixture_container(project, environment)
+        fixture_image_id = _fixture_image_id(container)
         if _fetch_fixture_json(container, "/health").get("status") != "ok":
             raise RuntimeError("fixture_unhealthy")
         print("DAST stage: fixture-ready", flush=True)
+
+        before_passive = _fetch_fixture_json(container, "/stats")
 
         previous_header = os.environ.get("ZAP_AUTH_HEADER_VALUE")
         os.environ["ZAP_AUTH_HEADER_VALUE"] = f"Session {token}"
@@ -538,7 +534,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
                 active=False,
             )
             print("DAST stage: passive-returned", flush=True)
-            before_active = _fetch_fixture_json(container, "/stats")
+            after_passive = _fetch_fixture_json(container, "/stats")
             active_report = _scan(
                 container,
                 8000,
@@ -554,11 +550,20 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
                 os.environ["ZAP_AUTH_HEADER_VALUE"] = previous_header
 
         after_active = _fetch_fixture_json(container, "/stats")
-        _require_evidence(report, public_requests=before_active.get("public_requests"))
-        count = before_active.get("authenticated_protected_requests")
-        if not isinstance(count, int) or isinstance(count, bool) or count < 1:
+        _require_evidence(report, allowed_paths=passive_paths)
+        previous_auth = before_passive.get("authenticated_protected_requests")
+        current_auth = after_passive.get("authenticated_protected_requests")
+        if (
+            not isinstance(previous_auth, int)
+            or isinstance(previous_auth, bool)
+            or not isinstance(current_auth, int)
+            or isinstance(current_auth, bool)
+            or current_auth <= previous_auth
+        ):
             raise RuntimeError("authenticated_route_not_tested")
-        _require_active_evidence(active_report, before=before_active, after=after_active)
+        _require_active_evidence(
+            active_report, expected_endpoints=active_endpoints, allowed_paths=active_paths
+        )
         _assert_host_redirect_isolated(container)
         print("DAST stage: evidence-checked", flush=True)
 
@@ -570,8 +575,6 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
             "dast-active.md": render_report(active_report, ReportFormat.MARKDOWN),
             "dast-active.sarif": render_report(active_report, ReportFormat.SARIF),
         }
-        if any(token in content or f"Session {token}" in content for content in rendered.values()):
-            raise RuntimeError("credential_in_report")
     finally:
         stopped = _run_compose(
             project,
@@ -582,9 +585,32 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         if stopped.returncode != 0:
             raise RuntimeError("fixture_cleanup_failed")
     print("DAST stage: cleanup-complete", flush=True)
+    result = evaluate_dast_benchmark(
+        manifest,
+        report,
+        active_report,
+        before_passive,
+        after_passive,
+        after_active,
+        fixture_image_id=fixture_image_id,
+        source_revision=source_revision,
+        source_dirty=source_dirty,
+        total_elapsed_ms=max(0, int((monotonic() - started_at) * 1000)),
+    )
+    rendered["dast-benchmark.json"] = render_benchmark_json(result)
+    rendered["dast-benchmark.md"] = render_benchmark_markdown(result)
+    if any(token in content or f"Session {token}" in content for content in rendered.values()):
+        raise RuntimeError("credential_in_report")
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, content in rendered.items():
         (output_dir / name).write_text(content, encoding="utf-8")
+    metrics = result.metrics
+    print(
+        "DAST benchmark: "
+        f"TP={metrics.tp} FP={metrics.fp} FN={metrics.fn} TN={metrics.tn} "
+        f"manifest_sha256={manifest.sha256}",
+        flush=True,
+    )
 
 
 def _safe_failure_location(error: BaseException) -> str:
