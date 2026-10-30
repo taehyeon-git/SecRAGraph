@@ -491,6 +491,9 @@ def run_zap_api_scan(
                             ]
                             if host_group is not None:
                                 zap_args.extend(["--group-add", str(host_group)])
+                            if active:
+                                # Keep ZAP-owned bytecode caches out of the mounted workspace.
+                                zap_args.extend(["-e", "PYTHONDONTWRITEBYTECODE=1"])
                             if auth_value is not None:
                                 child_env["ZAP_AUTH_HEADER_VALUE"] = auth_value
                                 zap_args.extend(["-e", "ZAP_AUTH_HEADER_VALUE"])

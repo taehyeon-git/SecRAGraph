@@ -281,6 +281,7 @@ def test_active_scan_uses_pinned_id_api_minimal_and_completion_marker(
         for args in commands
     )
     zap = next(args for args in commands if args[0] == "run" and "zap-api-scan.py" in args)
+    assert ("-e", "PYTHONDONTWRITEBYTECODE=1") in tuple(zip(zap, zap[1:], strict=False))
     script_args = zap[zap.index("zap-api-scan.py") + 1 :]
     assert "-S" not in script_args and "-c" not in script_args
     assert script_args[script_args.index("--hook") + 1] == "/zap/wrk/active-hooks.py"
