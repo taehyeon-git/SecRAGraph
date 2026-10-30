@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from hmac import compare_digest
 from threading import Lock
@@ -27,6 +28,11 @@ _authenticated_protected_requests = 0
 _host_redirect_requests = 0
 _sql_vulnerable_mutations = 0
 _sql_safe_mutations = 0
+_SQLI_PROBE_PATTERN = re.compile(
+    r"\b(?:or|and)\s+\S+\s*=\s*\S+|\bunion\s+(?:all\s+)?select\b|"
+    r"\b(?:sleep|benchmark)\s*\(",
+    flags=re.IGNORECASE | re.ASCII,
+)
 
 
 @app.middleware("http")
@@ -77,12 +83,21 @@ def _sql_connection() -> sqlite3.Connection:
     return connection
 
 
+def _is_sqli_probe(value: str) -> bool:
+    """Recognize SQL syntax probes without keeping their request values."""
+
+    sample = value[:512]
+    return any(token in sample for token in ("'", '"', "--", "/*", "*/", ";")) or bool(
+        _SQLI_PROBE_PATTERN.search(sample)
+    )
+
+
 @app.get("/sql-vulnerable", openapi_extra={"x-secragraph-dast-active": True})
 def sql_vulnerable(username: Annotated[str, Query(examples=["alice"])]) -> dict[str, int]:
     """Deliberately injectable SQLite query, confined to this disposable fixture."""
 
     global _sql_vulnerable_mutations
-    if username != "alice":
+    if _is_sqli_probe(username):
         with _counter_lock:
             _sql_vulnerable_mutations += 1
     connection = _sql_connection()
@@ -102,7 +117,7 @@ def sql_safe(username: Annotated[str, Query(examples=["alice"])]) -> dict[str, i
     """Parameterized control with the same records and response shape."""
 
     global _sql_safe_mutations
-    if username != "alice":
+    if _is_sqli_probe(username):
         with _counter_lock:
             _sql_safe_mutations += 1
     connection = _sql_connection()

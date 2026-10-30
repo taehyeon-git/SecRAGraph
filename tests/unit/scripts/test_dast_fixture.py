@@ -65,12 +65,26 @@ def test_sql_canary_exposes_vulnerability_and_safe_control_without_payload_logs(
 
     assert module.sql_vulnerable("alice") == {"matches": 1}
     assert module.sql_safe("alice") == {"matches": 1}
+    assert module.sql_vulnerable("bob") == {"matches": 1}
+    assert module.sql_safe("bob") == {"matches": 1}
+    assert module.sql_vulnerable("") == {"matches": 0}
+    assert module.sql_safe("") == {"matches": 0}
+    assert module.stats()["sql_vulnerable_mutations"] == 0
+    assert module.stats()["sql_safe_mutations"] == 0
     attack = "alice' OR '1'='1"
     assert module.sql_vulnerable(attack)["matches"] > 1
     assert module.sql_safe(attack) == {"matches": 0}
     assert module.stats()["sql_vulnerable_mutations"] >= 1
     assert module.stats()["sql_safe_mutations"] >= 1
     assert attack not in repr(module.stats())
+
+
+@pytest.mark.parametrize("probe", ["'", '"', "1 OR 1=1", "1 UNION SELECT 1", "1--", "1/*x*/"])
+def test_sql_probe_classifier_accepts_common_injection_shapes(monkeypatch, probe: str) -> None:
+    monkeypatch.setenv("SECRAGRAPH_DAST_TEST_TOKEN", "fixture-secret")
+    module = importlib.reload(importlib.import_module("apps.dast_fixture.main"))
+    assert module._is_sqli_probe(probe)
+    assert not module._is_sqli_probe("bob")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="ASGI middleware call hangs on Windows")
