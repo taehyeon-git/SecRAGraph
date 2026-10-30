@@ -59,7 +59,7 @@ validate_input → deterministic_scan → normalize_findings
 
 `retrieve_finding_evidence`는 규칙 결과의 `references`에 Qdrant 문서 출처를 합칩니다. finding ID, 탐지 위치, 심각도, CWE 매핑, 수정 권고는 결정적 결과를 유지합니다. 이 노드는 ChatModel 또는 PostgreSQL Text2SQL을 호출하지 않습니다. 검색 불가·시간 한도 초과 시 확인된 finding을 보존하고 `completed_with_warnings` 보고서를 만들 수 있습니다. 스캔 경로의 기본 수정 권고는 LLM 생성 문장이 아닙니다.
 
-`deterministic_scan`은 제한된 UTF-8 스냅샷을 만들고 Opengrep·Gitleaks·Checkov를 별도 프로세스로 실행합니다. 각 엔진의 상태·버전·대상과 확인된 파일·시간·경고를 `ScanExecution`에 정규화합니다. 대상 파일을 import하거나 실행하지 않습니다. `audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 의존성 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 이미 확인한 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
+`deterministic_scan`은 제한된 UTF-8 스냅샷을 만들고 Opengrep·Gitleaks·Checkov를 별도 프로세스로 실행하며 Docker Compose 파일은 별도 `compose-policy` 어댑터가 파싱합니다. Checkov에는 Compose 파일을 제외한 적격 파일만 복사한 비공개 작업 디렉터리를 넘깁니다. 전용 어댑터는 Docker Compose 명령이나 파일 참조를 실행·로드하지 않고 선언된 설정만 확인합니다. 각 엔진의 상태·버전·대상과 확인된 파일·시간·경고를 `ScanExecution`에 정규화합니다. 대상 파일을 import하거나 실행하지 않습니다. `audit_dependencies`는 공개 레지스트리 `uv.lock`/`package-lock.json`의 정확한 버전만 OSV에 조회하고, 실제 권고가 있으면 의존성 finding을 추가합니다. 잠금 파일 원문이나 대상 코드는 전송하지 않습니다. OSV 실패와 미지원 항목은 범위 경고로 남기고 이미 확인한 finding을 보존합니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_OSV_ENABLED=false`는 이 외부 단계를 끕니다.
 
 `prepare_cwe_evidence`는 실제 스캔 결과의 CWE ID를 중복 제거하고 항목별 검증 캐시를 확인합니다. 없는 항목만 고정된 MITRE HTTPS API로 조회합니다. 응답의 CWE ID·형식·크기와 로컬 manifest SHA-256을 검사한 뒤 공식 출처를 finding에 연결합니다. 인덱서가 있으면 같은 Qdrant 컬렉션의 별도 런타임 코퍼스 ID로 문서를 추가합니다. 초기 사례 코퍼스 재동기화가 이 코퍼스를 제거하지 않습니다. 취득 실패·시간 초과·상한 도달 시 결정적 finding을 보존하고 범위 경고를 남깁니다. MITRE에는 업로드 코드나 질문 전문이 아닌 CWE ID만 보냅니다. CLI `--offline`과 API `SECRAGRAPH_AUTO_CWE_ENABLED=false`로 자동 조회를 끌 수 있습니다.
 
@@ -85,7 +85,7 @@ classify_intent ─┬→ general_answer → END
 | 위치 | 책임 / 외부 경계 |
 | --- | --- |
 | `src/security_review/domain/models.py`, `risk.py` | 검증된 `Finding`, `SourceReference`, `ScanReport`와 결정적 위험 점수. FastAPI·DB·모델 SDK에 의존하지 않습니다. |
-| `scanner/files.py`, `snapshot.py`, `opengrep_adapter.py`, `external_detectors.py` | 지원 파일 탐색·한도, 별도 비실행 스냅샷, 신뢰된 검사기 호출과 결과 정규화. 소스 줄이나 비밀 원문을 보고서에 복사하지 않습니다. |
+| `scanner/files.py`, `snapshot.py`, `opengrep_adapter.py`, `external_detectors.py`, `compose_adapter.py` | 지원 파일 탐색·한도, 별도 비실행 스냅샷, 신뢰된 검사기 호출과 Docker Compose 선언 검사·결과 정규화. 소스 줄이나 비밀 원문을 보고서에 복사하지 않습니다. |
 | `history/engine.py`, `history_review.py` | 신뢰된 Git 체크아웃의 유한 커밋 집합을 검증하고 Gitleaks Git 모드의 비밀 없는 결과를 같은 LangGraph 보고서로 보냅니다. |
 | `uploads/service.py`, `archive.py` | 파일명·MIME·크기 검증, ZIP 경로·링크·개수·압축 해제량 검사 후 임시 디렉터리 사용. |
 | `application.py` | CLI의 `scan_path`와 API의 `ScanService`; 같은 스캔 그래프를 조립하고 API 경로에서는 보고서를 저장합니다. |
@@ -114,7 +114,7 @@ HTTP 계약은 `GET /health/live`, `GET /health/ready`, `POST /v1/auth/login`, `
 
 ## 검사 엔진과 측정 경계
 
-회원 업로드의 SAST는 Opengrep 1.32.0과 [MIT 라이선스·커밋·파일 해시를 고정한 79개 규칙](../data/engines/opengrep/README.md), [프로젝트 작성 taint 규칙 3개](../data/engines/secragraph-taint/README.md)를 사용합니다. 웹 프레임워크 입력에서 명령 실행이나 SQL 쿼리 문자열까지의 흐름을 `--taint-intrafile`로 같은 파일의 함수 사이까지 추적하고, source·step·sink 경로/줄을 소스 내용 없이 기록합니다. 임의의 여러 파일을 지나는 데이터 흐름은 증명하지 않습니다. 비밀정보는 Gitleaks 8.30.1, Terraform 등 설정 오류는 Checkov 3.3.30, 정확한 잠금 파일 패키지 권고는 OSV.dev가 담당합니다. 과거 자체 제작 8개 규칙은 현재 경로에서 제거했습니다.
+회원 업로드의 SAST는 Opengrep 1.32.0과 [MIT 라이선스·커밋·파일 해시를 고정한 79개 규칙](../data/engines/opengrep/README.md), [프로젝트 작성 taint 규칙 3개](../data/engines/secragraph-taint/README.md)를 사용합니다. 웹 프레임워크 입력에서 명령 실행이나 SQL 쿼리 문자열까지의 흐름을 `--taint-intrafile`로 같은 파일의 함수 사이까지 추적하고, source·step·sink 경로/줄을 소스 내용 없이 기록합니다. 임의의 여러 파일을 지나는 데이터 흐름은 증명하지 않습니다. 비밀정보는 Gitleaks 8.30.1, Terraform·Dockerfile·Kubernetes 등 지원 설정은 Checkov 3.3.30, Docker Compose 선언은 `compose-policy`, 정확한 잠금 파일 패키지 권고는 OSV.dev가 담당합니다. 과거 자체 제작 8개 규칙은 현재 경로에서 제거했습니다.
 
 공개 SecRAGraph 소스 자체는 [CodeQL `security-extended`](../.github/workflows/security-scan.yml)를 GitHub Actions에서 실행합니다. CodeQL의 무료 허용 범위에 맞춰 공개 소스에만 적용하며 비공개 회원 업로드에는 사용하지 않습니다. [별도 FastAPI 흐름 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 `tests/fixtures/codeql_flow`에서 여러 파일 흐름과 차단 함수를 검증하는 테스트 자료입니다. 공개 코드에 대한 실제 경고는 `security-extended`에서 생성합니다. 이 규칙군은 기본 쿼리보다 낮은 정밀도의 쿼리도 포함하므로 결과를 사람이 검토해야 합니다.
 

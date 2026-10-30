@@ -4,19 +4,20 @@
 
 ## 1. 작성자 회귀 사례
 
-[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다.
+[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 및 Docker Compose 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다. Compose 정책의 선언 한정 범위와 직접 대조 결과는 [전용 증거](evidence/compose-iac-2026-10-30.md)에 있습니다.
 
-- 입력 SHA-256: `682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152`
-- 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30; 잠금 파일이 없어 OSV는 이 자료에서 미채점
-- 결과: 사례 14/14, 라벨 42/42 채점, 라벨 밖 finding 0건, 흐름 경로 4/4 확인
-- 합계: TP 26, FP 1, FN 1; 정밀도·재현율·F1 모두 26/27 = 0.963
-- 총 경과: 136,905 ms. 엔진별 누적 시간은 해당 엔진이 적격인 사례의 실행 시간 합계이며 총 경과와 정확히 같을 필요는 없습니다.
+- 입력 SHA-256: `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`
+- 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30, `compose-policy` 2026.10.30.1; 잠금 파일이 없어 OSV는 이 자료에서 미채점
+- 결과: 사례 25/25, 라벨 152/152 채점, 라벨 밖 finding 0건, 흐름 경로 4/4 확인
+- 합계: TP 37, FP 1, FN 1; 정밀도·재현율·F1 모두 37/38 ≈ 0.974
+- 총 경과: 166,237 ms. 엔진별 누적 시간은 해당 엔진이 적격인 사례의 실행 시간 합계이며 총 경과와 정확히 같을 필요는 없습니다.
 
 | 엔진 | TP | FP | FN | 엔진 누적 시간 |
 | --- | ---: | ---: | ---: | ---: |
-| Opengrep | 13 | 1 | 1 | 115,205 ms |
-| Gitleaks | 1 | 0 | 0 | 7,122 ms |
-| Checkov | 12 | 0 | 0 | 14,304 ms |
+| Opengrep | 13 | 1 | 1 | 130,910 ms |
+| Gitleaks | 1 | 0 | 0 | 17,672 ms |
+| Checkov | 12 | 0 | 0 | 17,071 ms |
+| Compose 정책 | 11 | 0 | 0 | 11 ms |
 
 동봉한 벤더 SQL 패턴 규칙은 외부 입력으로 만든 f-string 쿼리 한 건을 놓쳤습니다. 별도 웹 입력 taint 규칙은 평가에서 라벨을 붙인 다른 SQL 흐름을 탐지했습니다. 개별 규칙의 분모·시간·누락과 각 실행의 파일 범위는 `build/evidence/multiengine-scanner.json` 및 `.md`에 생성됩니다. 이 사례들은 작성자가 만들었으므로 회귀 평가이지 임의 저장소의 탐지율 추정이 아닙니다. 과거 8개 자체 규칙의 120건 결과는 [역사적 증거](evidence/expanded-scanner-2026-10-27.md)로만 보존하며 현재 수치와 합치지 않습니다.
 
@@ -26,7 +27,7 @@ CI는 [고정 도구 이미지](../Dockerfile)를 빌드한 다음, 네트워크
 python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_cases.json --staging-dir /tmp/secragraph --require-complete --require-traces
 ```
 
-`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 호스트에서 직접 명령을 실행하려면 같은 세 도구가 PATH에 있어야 합니다.
+`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 이어서 `scripts.check_compose_evidence`가 같은 JSON을 실제 manifest와 대조해 Compose 사례의 완료 범위, 규칙별 양성·음성 평가, 새 미평가 finding, FP/FN을 확인합니다. 호스트에서 직접 전체 평가 명령을 실행하려면 Opengrep·Gitleaks·Checkov가 PATH에 있어야 합니다. Compose 정책에는 별도 실행 파일이 필요하지 않습니다.
 
 ## 2. 독립 라벨 코퍼스
 

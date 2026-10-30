@@ -21,6 +21,7 @@ from time import monotonic
 from typing import Any
 
 from security_review.domain.models import Confidence, Finding, Severity
+from security_review.scanner.compose_files import is_compose_file
 from security_review.scanner.external_common import (
     ExternalExecution,
     ExternalScanResult,
@@ -31,6 +32,8 @@ _MAX_REPORT_BYTES = 32_000_000
 _MAX_FINDINGS = 2_000
 _MAX_CHECKOV_RECORDS = 20_000
 _MAX_CHECKS = 1_000
+_MAX_STAGED_FILES = 500
+_MAX_STAGED_BYTES = 20_000_000
 _RULE_ID = re.compile(r"[A-Za-z0-9_.:-]{1,100}\Z")
 _VERSION = re.compile(r"\b\d+\.\d+(?:\.\d+)?(?:[-+][A-Za-z0-9.]+)?\b")
 _GITLEAKS_TEMPLATE = (
@@ -46,6 +49,10 @@ class _UnsafeSnapshot(ValueError):
 
 
 class _InvalidReport(ValueError):
+    pass
+
+
+class _StagingTimeout(ValueError):
     pass
 
 
@@ -417,7 +424,7 @@ _CONFIG_FILENAMES = {"dockerfile", "containerfile"}
 def _config_candidate(path: str) -> bool:
     pure = PurePosixPath(path)
     name = pure.name.lower()
-    if name in {".checkov.yaml", ".checkov.yml"}:
+    if name in {".checkov.yaml", ".checkov.yml"} or is_compose_file(path):
         return False
     return (
         pure.suffix.lower() in _CONFIG_EXTENSIONS
@@ -444,6 +451,85 @@ def _frameworks(files: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted(selected))
 
 
+def _stage_checkov_input(
+    root: Path, staged_root: Path, eligible: tuple[str, ...], deadline: float
+) -> None:
+    """Copy verified eligible files into a bounded tree inaccessible to target controls."""
+
+    if len(eligible) > _MAX_STAGED_FILES:
+        raise _UnsafeSnapshot("input_limit_exceeded")
+    try:
+        resolved_root = root.resolve(strict=True)
+        staged_root.mkdir()
+        total_bytes = 0
+        for relative in eligible:
+            if monotonic() >= deadline:
+                raise _StagingTimeout
+            pure = PurePosixPath(relative)
+            source = root.joinpath(*pure.parts)
+            ancestor = root
+            for part in pure.parts[:-1]:
+                ancestor /= part
+                if _is_link_like(ancestor):
+                    raise _UnsafeSnapshot("snapshot_contains_link")
+            if _is_link_like(source) or not source.is_file():
+                raise _UnsafeSnapshot("snapshot_contains_link")
+            before = source.stat(follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode):
+                raise _UnsafeSnapshot("snapshot_contains_link")
+            try:
+                source.resolve(strict=True).relative_to(resolved_root)
+            except ValueError as error:
+                raise _UnsafeSnapshot("snapshot_contains_link") from error
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(source, flags)
+            try:
+                opened = os.fstat(descriptor)
+                if not stat.S_ISREG(opened.st_mode) or (
+                    opened.st_dev,
+                    opened.st_ino,
+                    opened.st_size,
+                    opened.st_mtime_ns,
+                ) != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+                    raise _UnsafeSnapshot("snapshot_changed")
+                if opened.st_size + total_bytes > _MAX_STAGED_BYTES:
+                    raise _UnsafeSnapshot("input_limit_exceeded")
+                with os.fdopen(descriptor, "rb", closefd=False) as source_file:
+                    payload = source_file.read(opened.st_size + 1)
+                after_open = os.fstat(descriptor)
+                after_path = source.stat(follow_symlinks=False)
+                if (
+                    len(payload) != opened.st_size
+                    or (
+                        after_open.st_dev,
+                        after_open.st_ino,
+                        after_open.st_size,
+                        after_open.st_mtime_ns,
+                    )
+                    != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
+                    or (after_path.st_dev, after_path.st_ino) != (opened.st_dev, opened.st_ino)
+                ):
+                    raise _UnsafeSnapshot("snapshot_changed")
+            finally:
+                os.close(descriptor)
+            if b"\x00" in payload:
+                raise _UnsafeSnapshot("invalid_snapshot")
+            try:
+                payload.decode("utf-8")
+            except UnicodeDecodeError as error:
+                raise _UnsafeSnapshot("invalid_snapshot") from error
+            if monotonic() >= deadline:
+                raise _StagingTimeout
+            destination = staged_root.joinpath(*pure.parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(payload)
+            total_bytes += len(payload)
+            if monotonic() >= deadline:
+                raise _StagingTimeout
+    except OSError as error:
+        raise _UnsafeSnapshot("invalid_snapshot") from error
+
+
 @dataclass(frozen=True, slots=True)
 class CheckovAdapter:
     """Evaluate built-in static IaC policies without network or custom checks."""
@@ -458,6 +544,7 @@ class CheckovAdapter:
             return _result("checkov", started, status="error", warnings=(str(error),))
         root = root.absolute()
         eligible = tuple(path for path in all_files if _config_candidate(path))
+        eligible_set = frozenset(eligible)
         skipped = tuple(
             (
                 path,
@@ -466,7 +553,7 @@ class CheckovAdapter:
                 else "unsupported_format",
             )
             for path in all_files
-            if path not in eligible
+            if path not in eligible_set
         )
         if not eligible:
             return _result(
@@ -502,6 +589,27 @@ class CheckovAdapter:
             work_dir = Path(temporary)
             config = work_dir / "trusted.yaml"
             config.write_text("{}\n", encoding="utf-8")
+            staged_root = work_dir / "input"
+            try:
+                _stage_checkov_input(root, staged_root, eligible, deadline)
+            except _StagingTimeout:
+                return _result(
+                    "checkov",
+                    started,
+                    status="partial",
+                    eligible_files=eligible,
+                    skipped=skipped,
+                    warnings=("scanner_timeout",),
+                )
+            except _UnsafeSnapshot as error:
+                return _result(
+                    "checkov",
+                    started,
+                    status="error",
+                    eligible_files=eligible,
+                    skipped=skipped,
+                    warnings=(str(error),),
+                )
             version = _probe_version(binary, max(0.0, deadline - monotonic()), work_dir)
             remaining = deadline - monotonic()
             if remaining <= 0:
@@ -517,7 +625,7 @@ class CheckovAdapter:
             command = [
                 binary,
                 "--directory",
-                str(root),
+                str(staged_root),
                 "--config-file",
                 str(config),
                 "--framework",
@@ -577,7 +685,7 @@ class CheckovAdapter:
                 )
             try:
                 findings, inspected, checks, parsing_errors, skipped_checks = _parse_checkov(
-                    payload, root, frozenset(eligible), frozenset(_frameworks(eligible))
+                    payload, staged_root, eligible_set, frozenset(_frameworks(eligible))
                 )
             except _InvalidReport as error:
                 return _result(

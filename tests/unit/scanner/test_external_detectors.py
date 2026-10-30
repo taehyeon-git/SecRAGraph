@@ -161,6 +161,9 @@ def test_checkov_normalizes_failures_without_returning_source_snippets(
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         if "--version" in args:
             return subprocess.CompletedProcess(args, 0, stdout=b"3.3.30\n")
+        staged_root = Path(args[args.index("--directory") + 1])
+        assert staged_root != tmp_path
+        assert (staged_root / "main.tf").read_text(encoding="utf-8").startswith("# ")
         assert "--config-file" in args
         trusted_config = Path(args[args.index("--config-file") + 1])
         assert trusted_config.parent != tmp_path
@@ -183,7 +186,7 @@ def test_checkov_normalizes_failures_without_returning_source_snippets(
                     {
                         "check_id": "CKV_AWS_18",
                         "file_path": "/main.tf",
-                        "file_abs_path": str(tmp_path / "main.tf"),
+                        "file_abs_path": str(staged_root / "main.tf"),
                         "file_line_range": [2, 2],
                         "resource": "aws_s3_bucket.x",
                         "severity": "HIGH",
@@ -213,6 +216,221 @@ def test_checkov_normalizes_failures_without_returning_source_snippets(
     assert result.findings[0].file_path == "main.tf"
     assert canary not in str(result)
     assert canary not in result.findings[0].model_dump_json()
+
+
+def test_checkov_stages_only_verified_non_compose_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "infra").mkdir()
+    (source / "infra" / "main.tf").write_text("resource {}", encoding="utf-8")
+    (source / "docker-compose.override.yaml").write_text(
+        "services:\n  web:\n    privileged: true\n", encoding="utf-8"
+    )
+    (source / ".checkov.yaml").write_text("external-checks-git: hostile", encoding="utf-8")
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if "--version" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=b"3.3.30\n")
+        staged_root = Path(args[args.index("--directory") + 1])
+        assert staged_root != source
+        assert staged_root.parent.name.startswith("secragraph-checkov-")
+        assert (staged_root / "infra" / "main.tf").read_text(encoding="utf-8") == "resource {}"
+        assert tuple(
+            sorted(path.relative_to(staged_root).as_posix() for path in staged_root.rglob("*"))
+        ) == (
+            "infra",
+            "infra/main.tf",
+        )
+        payload = {
+            "check_type": "terraform",
+            "results": {
+                "failed_checks": [
+                    {
+                        "check_id": "CKV_AWS_18",
+                        "file_path": "/infra/main.tf",
+                        "file_abs_path": str(staged_root / "infra" / "main.tf"),
+                        "file_line_range": [1, 1],
+                    }
+                ],
+                "passed_checks": [],
+                "skipped_checks": [],
+                "parsing_errors": [],
+            },
+            "summary": {"passed": 0, "failed": 1, "skipped": 0, "parsing_errors": 0},
+        }
+        kwargs["stdout"].write(json.dumps(payload).encode("utf-8"))
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", fake_run)
+    result = CheckovAdapter().scan_snapshot(source, timeout=5)
+
+    assert result.execution.status == "completed"
+    assert result.execution.eligible_files == ("infra/main.tf",)
+    assert result.execution.inspected_files == ("infra/main.tf",)
+    assert result.findings[0].file_path == "infra/main.tf"
+    assert ("docker-compose.override.yaml", "unsupported_format") in result.execution.skipped
+    assert (".checkov.yaml", "scanner_control_file") in result.execution.skipped
+
+
+@pytest.mark.parametrize("reported_path", ["original", "compose"])
+def test_checkov_rejects_paths_not_present_in_staged_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reported_path: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "main.tf").write_text("resource {}", encoding="utf-8")
+    (source / "docker-compose.override.yaml").write_text("services: {}\n", encoding="utf-8")
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+
+    def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        if "--version" in args:
+            return subprocess.CompletedProcess(args, 0, stdout=b"3.3.30\n")
+        staged_root = Path(args[args.index("--directory") + 1])
+        unsafe_path = (
+            source / "main.tf"
+            if reported_path == "original"
+            else staged_root / "docker-compose.override.yaml"
+        )
+        payload = {
+            "check_type": "terraform",
+            "results": {
+                "failed_checks": [
+                    {
+                        "check_id": "CKV_AWS_18",
+                        "file_path": "/main.tf",
+                        "file_abs_path": str(unsafe_path),
+                        "file_line_range": [1, 1],
+                    }
+                ],
+                "passed_checks": [],
+                "skipped_checks": [],
+                "parsing_errors": [],
+            },
+            "summary": {"passed": 0, "failed": 1, "skipped": 0, "parsing_errors": 0},
+        }
+        kwargs["stdout"].write(json.dumps(payload).encode("utf-8"))
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", fake_run)
+    result = CheckovAdapter().scan_snapshot(source, timeout=5)
+
+    assert result.execution.status == "error"
+    assert result.execution.warnings == ("unsafe_report_path",)
+    assert result.findings == ()
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "limit_value"),
+    [("_MAX_STAGED_FILES", 1), ("_MAX_STAGED_BYTES", 10)],
+)
+def test_checkov_rejects_staging_over_resource_limit_before_invoking_scanner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+    limit_value: int,
+) -> None:
+    (tmp_path / "first.tf").write_text("resource {}", encoding="utf-8")
+    (tmp_path / "second.tf").write_text("resource {}", encoding="utf-8")
+    monkeypatch.setattr(external_detectors, limit_name, limit_value, raising=False)
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+
+    def no_scanner(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Checkov must not start after staging exceeds a limit")
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", no_scanner)
+    result = CheckovAdapter().scan_snapshot(tmp_path, timeout=5)
+
+    assert result.execution.status == "error"
+    assert result.execution.warnings == ("input_limit_exceeded",)
+    assert result.execution.inspected_files == ()
+
+
+def test_checkov_rejects_file_swapped_between_validation_and_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "main.tf"
+    source.write_text("resource {}", encoding="utf-8")
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+    original_open = external_detectors.os.open
+    swapped = False
+
+    def swap_before_open(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        nonlocal swapped
+        if Path(path) == source and not swapped:
+            swapped = True
+            source.unlink()
+            source.write_text("changed resource {}", encoding="utf-8")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(external_detectors.os, "open", swap_before_open)
+
+    def no_scanner(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Checkov must not scan a file changed during staging")
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", no_scanner)
+    result = CheckovAdapter().scan_snapshot(tmp_path, timeout=5)
+
+    assert swapped
+    assert result.execution.status == "error"
+    assert result.execution.warnings == ("snapshot_changed",)
+
+
+@pytest.mark.parametrize("failure_path", ["root", "source"])
+def test_checkov_reports_staging_path_resolution_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_path: str
+) -> None:
+    source = tmp_path / "main.tf"
+    source.write_text("resource {}", encoding="utf-8")
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+    original_resolve = Path.resolve
+    affected = tmp_path if failure_path == "root" else source
+
+    def fail_resolution(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == affected and kwargs.get("strict") is True:
+            raise PermissionError("simulated inaccessible path")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", fail_resolution)
+
+    def no_scanner(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Checkov must not start if staging cannot verify an input path")
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", no_scanner)
+    result = CheckovAdapter().scan_snapshot(tmp_path, timeout=5)
+
+    assert result.execution.status == "error"
+    assert result.execution.warnings == ("invalid_snapshot",)
+
+
+def test_checkov_counts_staging_against_its_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "main.tf"
+    source.write_text("resource {}", encoding="utf-8")
+    monkeypatch.setattr(external_detectors.shutil, "which", lambda _binary: "checkov")
+    now = [100.0]
+    monkeypatch.setattr(external_detectors, "monotonic", lambda: now[0])
+    original_open = external_detectors.os.open
+
+    def finish_after_deadline(path: object, flags: int, *args: object, **kwargs: object) -> int:
+        if Path(path) == source:
+            now[0] = 106.0
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(external_detectors.os, "open", finish_after_deadline)
+
+    def no_scanner(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Checkov must not start after staging consumes its deadline")
+
+    monkeypatch.setattr(external_detectors.subprocess, "run", no_scanner)
+    result = CheckovAdapter().scan_snapshot(tmp_path, timeout=5)
+
+    assert result.execution.status == "partial"
+    assert result.execution.warnings == ("scanner_timeout",)
+    assert result.execution.inspected_files == ()
 
 
 def test_checkov_parse_errors_are_partial_coverage(

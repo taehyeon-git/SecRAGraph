@@ -188,6 +188,215 @@
         {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_positive.py", "expected_lines": [6], "expected_trace": {"source_file": "flask_header_sql_positive.py", "source_line": 5, "sink_file": "flask_header_sql_positive.py", "sink_line": 6, "required_steps": [{"file": "flask_header_sql_positive.py", "line": 5}]}},
         {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_safe.py", "expected_lines": []}
       ]
+    },
+    {
+      "case_id": "compose-privileged",
+      "cwe_ids": ["CWE-250"],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    privileged: true\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-host-network",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    network_mode: host\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-host-pid",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    pid: host\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-host-ipc",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    ipc: host\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-cap-add-dangerous",
+      "cwe_ids": ["CWE-250"],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    cap_add: [SYS_ADMIN]\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-unconfined-profile",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    security_opt: [\"seccomp=unconfined\"]\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-docker-socket",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    volumes: [\"/var/run/docker.sock:/var/run/docker.sock:ro\"]\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-host-root-mount",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    volumes: [{type: bind, source: /, target: /host}]\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": [3]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-explicit-root-user",
+      "cwe_ids": ["CWE-250"],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  root-name:\n    user: \"root:ops\"\n  root-number:\n    user: \"0:ops\"\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": [3,5]},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "compose-provider",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    provider: {type: sample}\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": [3]}
+      ]
+    },
+    {
+      "case_id": "compose-benign",
+      "cwe_ids": [],
+      "files": [
+        {"path": "compose.yaml", "source": "services:\n  app:\n    image: alpine:3.20\n    privileged: false\n    network_mode: bridge\n    cap_add: [NET_BIND_SERVICE]\n    security_opt: [\"no-new-privileges:true\"]\n    volumes: [\"cache:/data\", \"./project:/app\"]\n    user: \"1000:1000\"\n"}
+      ],
+      "assessments": [
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PRIVILEGED", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_NETWORK", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_PID", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_IPC", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/CAP_ADD_DANGEROUS", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/UNCONFINED_PROFILE", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/DOCKER_SOCKET", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
+        {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
     }
   ]
 }

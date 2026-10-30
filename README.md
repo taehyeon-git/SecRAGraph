@@ -32,7 +32,7 @@ uv run --frozen python -m scripts.local_up
 
 이 명령 하나가 공식 CWE 초기 자료와 RAG 평가, Compose 이미지, DB 마이그레이션, 서비스 준비와 최초 회원 생성을 진행합니다. 실제 finding이나 새 질문에 다른 CWE가 필요하면 그 항목을 추가로 확인합니다. 준비 후 `http://127.0.0.1:8501`에서 로그인하거나 `http://127.0.0.1:8000/docs`에서 API 계약을 확인할 수 있습니다. 두 서비스는 로컬 루프백에만 열립니다. 재실행·종료·복구는 [운영 문서](docs/operations.md)에 있습니다.
 
-CLI도 같은 스캔 경로를 사용합니다. 호스트에서 직접 실행할 때는 Opengrep·Gitleaks·Checkov 바이너리를 별도로 준비해야 하며, 없는 엔진은 보고서에서 `not_run`으로 표시됩니다.
+CLI도 같은 스캔 경로를 사용합니다. 호스트에서 직접 실행할 때는 Opengrep·Gitleaks·Checkov 바이너리를 별도로 준비해야 하며, 없는 엔진은 보고서에서 `not_run`으로 표시됩니다. Docker Compose 정책 검사는 별도 실행 파일 없이 동일한 스냅샷을 읽습니다.
 
 ```powershell
 uv run security-review scan examples/insecure/sample.py --format markdown
@@ -60,6 +60,7 @@ flowchart LR
   TRIVY --> SBOM["CycloneDX SBOM"]
   TRIVY --> SCAN
   SNAP --> CONFIG["Checkov 설정 검사"]
+  SNAP --> COMPOSEPOLICY["Docker Compose 선언 정책"]
   SCAN --> OSV["잠금 파일 → OSV.dev"]
   SCAN --> CWE["Finding CWE → MITRE"]
   SCAN --> EVIDENCE["Qdrant 문서 근거 · 선택"]
@@ -69,6 +70,7 @@ flowchart LR
   HISTSECRET --> REPORT
   TRIVY --> REPORT
   CONFIG --> REPORT
+  COMPOSEPOLICY --> REPORT
   OSV --> REPORT
   CWE --> REPORT
   EVIDENCE --> REPORT
@@ -85,7 +87,7 @@ flowchart LR
 | **소스 SAST** | Opengrep 1.32.0, [출처·해시가 고정된 MIT 규칙 79개](data/engines/opengrep/README.md), [프로젝트 taint 규칙 3개](data/engines/secragraph-taint/README.md). Python·JavaScript/TypeScript의 규칙 패턴과 웹 입력→명령 실행/SQL 쿼리 흐름을 같은 파일의 함수 사이까지 검사합니다. |
 | **비밀정보** | Gitleaks 8.30.1. `.env.local`, `.npmrc`, 키 파일을 포함한 허용 텍스트에서 비밀 유사 값을 검사하고 값을 가립니다. |
 | **Git 이력 비밀정보** | 신뢰된 로컬/CI 체크아웃의 선택된 커밋을 Gitleaks 8.30.1 Git 모드로 검사합니다. 보고서에는 비밀 원문 대신 과거 커밋 SHA·파일·줄과 선택 범위·커밋 수를 기록합니다. |
-| **설정 오류** | Checkov 3.3.30. 지원 Terraform·구성 파일을 검사하며 [간접 의존성도 해시로 고정](infra/scanners/checkov-requirements.txt)합니다. |
+| **설정 오류** | Checkov 3.3.30이 지원 Terraform·Dockerfile·Kubernetes 등 구성 파일을 검사하며 [간접 의존성도 해시로 고정](infra/scanners/checkov-requirements.txt)합니다. 별도 `compose-policy`는 Docker Compose의 명시적 고위험 설정 10종을 검사합니다. Compose 파일은 Checkov 검사 범위에서 제외하고 전용 엔진의 실행 기록에 표시합니다. [규칙·검증·한계](docs/evidence/compose-iac-2026-10-30.md)를 참고하세요. |
 | **패키지 권고** | `uv.lock`·npm `package-lock.json`의 정확한 버전을 OSV.dev에서 확인합니다. 코드나 잠금 파일 원문은 전송하지 않습니다. |
 | **컨테이너 이미지·SBOM** | CI가 빌드한 `linux/amd64` 런타임 이미지 tar의 OS·언어 패키지와 이미지 설정을 Trivy 0.76.1로 검사하고, 같은 tar의 CycloneDX SBOM을 생성합니다. JSON·Markdown·SARIF에는 이미지의 논리적 위치와 이미지/DB 신원을 기록합니다. [설계·범위](docs/design/container-image-sbom.md)를 참고하세요. |
 | **테스트 API DAST** | `io.secragraph.dast.disposable=true`가 붙은 실행 중인 Docker 컨테이너만 ZAP의 패시브 검사 모드로 확인합니다. 호스트 게이트웨이가 없는 내부 전용 네트워크에서 인증된 API 요청과 응답 보안 헤더를 검사하고 HTTP 경로를 별도 위치로 보고합니다. [격리 데모와 검증 절차](docs/demo.md#7-격리-테스트-api-dast)를 참고하세요. |
@@ -95,7 +97,7 @@ flowchart LR
 
 ## LangGraph 워크플로
 
-- **스캔:** 입력 검증 → 제한된 스냅샷 → SAST·비밀정보·설정 검사 → OSV 감사 → 실제 finding에 필요한 CWE 수집 → 근거 검색 → 위험도·보고서 생성. 외부 조회가 실패해도 확인한 finding과 범위 경고는 유지합니다.
+- **스캔:** 입력 검증 → 제한된 스냅샷 → SAST·비밀정보·Checkov·Docker Compose 선언 검사 → OSV 감사 → 실제 finding에 필요한 CWE 수집 → 근거 검색 → 위험도·보고서 생성. 외부 조회가 실패해도 확인한 finding과 범위 경고는 유지합니다.
 - **Git 이력 검사:** 신뢰된 체크아웃에서 범위·커밋 존재·완전한 이력을 확인 → Gitleaks의 비밀 없는 메타데이터만 정규화 → 같은 LangGraph 보고서 노드로 위험도·출력을 생성합니다. 과거 파일을 체크아웃하거나 실행하지 않습니다.
 - **이미지 검사:** CI가 만든 이미지의 ID로 tar 저장 → Trivy로 최종 이미지 패키지·설정 확인 → SBOM과 정규화된 finding을 같은 이미지 신원에 연결 → LangGraph 보고서 노드로 출력합니다. 이미지 tar는 회원 API에서 받지 않습니다.
 - **지식 질의:** 질문 분류 → 필요한 CWE 확인 → Qdrant 검색 → 근거 평가 → 질문 재작성·재검색 또는 인용 답변·보류. Text2SQL 질문은 별도 제한된 읽기 경로로 처리합니다.
@@ -117,7 +119,7 @@ flowchart LR
 
 ## 스캐너 평가
 
-현재 [다중 엔진 사례 manifest](data/evaluation/multiengine_cases.json)는 취약·정상 파일과 웹 입력의 함수 간 흐름을 함께 기록합니다. 고정 Docker 이미지에서 14/14 사례, 42/42 라벨을 평가해 **TP=26, FP=1, FN=1**이었습니다(정밀도·재현율·F1 각각 약 0.963). Flask 헤더 입력을 포함한 4개 taint 흐름의 source·중간 단계·sink 위치가 모두 확인됐고, 라벨 밖 finding은 0건이었습니다. 기존 패턴 규칙은 숫자 변환으로 안전해진 셸 인자를 한 번 잘못 경고했으며 SQL f-string 한 건을 놓쳤습니다. 입력 SHA-256은 `682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152`입니다. **이 수치는 작성자가 만든 회귀 사례의 결과이며 실제 저장소 탐지율이 아닙니다.** 규칙별 수치와 분모는 [고정 평가 증거](docs/evidence/multiengine-scanner-2026-10-27.md)에 있습니다.
+현재 [다중 엔진 사례 manifest](data/evaluation/multiengine_cases.json)는 취약·정상 파일, 웹 입력의 함수 간 흐름, Docker Compose 선언을 함께 기록합니다. [고정 CI 품질 작업](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41018714959/job/123940852364)에서 **25/25 사례, 152/152 라벨**을 평가해 **TP=37, FP=1, FN=1**이었습니다(정밀도·재현율·F1 각각 37/38 ≈ 0.974). 라벨 밖 finding은 0건이었고 Compose 전용 110개 평가는 TP=11, FP=0, FN=0으로 게이트를 통과했습니다. 기존 SAST에는 정상 셸 인자 오경보 1건과 SQL f-string 누락 1건이 남습니다. 입력 SHA-256은 `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`입니다. **작성자가 만든 회귀 사례의 결과이며 실제 저장소 탐지율이 아닙니다.** [기존 규칙별 증거](docs/evidence/multiengine-scanner-2026-10-27.md)와 [Compose 규칙·범위 증거](docs/evidence/compose-iac-2026-10-30.md)에 분모와 한계를 나누어 기록했습니다.
 
 별도 [OWASP BenchmarkPython 90개 사례](docs/evidence/multiengine-external-2026-10-27.md)는 넓은 CWE 단위로 **TP 27, FP 19, FN 9, TN 35**였고, 고정 [Starlette 저장소](docs/evidence/multiengine-external-2026-10-27.md#pinned-real-repository-workload)는 라벨이 없어 실행 범위·시간과 미판정 finding만 기록했습니다. 서로 다른 라벨·분모의 점수는 합산하지 않습니다. [평가 방법](docs/demo.md)을 참고하세요.
 
@@ -147,6 +149,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 - 회원 로그인과 보고서 소유권은 로컬 배포를 위한 기능입니다. 공개 서비스용 속도 제한·MFA·계정 복구가 없어 인터넷에 그대로 배포할 수 없습니다.
 - OSV 조회는 명시된 패키지 버전에 한정됩니다. 보고서의 파일 경로·대상 이름·인용 메타데이터는 민감할 수 있습니다. 모델 답변은 오류나 프롬프트 인젝션 영향을 받을 수 있고, 문서 근거의 품질은 수집 자료에 좌우됩니다. [위협 모델](docs/threat-model.md)에 신뢰 경계와 남은 위험을 기록했습니다.
 - 외부 검사기는 현재 API 컨테이너와 같은 네트워크 네임스페이스에서 실행됩니다. 프록시·다운로드 금지 설정을 완전한 네트워크 격리로 간주하지 않습니다.
+- Docker Compose 검사는 선언된 값만 읽습니다. 파일 병합·환경 변수 치환·외부 참조·실제 실행 상태를 확인하지 않으며, 해석할 수 없는 설정이나 같은 디렉터리의 여러 Compose 파일은 부분 검사로 표시합니다. 파일 내용이나 참조 파일을 실행·로드하지 않습니다.
 - 현재 DAST는 승인 표시가 있는 일회용 Docker 테스트 API의 GET/HEAD/OPTIONS OpenAPI 경로를 시작점으로 패시브 응답 검사를 보여줍니다. ZAP의 리디렉션은 격리 네트워크 안에서 다른 경로나 포트로 이어질 수 있으므로 보고서의 경로 목록은 모든 요청의 기록이나 정확한 경로 허용 목록이 아닙니다. 호스트 게이트웨이 없는 내부 네트워크를 확인하고 지원하지 않는 Docker 환경에서는 실패합니다. 임의 운영 URL이나 업로드한 코드를 실행하지 않으며 SQL 주입 같은 능동 취약점 검증을 주장하지 않습니다. DAST SARIF의 위치는 HTTP 경로이므로 GitHub Code Scanning의 소스 줄 주석으로 올리지 않습니다.
 - 이미지 검사는 이 저장소가 빌드한 런타임 이미지의 알려진 권고와 설정에 한정됩니다. Trivy의 취약점 기록은 실제 악용 가능성을 증명하지 않으며, 현재 이미지의 기존 HIGH·CRITICAL 항목은 해결 과제로 남아 있습니다. 기준선은 이를 감추지 않고 새 항목을 막기 위한 비교 자료입니다. 회원 업로드 이미지, 임의 레지스트리, 여러 아키텍처, 실행 중 컨테이너를 검사했다고 주장하지 않습니다. 이미지 SARIF는 논리적 패키지 위치이므로 소스 줄 주석으로 올리지 않습니다.
 
