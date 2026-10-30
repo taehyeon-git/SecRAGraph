@@ -112,8 +112,8 @@ def _route_path(value: object) -> str:
     return value
 
 
-def sanitize_openapi(raw: bytes, *, origin: str) -> SafeOpenAPI:
-    """Keep only bounded GET/HEAD/OPTIONS paths on the isolated target."""
+def sanitize_openapi(raw: bytes, *, origin: str, active: bool = False) -> SafeOpenAPI:
+    """Keep safe methods, or explicitly marked GET seeds for active scanning."""
 
     _origin(origin)
     if not raw or len(raw) > MAX_OPENAPI_BYTES:
@@ -141,12 +141,14 @@ def sanitize_openapi(raw: bytes, *, origin: str) -> SafeOpenAPI:
         safe_item: dict[str, Any] = {}
         if "parameters" in raw_item:
             safe_item["parameters"] = raw_item["parameters"]
-        for method in sorted(SAFE_METHODS):
+        for method in ("GET",) if active else sorted(SAFE_METHODS):
             operation = raw_item.get(method.lower())
             if operation is None:
                 continue
             if not isinstance(operation, dict):
                 raise DastInputError("invalid_openapi_operation")
+            if active and operation.get("x-secragraph-dast-active") is not True:
+                continue
             safe_item[method.lower()] = {
                 key: value
                 for key, value in operation.items()
@@ -158,7 +160,9 @@ def sanitize_openapi(raw: bytes, *, origin: str) -> SafeOpenAPI:
         if any(key.lower() in {"get", "head", "options"} for key in safe_item):
             safe_paths[path] = safe_item
     if not operations:
-        raise DastInputError("no_safe_openapi_operations")
+        raise DastInputError(
+            "no_active_openapi_operations" if active else "no_safe_openapi_operations"
+        )
     safe: dict[str, Any] = {
         "openapi": version,
         "info": info,
@@ -349,7 +353,7 @@ def parse_zap_report(
                     line_start=None,
                     http_method=method,
                     http_path=route,
-                    message=f"ZAP passive rule {raw_plugin} flagged this API operation.",
+                    message=f"ZAP rule {raw_plugin} flagged this API operation.",
                     redacted_evidence="[HTTP evidence omitted]",
                     confidence=(
                         Confidence.LOW,
@@ -359,7 +363,9 @@ def parse_zap_report(
                         Confidence.HIGH,
                     )[confidence],
                     cwe_ids=cwes,
-                    remediation=f"Review OWASP ZAP rule {raw_plugin} and harden the API response.",
+                    remediation=(
+                        f"Review OWASP ZAP rule {raw_plugin} and remediate this API behavior."
+                    ),
                     engine="zap",
                 )
                 findings[(raw_plugin, method, route)] = finding

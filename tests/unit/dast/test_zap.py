@@ -89,6 +89,26 @@ def test_sanitize_openapi_removes_mutations_and_overrides_external_server() -> N
     )
 
 
+def test_active_openapi_imports_only_explicitly_marked_get_routes() -> None:
+    schema = json.loads(_schema())
+    schema["paths"]["/public"]["get"]["x-secragraph-dast-active"] = True
+    schema["paths"]["/protected"]["get"]["x-secragraph-dast-active"] = "true"
+    schema["paths"]["/items/{item_id}"]["get"]["x-secragraph-dast-active"] = False
+    schema["paths"]["/public"]["head"] = {"x-secragraph-dast-active": True}
+
+    safe = sanitize_openapi(json.dumps(schema).encode(), origin=ORIGIN, active=True)
+    payload = json.loads(safe.document)
+
+    assert safe.eligible_endpoints == ("GET /public",)
+    assert list(payload["paths"]) == ["/public"]
+    assert list(payload["paths"]["/public"]) == ["get"]
+
+
+def test_active_openapi_requires_marked_get_route() -> None:
+    with pytest.raises(DastInputError, match="no_active_openapi_operations"):
+        sanitize_openapi(_schema(), origin=ORIGIN, active=True)
+
+
 @pytest.mark.parametrize(
     "payload",
     [

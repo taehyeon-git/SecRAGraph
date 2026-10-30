@@ -179,6 +179,7 @@ def scan_dast_container(
     openapi_path: str,
     *,
     auth_header_env: str | None = None,
+    active: bool = False,
 ) -> ScanReport:
     """Use the DAST service without loading Docker code for other CLI commands."""
 
@@ -189,6 +190,7 @@ def scan_dast_container(
         port,
         openapi_path,
         auth_header_env=auth_header_env,
+        active=active,
         cwe_evidence=_cwe_evidence_factory(),
     )
 
@@ -201,12 +203,16 @@ def dast(
     port: Annotated[int, typer.Option("--port", min=1, max=65535)] = 8000,
     openapi_path: Annotated[str, typer.Option("--openapi-path")] = "/openapi.json",
     auth_header_env: Annotated[str | None, typer.Option("--auth-header-env")] = None,
+    active: Annotated[
+        bool,
+        typer.Option("--active", help="Actively probe an expressly permitted disposable container"),
+    ] = False,
     report_format: Annotated[
         ReportFormat, typer.Option("--format", case_sensitive=False)
     ] = ReportFormat.MARKDOWN,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
 ) -> None:
-    """Passively inspect a disposable running test API through isolated ZAP."""
+    """Inspect a disposable test API with passive or explicit active ZAP."""
 
     try:
         report = scan_dast_container(
@@ -214,6 +220,7 @@ def dast(
             port,
             openapi_path,
             auth_header_env=auth_header_env,
+            active=active,
         )
     except ValueError as error:
         del error

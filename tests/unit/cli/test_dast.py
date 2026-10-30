@@ -21,7 +21,7 @@ def test_dast_command_renders_one_canonical_report(
         (),
         executions=(ScanExecution(engine="zap", kind="sast", status="completed", elapsed_ms=123),),
     )
-    calls: list[tuple[str, int, str, str | None]] = []
+    calls: list[tuple[str, int, str, str | None, bool]] = []
 
     def fake_scan(
         container: str,
@@ -29,8 +29,9 @@ def test_dast_command_renders_one_canonical_report(
         openapi_path: str,
         *,
         auth_header_env: str | None = None,
+        active: bool = False,
     ) -> object:
-        calls.append((container, port, openapi_path, auth_header_env))
+        calls.append((container, port, openapi_path, auth_header_env, active))
         return report
 
     monkeypatch.setattr(cli, "scan_dast_container", fake_scan)
@@ -55,7 +56,7 @@ def test_dast_command_renders_one_canonical_report(
     )
 
     assert result.exit_code == 0, result.output
-    assert calls == [("fixture-container", 8080, "/openapi.json", "TEST_DAST_TOKEN")]
+    assert calls == [("fixture-container", 8080, "/openapi.json", "TEST_DAST_TOKEN", False)]
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["scan_id"] == str(report.scan_id)
     assert payload["executions"][0]["engine"] == "zap"
@@ -70,6 +71,24 @@ def test_dast_command_hides_target_error_details(monkeypatch: pytest.MonkeyPatch
 
     assert result.exit_code == 2
     assert "hidden-test-token" not in result.output
+
+
+def test_dast_command_explicit_active_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    report = build_report(
+        "fixture",
+        (),
+        executions=(ScanExecution(engine="zap", kind="dast", status="completed", elapsed_ms=1),),
+    )
+    calls: list[bool] = []
+
+    def fake_scan(*args: object, active: bool = False, **kwargs: object) -> object:
+        calls.append(active)
+        return report
+
+    monkeypatch.setattr(cli, "scan_dast_container", fake_scan)
+    result = CliRunner().invoke(cli.app, ["dast", "a" * 64, "--active"])
+    assert result.exit_code == 0, result.output
+    assert calls == [True]
 
 
 def test_dast_command_writes_partial_report_then_exits_nonzero(
