@@ -23,7 +23,7 @@ ACTIVE_PATHS = (
     "/redirect-safe",
 )
 PASSIVE_PATHS = ("/public", "/protected", *ACTIVE_PATHS)
-BENCHMARK_SHA = "32ecbfb19e6eabd27d9988d71fdb60058740fa44f4d3cb69cdc1c2c0a0d2fdff"
+BENCHMARK_SHA = "5ebdae87db7af9c06637beb7d6ef581853445b633901a3b1e792b317323cc2b7"
 
 
 def test_reviewed_manifest_digest_matches_file() -> None:
@@ -33,14 +33,27 @@ def test_reviewed_manifest_digest_matches_file() -> None:
     assert run_dast_evidence._BENCHMARK_SHA == BENCHMARK_SHA
 
 
-def _benchmark_result(*, sqli_tp: int = 1, sqli_fp: int = 0) -> Any:
+def _benchmark_result(
+    *, sqli_tp: int = 1, sqli_fp: int = 0, diff_tp: int = 1, diff_fp: int = 0
+) -> Any:
     header = SimpleNamespace(tp=1, fp=0, fn=0, tn=1)
     redirect = SimpleNamespace(tp=1, fp=0, fn=0, tn=1)
-    sqli = SimpleNamespace(tp=sqli_tp, fp=sqli_fp, fn=2 - sqli_tp, tn=2 - sqli_fp)
+    sqli = SimpleNamespace(tp=sqli_tp, fp=sqli_fp, fn=1 - sqli_tp, tn=1 - sqli_fp)
+    differential = SimpleNamespace(tp=diff_tp, fp=diff_fp, fn=1 - diff_tp, tn=1 - diff_fp)
     return SimpleNamespace(
         manifest_sha256=BENCHMARK_SHA,
-        metrics=SimpleNamespace(tp=2 + sqli_tp, fp=sqli_fp, fn=2 - sqli_tp, tn=4 - sqli_fp),
-        rules=(("ZAP/10021", header), ("ZAP/20019", redirect), ("ZAP/40018", sqli)),
+        metrics=SimpleNamespace(
+            tp=2 + sqli_tp + diff_tp,
+            fp=sqli_fp + diff_fp,
+            fn=2 - sqli_tp - diff_tp,
+            tn=4 - sqli_fp - diff_fp,
+        ),
+        rules=(
+            ("DIFF/NUMERIC_SQLI", differential),
+            ("ZAP/10021", header),
+            ("ZAP/20019", redirect),
+            ("ZAP/40018", sqli),
+        ),
     )
 
 
@@ -319,7 +332,15 @@ def test_benchmark_refusal_leaves_no_artifacts_after_cleanup(
     assert not list(tmp_path.glob("dast*"))
 
 
-@pytest.mark.parametrize("result", [_benchmark_result(sqli_tp=0), _benchmark_result(sqli_fp=1)])
+@pytest.mark.parametrize(
+    "result",
+    [
+        _benchmark_result(sqli_tp=0),
+        _benchmark_result(sqli_fp=1),
+        _benchmark_result(diff_tp=0),
+        _benchmark_result(diff_fp=1),
+    ],
+)
 def test_benchmark_regression_fails_after_cleanup_without_publishing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, result: Any
 ) -> None:
@@ -343,6 +364,14 @@ def test_benchmark_manifest_change_requires_new_review(
     with pytest.raises(RuntimeError, match="benchmark_manifest_unreviewed"):
         run_dast_evidence.run_evidence(tmp_path)
     assert not list(tmp_path.glob("dast*"))
+
+
+def test_benchmark_floor_requires_zero_total_false_negatives() -> None:
+    result = _benchmark_result()
+    result.metrics.fn = 1
+
+    with pytest.raises(RuntimeError, match="benchmark_regression"):
+        run_dast_evidence._require_benchmark_floor(_manifest(), result)
 
 
 def test_stats_phases_and_identity_reach_benchmark(

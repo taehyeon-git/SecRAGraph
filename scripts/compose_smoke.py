@@ -26,6 +26,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 _SYNTHETIC_MARKER = "S3cr3t-" + "X9a2Q7b5R8c1"
 _EXPECTED_ENGINES = {
     "opengrep": ("sast", "app.py"),
+    "python-flow": ("sast", "app.py"),
     "gitleaks": ("secret", "secret.env"),
     "checkov": ("configuration", "bucket.tf"),
     "compose-policy": ("configuration", "compose.yaml"),

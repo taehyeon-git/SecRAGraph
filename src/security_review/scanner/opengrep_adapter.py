@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import math
 import os
@@ -25,6 +26,8 @@ from security_review.scanner.external_common import (
 _SOURCE_EXTENSIONS = frozenset({".py", ".js", ".jsx", ".ts", ".tsx"})
 _MAX_OUTPUT_BYTES = 32_000_000
 _MAX_RESULTS = 2_000
+_MAX_NUMERIC_AST_SOURCE_BYTES = 100_000
+_MAX_NUMERIC_AST_NODES = 10_000
 _RULE_ID = re.compile(r"[A-Za-z0-9_.-]{1,180}\Z")
 _CWE_ID = re.compile(r"CWE-[1-9][0-9]{0,5}\Z")
 _VERSION = re.compile(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?\Z")
@@ -183,6 +186,143 @@ def _taint_trace(raw: object, root: Path, eligible: set[str]) -> tuple[TraceLoca
     return (source, *steps, sink)
 
 
+def _int_may_be_shadowed(tree: ast.AST) -> bool:
+    """Refuse numeric suppression if the file can redefine the builtin name."""
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if node.id == "__builtins__":
+                return True
+            if node.id == "int" and isinstance(node.ctx, (ast.Store, ast.Del)):
+                return True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == "int":
+                return True
+        elif isinstance(node, ast.arg) and node.arg == "int":
+            return True
+        elif isinstance(node, ast.alias):
+            if node.name in {"*", "builtins", "int"} or node.asname == "int":
+                return True
+        elif isinstance(node, ast.Attribute) and node.attr == "int":
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                return True
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and "int" in node.names:
+            return True
+        elif isinstance(node, ast.ExceptHandler) and node.name == "int":
+            return True
+        elif isinstance(node, ast.MatchAs) and node.name == "int":
+            return True
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in {"exec", "eval", "setattr", "delattr", "globals", "locals"}:
+                return True
+    return False
+
+
+def _shell_true_call(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and any(
+            keyword.arg == "shell"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in node.keywords
+        )
+    )
+
+
+def _numeric_shell_lines_unchecked(root: Path, file_path: str) -> frozenset[int]:
+    """Prove only adjacent builtin-int assignments feed a shell f-string."""
+
+    path = root / file_path
+    try:
+        if _is_link_like(path) or path.stat().st_size > _MAX_NUMERIC_AST_SOURCE_BYTES:
+            return frozenset()
+        body = path.read_bytes()
+        if len(body) > _MAX_NUMERIC_AST_SOURCE_BYTES:
+            return frozenset()
+        tree = ast.parse(body, filename=file_path)
+    except (OSError, SyntaxError, UnicodeError, ValueError):
+        return frozenset()
+    for count, _ in enumerate(ast.walk(tree), start=1):
+        if count > _MAX_NUMERIC_AST_NODES:
+            return frozenset()
+    if _int_may_be_shadowed(tree):
+        return frozenset()
+
+    subprocess_calls: dict[int, int] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "subprocess"
+        ):
+            subprocess_calls[node.lineno] = subprocess_calls.get(node.lineno, 0) + 1
+
+    proven: set[int] = set()
+    for parent in ast.walk(tree):
+        for _, value in ast.iter_fields(parent):
+            if (
+                not isinstance(value, list)
+                or not value
+                or not all(isinstance(item, ast.stmt) for item in value)
+            ):
+                continue
+            for index, statement in enumerate(value):
+                if (
+                    not isinstance(statement, ast.Expr)
+                    or not isinstance(statement.value, ast.Call)
+                    or not _shell_true_call(statement.value)
+                ):
+                    continue
+                call = statement.value
+                if subprocess_calls.get(call.lineno) != 1 or not call.args:
+                    continue
+                command = call.args[0]
+                if not isinstance(command, ast.JoinedStr):
+                    continue
+                holes = [item for item in command.values if isinstance(item, ast.FormattedValue)]
+                if not holes or any(
+                    not isinstance(hole.value, ast.Name)
+                    or hole.format_spec is not None
+                    or hole.conversion != -1
+                    for hole in holes
+                ):
+                    continue
+                names = {hole.value.id for hole in holes if isinstance(hole.value, ast.Name)}
+                assignments = value[index - len(names) : index]
+                if len(assignments) != len(names) or index < len(names):
+                    continue
+                assigned: set[str] = set()
+                for assignment in assignments:
+                    if (
+                        not isinstance(assignment, ast.Assign)
+                        or len(assignment.targets) != 1
+                        or not isinstance(assignment.targets[0], ast.Name)
+                        or not isinstance(assignment.value, ast.Call)
+                        or not isinstance(assignment.value.func, ast.Name)
+                        or assignment.value.func.id != "int"
+                        or len(assignment.value.args) != 1
+                        or assignment.value.keywords
+                    ):
+                        break
+                    assigned.add(assignment.targets[0].id)
+                else:
+                    if assigned == names:
+                        proven.add(call.lineno)
+    return frozenset(proven)
+
+
+def _numeric_shell_lines(root: Path, file_path: str) -> frozenset[int]:
+    try:
+        return _numeric_shell_lines_unchecked(root, file_path)
+    except (RecursionError, MemoryError):
+        return frozenset()
+
+
 def _normalize_report(
     payload: object, root: Path, eligible_files: tuple[str, ...]
 ) -> tuple[tuple[Finding, ...], tuple[str, ...], bool]:
@@ -207,6 +347,7 @@ def _normalize_report(
     if not isinstance(skipped, list):
         raise _UnsafeReport("invalid_report")
     findings: list[Finding] = []
+    numeric_lines_cache: dict[str, frozenset[int]] = {}
     for item in results:
         if not isinstance(item, dict):
             raise _UnsafeReport("invalid_result")
@@ -229,6 +370,11 @@ def _normalize_report(
         if not isinstance(extra, dict):
             raise _UnsafeReport("invalid_result")
         rule_id = f"OG/{short_rule}"
+        if rule_id == "OG/python_exec_rule-subprocess-popen-shell-true":
+            if file_path not in numeric_lines_cache:
+                numeric_lines_cache[file_path] = _numeric_shell_lines(root, file_path)
+            if line_start in numeric_lines_cache[file_path]:
+                continue
         identifier = sha256(f"{rule_id}\0{file_path}\0{line_start}".encode()).hexdigest()[:20]
         findings.append(
             Finding(

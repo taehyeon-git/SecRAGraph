@@ -162,7 +162,9 @@
       ],
       "assessments": [
         {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "python_sql_positive.py", "expected_lines": [3], "expected_trace": {"source_file": "python_sql_positive.py", "source_line": 2, "sink_file": "python_sql_positive.py", "sink_line": 3, "required_steps": [{"file": "python_sql_positive.py", "line": 2}]}},
-        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "python_sql_safe.py", "expected_lines": []}
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "python_sql_safe.py", "expected_lines": []},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "python_sql_positive.py", "expected_lines": [3]},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "python_sql_safe.py", "expected_lines": []}
       ]
     },
     {
@@ -186,7 +188,9 @@
       ],
       "assessments": [
         {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_positive.py", "expected_lines": [6], "expected_trace": {"source_file": "flask_header_sql_positive.py", "source_line": 5, "sink_file": "flask_header_sql_positive.py", "sink_line": 6, "required_steps": [{"file": "flask_header_sql_positive.py", "line": 5}]}},
-        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_safe.py", "expected_lines": []}
+        {"engine": "opengrep", "rule_id": "OG/python-web-sql-taint", "file_path": "flask_header_sql_safe.py", "expected_lines": []},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "flask_header_sql_positive.py", "expected_lines": [6]},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "flask_header_sql_safe.py", "expected_lines": []}
       ]
     },
     {
@@ -396,6 +400,52 @@
         {"engine": "compose-policy", "rule_id": "COMPOSE/HOST_ROOT_MOUNT", "file_path": "compose.yaml", "expected_lines": []},
         {"engine": "compose-policy", "rule_id": "COMPOSE/EXPLICIT_ROOT_USER", "file_path": "compose.yaml", "expected_lines": []},
         {"engine": "compose-policy", "rule_id": "COMPOSE/PROVIDER", "file_path": "compose.yaml", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-cross-file-shell-vulnerable",
+      "cwe_ids": ["CWE-78"],
+      "files": [
+        {"path": "app.py", "source": "from worker import run\n\ndef route(request):\n    value = request.query_params.get('cmd')\n    run(value)\n"},
+        {"path": "worker.py", "source": "import os\n\ndef run(value):\n    os.system(value)\n"}
+      ],
+      "assessments": [
+        {"engine": "python-flow", "rule_id": "PYFLOW/SHELL", "file_path": "worker.py", "expected_lines": [4], "expected_trace": {"source_file": "app.py", "source_line": 4, "sink_file": "worker.py", "sink_line": 4, "required_steps": [{"file": "worker.py", "line": 3}]}},
+        {"engine": "opengrep", "rule_id": "OG/python_exec_rule-os-popen2", "file_path": "worker.py", "expected_lines": [4]}
+      ]
+    },
+    {
+      "case_id": "python-cross-file-shell-sanitized",
+      "cwe_ids": ["CWE-78"],
+      "files": [
+        {"path": "app.py", "source": "from worker import run\n\ndef route(request):\n    value = int(request.query_params.get('id'))\n    run(value)\n"},
+        {"path": "worker.py", "source": "def run(value):\n    return f'echo {value}'\n"}
+      ],
+      "assessments": [
+        {"engine": "python-flow", "rule_id": "PYFLOW/SHELL", "file_path": "worker.py", "expected_lines": []}
+      ]
+    },
+    {
+      "case_id": "python-cross-file-sql-vulnerable",
+      "cwe_ids": ["CWE-89"],
+      "files": [
+        {"path": "app.py", "source": "from worker import search\n\ndef route(request, cursor):\n    value = request.query_params.get('id')\n    search(cursor, value)\n"},
+        {"path": "worker.py", "source": "def search(cursor, value):\n    cursor.execute(f'SELECT * FROM users WHERE id={value}')\n"}
+      ],
+      "assessments": [
+        {"engine": "python-flow", "rule_id": "PYFLOW/SQL", "file_path": "worker.py", "expected_lines": [2], "expected_trace": {"source_file": "app.py", "source_line": 4, "sink_file": "worker.py", "sink_line": 2, "required_steps": [{"file": "worker.py", "line": 1}]}},
+        {"engine": "opengrep", "rule_id": "OG/python_sql_rule-hardcoded-sql-expression", "file_path": "worker.py", "expected_lines": [2]}
+      ]
+    },
+    {
+      "case_id": "python-cross-file-sql-parameterized",
+      "cwe_ids": ["CWE-89"],
+      "files": [
+        {"path": "app.py", "source": "from worker import search\n\ndef route(request, cursor):\n    value = request.query_params.get('id')\n    search(cursor, value)\n"},
+        {"path": "worker.py", "source": "def search(cursor, value):\n    cursor.execute('SELECT * FROM users WHERE id=?', (value,))\n"}
+      ],
+      "assessments": [
+        {"engine": "python-flow", "rule_id": "PYFLOW/SQL", "file_path": "worker.py", "expected_lines": []}
       ]
     }
   ]

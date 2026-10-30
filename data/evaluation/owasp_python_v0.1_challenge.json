@@ -109,7 +109,7 @@
       "config_path": "opengrep/python/sql/rule-hardcoded-sql-expression.yml",
       "cwe_id": "CWE-89",
       "rule_id": "OG/python_sql_rule-hardcoded-sql-expression",
-      "sha256": "f054dce5ef49e24a0b1faa12f3787ea657f539f2b9c733498313c78681271559"
+      "sha256": "a9d3d0e0590e1b05770a0cad0172368d413d2f732a30bf7f094144415587cd32"
     }
   ],
   "schema_version": 1,

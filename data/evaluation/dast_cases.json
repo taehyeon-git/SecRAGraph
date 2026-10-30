@@ -28,7 +28,7 @@
       "mode": "active",
       "method": "GET",
       "path": "/sql-numeric-vulnerable",
-      "rule_id": "ZAP/40018",
+      "rule_id": "DIFF/NUMERIC_SQLI",
       "cwe_id": "CWE-89",
       "expected": true,
       "proof": "attack_probe"
@@ -38,7 +38,7 @@
       "mode": "active",
       "method": "GET",
       "path": "/sql-numeric-safe",
-      "rule_id": "ZAP/40018",
+      "rule_id": "DIFF/NUMERIC_SQLI",
       "cwe_id": "CWE-89",
       "expected": false,
       "proof": "attack_probe"

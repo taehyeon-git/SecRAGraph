@@ -136,7 +136,7 @@ def test_markdown_must_display_the_same_finding_count_and_sections() -> None:
             compose_smoke._validate_markdown(invalid, "scan-1", findings)
 
 
-def test_benchmark_archive_covers_four_engines_without_external_dependency() -> None:
+def test_benchmark_archive_covers_five_engines_without_external_dependency() -> None:
     archive = compose_smoke._mixed_archive()
     with ZipFile(BytesIO(archive)) as package:
         names = set(package.namelist())
@@ -196,6 +196,7 @@ def test_benchmark_endpoints_measure_auth_owned_reports_and_redaction(
         }
         for engine, kind, file_name in (
             ("opengrep", "sast", "app.py"),
+            ("python-flow", "sast", "app.py"),
             ("gitleaks", "secret", "secret.env"),
             ("checkov", "configuration", "bucket.tf"),
             ("compose-policy", "configuration", "compose.yaml"),
@@ -358,6 +359,7 @@ def test_benchmark_endpoints_measure_auth_owned_reports_and_redaction(
     assert all(result["checks"].values())
     assert {item["engine"] for item in result["executions"]} == {
         "opengrep",
+        "python-flow",
         "gitleaks",
         "checkov",
         "compose-policy",

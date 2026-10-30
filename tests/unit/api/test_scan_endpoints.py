@@ -10,17 +10,21 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from security_review import application
 from security_review.api.app import create_app
 from security_review.api.dependencies import get_scan_service, get_temp_factory
 from security_review.application import ScanService
 from security_review.config import Settings
 from security_review.domain.models import Confidence, Finding, Severity, SourceReference
+from security_review.membership.service import InMemoryMembershipRepository, MembershipService
 from security_review.orchestrator.scan_graph import (
     DeterministicScanResult,
     ScanGraphServices,
     ScanRequest,
 )
+from security_review.scanner.external_common import ExternalExecution, ExternalScanResult
 from security_review.scanner.files import ScanLimits
+from security_review.storage.memory import InMemoryReportRepository
 
 
 class RaisingScanService:
@@ -132,6 +136,88 @@ def test_archive_scan_preserves_original_name_and_relative_paths() -> None:
     body = response.json()
     assert body["target_name"] == "backend-source.zip"
     assert body["findings"][0]["file_path"] == "src/app.py"
+
+
+def test_member_archive_exposes_cross_file_python_flow_without_source_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = "private-upload-marker-9381"
+
+    class EmptyExternalAdapter:
+        def __init__(self, scanner: str) -> None:
+            self.scanner = scanner
+
+        def scan_snapshot(self, _root: Path, _timeout: float) -> ExternalScanResult:
+            return ExternalScanResult(
+                findings=(),
+                execution=ExternalExecution(scanner=self.scanner, version=None, status="skipped"),
+            )
+
+    for engine, attribute in (
+        ("opengrep", "OpengrepAdapter"),
+        ("gitleaks", "GitleaksAdapter"),
+        ("checkov", "CheckovAdapter"),
+        ("compose-policy", "ComposePolicyAdapter"),
+    ):
+        monkeypatch.setattr(
+            application, attribute, lambda engine=engine: EmptyExternalAdapter(engine)
+        )
+    membership = MembershipService(InMemoryMembershipRepository())
+    membership.register("alice", "secure-password-123")
+    app = create_app(
+        Settings(testing=True),
+        membership=membership,
+        reports=InMemoryReportRepository(),
+    )
+    with TestClient(app) as client:
+        login = client.post(
+            "/v1/auth/login",
+            json={"username": "alice", "password": "secure-password-123"},
+        )
+        assert login.status_code == 200
+        headers = {"Authorization": f"Session {login.json()['token']}"}
+        created = client.post(
+            "/v1/scans/archive",
+            files={
+                "file": (
+                    "member-code.zip",
+                    zip_payload(
+                        {
+                            "app.py": (
+                                "from relay import command\nimport subprocess\n\n"
+                                "def route(request):\n"
+                                "    value = request.query_params.get('cmd')\n"
+                                "    subprocess.run(command(value), shell=True)\n"
+                                f"# {marker}\n"
+                            ).encode(),
+                            "relay.py": b"def command(value):\n    return 'echo ' + value\n",
+                        }
+                    ),
+                    "application/zip",
+                )
+            },
+            headers=headers,
+        )
+        assert created.status_code == 200, created.text
+        saved = client.get(f"/v1/scans/{created.json()['scan_id']}", headers=headers)
+    assert saved.status_code == 200
+    body = saved.json()
+    flow = [finding for finding in body["findings"] if finding["engine"] == "python-flow"]
+    assert len(flow) == 1
+    assert flow[0]["rule_id"] == "PYFLOW/SHELL"
+    assert [
+        (point["file_path"], point["line_start"], point["role"]) for point in flow[0]["trace"]
+    ] == [
+        ("app.py", 5, "source"),
+        ("relay.py", 1, "step"),
+        ("relay.py", 2, "step"),
+        ("app.py", 6, "sink"),
+    ]
+    coverage = next(item for item in body["executions"] if item["engine"] == "python-flow")
+    assert coverage["status"] == "completed"
+    assert coverage["eligible_files"] == ["app.py", "relay.py"]
+    assert coverage["scanned_files"] == ["app.py", "relay.py"]
+    assert marker not in created.text + saved.text
 
 
 def test_archive_scan_uses_automatic_dependency_auditor() -> None:

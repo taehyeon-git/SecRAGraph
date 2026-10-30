@@ -20,6 +20,7 @@ from security_review.evaluation.multiengine_benchmark import (
     measure_unlabeled_repository,
 )
 from security_review.reporting.builder import build_report
+from security_review.scanner.python_flow import PythonFlowAdapter
 
 
 def _case(case_id: str, source: str, expected: list[int]) -> dict[str, object]:
@@ -354,3 +355,45 @@ def test_runner_writes_evidence_and_requires_complete_coverage(
         )
         == 1
     )
+
+
+def test_authored_cross_file_cases_match_python_flow_findings_and_traces(tmp_path: Path) -> None:
+    manifest = Path(__file__).resolve().parents[3] / "data/evaluation/multiengine_cases.json"
+    cases = load_labeled_corpus(manifest).cases
+    selected = tuple(case for case in cases if case.case_id.startswith("python-cross-file-"))
+    assert len(selected) == 4
+
+    for case in selected:
+        root = tmp_path / case.case_id
+        for name, source in case.files:
+            target = root / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(source, encoding="utf-8")
+        result = PythonFlowAdapter().scan_snapshot(root, 5.0)
+        assert result.execution.status == "completed", case.case_id
+        flow_truth = tuple(item for item in case.assessments if item.engine == "python-flow")
+        assert len(flow_truth) == 1
+        expected = flow_truth[0]
+        findings = tuple(
+            finding
+            for finding in result.findings
+            if (finding.rule_id, finding.file_path) == (expected.rule_id, expected.file_path)
+        )
+        assert {finding.line_start for finding in findings} == expected.expected_lines, case.case_id
+        assert len(findings) == len(expected.expected_lines), case.case_id
+        assert len(result.findings) == len(findings), case.case_id
+        if expected.expected_trace is not None:
+            trace = result.findings[0].trace
+            assert (trace[0].file_path, trace[0].line_start, trace[0].role) == (
+                expected.expected_trace.source_file,
+                expected.expected_trace.source_line,
+                "source",
+            )
+            assert (trace[-1].file_path, trace[-1].line_start, trace[-1].role) == (
+                expected.expected_trace.sink_file,
+                expected.expected_trace.sink_line,
+                "sink",
+            )
+            assert set(expected.expected_trace.required_steps) <= {
+                (item.file_path, item.line_start) for item in trace if item.role == "step"
+            }

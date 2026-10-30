@@ -74,7 +74,8 @@ _API_STAGES = frozenset(
         "cleanup",
     }
 )
-_API_ENGINES = frozenset({"opengrep", "gitleaks", "checkov", "compose-policy"})
+_API_ENGINES = frozenset({"opengrep", "python-flow", "gitleaks", "checkov", "compose-policy"})
+_API_MIN_FIXTURE_FINDINGS = 4
 
 
 class PipelineEvidenceError(ValueError):
@@ -210,7 +211,7 @@ def _api(data: dict[str, Any], revision: str) -> dict[str, object]:
         raise PipelineEvidenceError("api_report_incomplete")
     findings = _integer(report.get("finding_count"))
     warnings = _integer(report.get("warnings_count"))
-    if findings < len(_API_ENGINES) or warnings != 0:
+    if findings < _API_MIN_FIXTURE_FINDINGS or warnings != 0:
         raise PipelineEvidenceError("api_report_incomplete")
     return {
         "source_revision_status": "verified",

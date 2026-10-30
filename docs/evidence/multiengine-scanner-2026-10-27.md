@@ -99,3 +99,47 @@ The container had no network access and a read-only root filesystem; scanner
 scratch space and inert source snapshots used separate temporary mounts.
 These authored examples are regression evidence, not an estimate of accuracy
 on independent repositories.
+
+## 2026-10-31 rule quality follow-up
+
+The two errors above were reproduced as red tests against the official
+Opengrep 1.32.0 Windows release (asset SHA-256
+`ae7152809ec71340213e8f4de3701c83edbdb33f4ac05eca2987b96ec6826a5e`).
+The original broad shell YAML is unchanged. The Opengrep adapter now excludes
+its finding only when the scanned Python AST shows that every f-string
+interpolation comes from immediately preceding, simple `int(...)`
+assignments in the same statement block and no `int` shadowing or dynamic
+execution is visible in that file. Conditional conversion, tuple
+reassignment, unknown variables, and cross-file calls retain the original
+finding. If another `subprocess` call appears on the same source line, the
+adapter retains every finding on that line because report filtering is keyed
+by line number. The parser is capped at 100 KB and 10,000 AST nodes; parse or memory
+failures retain the finding. This static proof cannot rule out arbitrary
+runtime monkeypatching. The locally adapted SQL rule detects an interpolated
+f-string query and leaves a parameterized query clean. The tests are in
+[`test_opengrep_rule_quality.py`](../../tests/integration/scanner/test_opengrep_rule_quality.py).
+
+The original 25 SAST-eligible authored files, before any cross-file corpus
+extension, were scanned together with all 79 vendor rules and the project
+taint rules. Opengrep confirmed 25/25 files with no errors or skipped paths.
+For the original 27 exact rule/file/line assessments, the result moved from
+TP=13, FP=1, FN=1 to TP=14, FP=0, FN=0. This is a regression-corpus result,
+not an independent accuracy estimate.
+
+The [vendor manifest](../../data/engines/opengrep/manifest.json) records the
+SQL rule's local SHA-256 and original upstream SHA-256 under `local_patches`.
+The shell rule and 77 other YAML files remain byte-identical to the pinned
+upstream MIT revision. The [OWASP challenge manifest](../../data/evaluation/owasp_python_v0.1_challenge.json)
+(SHA-256 `1228a6de3d8a318bea1d3ba565161b98040ccb78895b8526f7ea4783fd09b594`)
+pins the local SQL rule and original shell rule, along with the official
+BenchmarkPython revision, CSV, and all 90 selected source hashes.
+
+On those 90 hash-verified external cases, the shell rule before and after
+adapter filtering scored TP=7, FP=7, FN=6, TN=0 on CWE-78. No case met the
+strict numeric-only exclusion. The SQL rule before and after its patch scored
+TP=0, FP=0, FN=5, TN=11 on CWE-89. The full Python
+vendor-plus-project-taint bundle also remained TP=27, FP=19, FN=9, TN=35 as a
+broad-CWE union. These are case-level labels, not line-level rule truth. The
+unchanged external result shows no loss of the original broad shell findings
+on this pinned challenge; it does not imply those findings are all valid
+injection reports.

@@ -4,8 +4,17 @@ The 79 Python and JavaScript YAML rules in this directory come from
 [`patched-codes/semgrep-rules`](https://github.com/patched-codes/semgrep-rules)
 at commit `1118d79823ae756534678378a4aac0cbfa5d3041`. Their upstream MIT
 license is copied as [`LICENSE`](LICENSE). [`manifest.json`](manifest.json)
-records the SHA-256 of every included rule. The YAML bytes match that pinned
-upstream revision; the upstream test scripts are not bundled or executed.
+records the SHA-256 of every included rule. The shell rule and 77 other YAML
+files match that pinned upstream revision byte for byte. The SQL rule is a
+local MIT adaptation for an interpolated f-string regression; the manifest's
+`local_patches` preserves its original upstream SHA-256. The upstream test
+scripts are not bundled or executed.
+
+The adapter conservatively excludes findings from the original broad shell
+rule only when the scanned Python AST shows every interpolated command value
+comes from an immediately preceding, statically unshadowed `int(...)`
+assignment. All uncertain findings remain review leads.
+Multiple `subprocess` calls on one source line also retain every finding.
 
 SecRAGraph runs these rules with Opengrep 1.32.0 against a bounded text-only
 snapshot. Opengrep's `--taint-intrafile` tracks flows within a file. It does

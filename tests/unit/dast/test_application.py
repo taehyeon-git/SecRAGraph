@@ -95,3 +95,25 @@ def test_dast_application_forwards_active_choice(monkeypatch: pytest.MonkeyPatch
     report = scan_dast_container("a" * 64, 8000, "/openapi.json", active=True)
     assert calls == [True]
     assert report.executions[0].checks == ("openapi-active",)
+
+
+def test_dast_application_reports_differential_execution_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    zap = ScanExecution(engine="zap", kind="dast", status="completed", elapsed_ms=1)
+    differential = ScanExecution(
+        engine="dast-differential",
+        kind="dast",
+        status="completed",
+        elapsed_ms=2,
+        checks=("numeric-sqli-differential",),
+        eligible_endpoints=("GET /records",),
+    )
+    monkeypatch.setattr(
+        "security_review.dast.application.run_zap_api_scan",
+        lambda *args, **kwargs: DastScanResult((), (), zap, (differential,)),
+    )
+
+    report = scan_dast_container("a" * 64, 8000, "/openapi.json", active=True)
+
+    assert report.executions == (zap, differential)

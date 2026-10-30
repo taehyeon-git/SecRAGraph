@@ -64,6 +64,7 @@ rules:
     - pattern: "$DB.execute(\"$QUERY\" % ...)"
     - pattern: "$DB.execute(\"$QUERY\".format(...))"
     - pattern: "$DB.execute(f\"$QUERY\")"
+    - pattern: "$DB.execute(f\"$QUERY{$VALUE}...\")"
     - pattern: "$DB.execute(\"$QUERY\" + ...)"
     - patterns:
       - pattern-either:

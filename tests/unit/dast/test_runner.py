@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from security_review.dast import runner
+from security_review.dast.differential import numeric_query_seeds
+from security_review.dast.zap import sanitize_openapi
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +71,80 @@ def _zap_report() -> bytes:
     ).encode()
 
 
+def _numeric_openapi() -> bytes:
+    schema = json.loads(_openapi())
+    for path in ("/first-record", "/second-record", "/unmarked-record"):
+        schema["paths"][path] = {
+            "get": {
+                "x-secragraph-dast-active": True,
+                "parameters": [
+                    {
+                        "name": "record_id",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "examples": ["1"]},
+                    }
+                ],
+                "responses": {"200": {"description": "ok"}},
+            }
+        }
+    del schema["paths"]["/unmarked-record"]["get"]["x-secragraph-dast-active"]
+    return json.dumps(schema).encode()
+
+
+def _numeric_observations(*, unstable: bool = False) -> bytes:
+    a, b, c = "a" * 64, "b" * 64, "c" * 64
+    return json.dumps(
+        {
+            "results": [
+                {
+                    "path": "/first-record",
+                    "parameter": "record_id",
+                    "baseline": [[200, a], [200, b if unstable else a]],
+                    "control": [[200, a], [200, a]],
+                    "true": [[200, b], [200, b]],
+                    "false": [[200, a], [200, a]],
+                },
+                {
+                    "path": "/second-record",
+                    "parameter": "record_id",
+                    "baseline": [[200, a], [200, a]],
+                    "control": [[422, c], [422, c]],
+                    "true": [[422, c], [422, c]],
+                    "false": [[422, c], [422, c]],
+                },
+            ]
+        }
+    ).encode()
+
+
+def test_numeric_seeds_use_only_marked_active_gets_and_ignore_complex_schema() -> None:
+    schema = json.loads(_numeric_openapi())
+    schema["paths"]["/complex"] = {
+        "get": {
+            "x-secragraph-dast-active": True,
+            "parameters": [
+                {
+                    "name": "record_id",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": ["integer", "null"]},
+                }
+            ],
+        }
+    }
+    safe = sanitize_openapi(
+        json.dumps(schema).encode(), origin="http://secragraph-target:8765", active=True
+    )
+
+    assert [
+        (seed.path, seed.parameter, seed.baseline) for seed in numeric_query_seeds(safe.document)
+    ] == [
+        ("/first-record", "record_id", "1"),
+        ("/second-record", "record_id", "1"),
+    ]
+
+
 class FakeDocker:
     def __init__(
         self,
@@ -83,6 +159,7 @@ class FakeDocker:
         inspected_id: str = "a" * 64,
         openapi_bytes: bytes | None = None,
         report_bytes: bytes | None = None,
+        probe_bytes: bytes | None = None,
     ) -> None:
         self.calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
         self.timeout_zap = timeout_zap
@@ -95,6 +172,7 @@ class FakeDocker:
         self.inspected_id = inspected_id
         self.openapi_bytes = openapi_bytes
         self.report_bytes = report_bytes
+        self.probe_bytes = probe_bytes
         self.marker_precreated = False
 
     def __call__(
@@ -157,6 +235,10 @@ class FakeDocker:
         if args[0] == "run" and "--entrypoint" in args:
             assert capture
             assert "--network" in args and "--read-only" in args
+            if "NUMERIC_SQLI_PROBE_V1" in args[args.index("-c") + 1]:
+                return subprocess.CompletedProcess(
+                    args, 0, self.probe_bytes or _numeric_observations()
+                )
             return subprocess.CompletedProcess(args, 0, self.openapi_bytes or _openapi())
         if args[0] == "run":
             assert "-f" in args and "openapi" in args
@@ -285,6 +367,95 @@ def test_active_scan_uses_pinned_id_api_minimal_and_completion_marker(
     script_args = zap[zap.index("zap-api-scan.py") + 1 :]
     assert "-S" not in script_args and "-c" not in script_args
     assert script_args[script_args.index("--hook") + 1] == "/zap/wrk/active-hooks.py"
+    assert result.supplemental_executions[0].engine == "dast-differential"
+    assert result.supplemental_executions[0].status == "skipped"
+    assert result.supplemental_executions[0].reason == "no_numeric_query_seed"
+
+
+def test_active_numeric_seed_emits_separate_differential_finding_and_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(openapi_bytes=_numeric_openapi())
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+
+    differential = [finding for finding in result.findings if finding.engine == "dast-differential"]
+    assert [(finding.rule_id, finding.http_path) for finding in differential] == [
+        ("DIFF/NUMERIC_SQLI", "/first-record")
+    ]
+    assert differential[0].cwe_ids == ("CWE-89",)
+    assert "200" in differential[0].redacted_evidence
+    assert "aaaaaaaaaaaa" in differential[0].redacted_evidence
+    assert "bbbbbbbbbbbb" in differential[0].redacted_evidence
+    assert "1 OR 1=1" not in differential[0].model_dump_json()
+    assert result.execution.engine == "zap"
+    assert len(result.supplemental_executions) == 1
+    assert result.supplemental_executions[0].engine == "dast-differential"
+    assert result.supplemental_executions[0].status == "completed"
+    assert "numeric-sqli-requests-16" in result.supplemental_executions[0].checks
+    assert set(result.supplemental_executions[0].eligible_endpoints) == {
+        "GET /first-record",
+        "GET /second-record",
+    }
+    probe = next(
+        args
+        for args, _ in fake.calls
+        if args[0] == "run"
+        and "--entrypoint" in args
+        and "NUMERIC_SQLI_PROBE_V1" in args[args.index("-c") + 1]
+    )
+    assert "--rm" in probe
+    assert "--read-only" in probe
+    assert "--network" in probe
+    assert "DAST_PROBE_FINGERPRINT_KEY" in probe
+    probe_env = next(env for args, env in fake.calls if args == probe)
+    assert probe_env is not None
+    assert probe_env["DAST_PROBE_FINGERPRINT_KEY"] not in differential[0].model_dump_json()
+
+
+def test_unstable_numeric_response_is_partial_without_differential_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(
+        openapi_bytes=_numeric_openapi(), probe_bytes=_numeric_observations(unstable=True)
+    )
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+
+    assert result.execution.status == "completed"
+    assert result.supplemental_executions[0].status == "partial"
+    assert result.supplemental_executions[0].reason == "dast_differential_incomplete"
+    assert not any(finding.engine == "dast-differential" for finding in result.findings)
+
+
+def test_numeric_probe_rejects_redirect_as_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    observations = json.loads(_numeric_observations())
+    observations["results"][0]["true"] = [[302, "b" * 64], [302, "b" * 64]]
+    fake = FakeDocker(
+        openapi_bytes=_numeric_openapi(), probe_bytes=json.dumps(observations).encode()
+    )
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+
+    assert result.supplemental_executions[0].status == "partial"
+    assert not any(finding.engine == "dast-differential" for finding in result.findings)
+
+
+def test_numeric_probe_does_not_flag_reflected_control(monkeypatch: pytest.MonkeyPatch) -> None:
+    observations = json.loads(_numeric_observations())
+    observations["results"][0]["control"] = [[200, "c" * 64], [200, "c" * 64]]
+    fake = FakeDocker(
+        openapi_bytes=_numeric_openapi(), probe_bytes=json.dumps(observations).encode()
+    )
+    monkeypatch.setattr(runner, "_docker", fake)
+
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+
+    assert result.supplemental_executions[0].status == "completed"
+    assert not any(finding.engine == "dast-differential" for finding in result.findings)
 
 
 def test_active_scan_missing_hook_marker_is_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:

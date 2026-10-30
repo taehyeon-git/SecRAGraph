@@ -383,6 +383,7 @@ def test_scan_stops_with_stable_warning_after_deadline(
     assert "processing_time_limit_exceeded" in report.warnings
     assert [(item.engine, item.status) for item in report.executions] == [
         ("opengrep", "completed"),
+        ("python-flow", "not_run"),
         ("gitleaks", "not_run"),
         ("checkov", "not_run"),
         ("compose-policy", "not_run"),

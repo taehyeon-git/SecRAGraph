@@ -15,7 +15,7 @@ from security_review.domain.models import ScanExecution, ScanReport
 
 _ID = re.compile(r"[a-z][a-z0-9-]{0,99}\Z")
 _PATH = re.compile(r"/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]{0,199})\Z")
-_RULE = re.compile(r"ZAP/[1-9][0-9]{1,5}\Z")
+_RULE = re.compile(r"(?:ZAP/[1-9][0-9]{1,5}|DIFF/NUMERIC_SQLI)\Z")
 _CWE = re.compile(r"CWE-[1-9][0-9]{0,5}\Z")
 _SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 _IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -130,9 +130,10 @@ class DastBenchmarkResult:
     metrics: DastMetrics
     unassessed_findings: int
     cwe_mismatch_cases: int
+    differential: dict[str, str | int] | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        result = {
             "schema_version": 1,
             "scope": "author_written_regression",
             "manifest_name": self.manifest_name,
@@ -156,6 +157,9 @@ class DastBenchmarkResult:
             "cwe_mismatch_cases": self.cwe_mismatch_cases,
             "unassessed_scope": "normalized_findings_only",
         }
+        if self.differential is not None:
+            result["differential"] = self.differential
+        return result
 
 
 def _strict_json_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -255,6 +259,32 @@ def _execution(report: ScanReport, mode: str) -> ScanExecution:
     return executions[0]
 
 
+def _require_differential_execution(
+    report: ScanReport, cases: tuple[DastBenchmarkCase, ...]
+) -> ScanExecution | None:
+    required = {
+        f"{case.method} {case.path}"
+        for case in cases
+        if case.mode == "active" and case.rule_id == "DIFF/NUMERIC_SQLI"
+    }
+    if not required:
+        return None
+    executions = [
+        item
+        for item in report.executions
+        if item.engine == "dast-differential"
+        and item.kind == "dast"
+        and "numeric-sqli-differential" in item.checks
+    ]
+    if (
+        len(executions) != 1
+        or executions[0].status != "completed"
+        or not required.issubset(set(executions[0].eligible_endpoints))
+    ):
+        raise DastBenchmarkInputError("incomplete_differential_execution")
+    return executions[0]
+
+
 def _counter(snapshot: Mapping[str, object], name: str, path: str) -> int:
     counters = snapshot.get(name)
     if not isinstance(counters, dict):
@@ -293,6 +323,7 @@ def evaluate_dast_benchmark(
         raise DastBenchmarkInputError("invalid_benchmark_timing")
     passive = _execution(passive_report, "passive")
     active = _execution(active_report, "active")
+    differential_execution = _require_differential_execution(active_report, manifest.cases)
     if (
         not passive.version
         or not _PINNED_ZAP.fullmatch(passive.version)
@@ -330,7 +361,10 @@ def evaluate_dast_benchmark(
     for mode, report in (("passive", passive_report), ("active", active_report)):
         for finding in report.findings:
             key = (mode, finding.rule_id, finding.http_method, finding.http_path)
-            if finding.engine == "zap" and key in assessed:
+            expected_engine = (
+                "dast-differential" if finding.rule_id == "DIFF/NUMERIC_SQLI" else "zap"
+            )
+            if finding.engine == expected_engine and key in assessed:
                 detected.add(key)
                 observed_cwes[key].update(getattr(finding, "cwe_ids", ()))
             else:
@@ -379,6 +413,17 @@ def evaluate_dast_benchmark(
         _metrics(case_tuple),
         unassessed,
         sum(case.cwe_match is False for case in case_tuple),
+        (
+            {
+                "engine": "dast-differential",
+                "status": "completed",
+                "elapsed_ms": differential_execution.elapsed_ms,
+                "requests": len(differential_execution.eligible_endpoints) * 8,
+                "requests_per_seed": 8,
+            }
+            if differential_execution is not None
+            else None
+        ),
     )
 
 
@@ -413,6 +458,14 @@ def render_benchmark_markdown(result: DastBenchmarkResult) -> str:
         "| Rule | TP | FP | FN | TN | Precision | Recall | F1 |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if result.differential is not None:
+        lines[15:15] = [
+            f"- Differential engine: {result.differential['engine']}",
+            f"- Differential status: {result.differential['status']}",
+            f"- Differential requests: {result.differential['requests']} "
+            f"({result.differential['requests_per_seed']} per seed)",
+            f"- Differential elapsed ms: {result.differential['elapsed_ms']}",
+        ]
     for rule, metrics in result.rules:
         rates = [
             "n/a" if value is None else f"{value:.3f}"

@@ -4,6 +4,12 @@
   "upstream_commit": "1118d79823ae756534678378a4aac0cbfa5d3041",
   "license": "MIT",
   "scope": "Python and JavaScript rule YAML files",
+  "local_patches": {
+    "python/sql/rule-hardcoded-sql-expression.yml": {
+      "upstream_sha256": "f054dce5ef49e24a0b1faa12f3787ea657f539f2b9c733498313c78681271559",
+      "reason": "Match SQL f-strings containing an interpolated value."
+    }
+  },
   "files": {
     "javascript/buf/rule-buffer-noassert.yml": "64cbebafcd95bc9897c22d7665be087dedb287e7d2fe05a2bf595261a9d49196",
     "javascript/buf/rule-detect-new-buffer.yml": "89256aed446061d063b69af010513a31f9e4bb9073c923de543d4ad9b08737fe",
@@ -66,7 +72,7 @@
     "python/requests/rule-request-without-timeout.yml": "996f36054b820b8d6d581ec3b904116128480c0ab3972cbf9c7613e00208662d",
     "python/snmp/rule-insecure-snmp-version.yml": "9b9abe63e53f13b5b3eb66745e7f62a87647c464e3aa957b73b742122f9cb53e",
     "python/snmp/rule-snmp-weak-cryptography.yml": "8e509b539ddc14b1bde3fc02c45ee6313680f26dbdf3a65e27b4105b048a7f4e",
-    "python/sql/rule-hardcoded-sql-expression.yml": "f054dce5ef49e24a0b1faa12f3787ea657f539f2b9c733498313c78681271559",
+    "python/sql/rule-hardcoded-sql-expression.yml": "a9d3d0e0590e1b05770a0cad0172368d413d2f732a30bf7f094144415587cd32",
     "python/ssh/rule-ssh-nohost-key-verification.yml": "8ccfcee9d6c8484f79ce5a7c6016bc7613bd5910a904b618faa16e12706e2538",
     "python/ssl/rule-req-no-certvalid.yml": "efc554eaf9f0f74861e33c3211cfe1cf4be9b3b43f07fe054994138941c9a976",
     "python/ssl/rule-ssl-no-version.yml": "a3a8519e126335b14cf85f722d96ed48c477642e12a26825e54e617a146e0049",
