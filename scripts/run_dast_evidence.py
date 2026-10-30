@@ -587,6 +587,28 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         (output_dir / name).write_text(content, encoding="utf-8")
 
 
+def _safe_failure_location(error: BaseException) -> str:
+    """Expose fixed source file names and line numbers, never exception values."""
+
+    allowed = {
+        "run_dast_evidence.py",
+        "runner.py",
+        "zap.py",
+        "tempfile.py",
+        "shutil.py",
+        "pathlib.py",
+        "contextlib.py",
+    }
+    frames: list[str] = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        name = Path(traceback.tb_frame.f_code.co_filename).name
+        if name in allowed:
+            frames.append(f"{name}:{traceback.tb_lineno}")
+        traceback = traceback.tb_next
+    return ">".join(frames[-4:])
+
+
 def main() -> int:
     try:
         run_evidence()
@@ -596,7 +618,9 @@ def main() -> int:
             if type(error) is RuntimeError and str(error) in _SAFE_FAILURE_CODES
             else f"unknown:{type(error).__name__}"
         )
-        print(f"DAST evidence generation failed ({code}).", file=sys.stderr)
+        location = _safe_failure_location(error) if code.startswith("unknown:") else ""
+        suffix = f" at {location}" if location else ""
+        print(f"DAST evidence generation failed ({code}{suffix}).", file=sys.stderr)
         return 1
     print("DAST evidence passed: isolated fixture and normalized reports.")
     return 0

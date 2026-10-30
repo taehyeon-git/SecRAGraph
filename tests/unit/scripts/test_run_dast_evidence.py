@@ -387,6 +387,20 @@ def test_main_prints_generic_failure_without_exception_text(
     assert "unknown:RuntimeError" in output.err
 
 
+def test_unknown_failure_location_uses_only_fixed_file_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def permission_denied() -> str:
+        raise PermissionError("Session secret-must-not-log")
+
+    monkeypatch.setattr(run_dast_evidence, "_docker_executable", permission_denied)
+    with pytest.raises(PermissionError) as caught:
+        run_dast_evidence._run_docker(["version"])
+    location = run_dast_evidence._safe_failure_location(caught.value)
+    assert "run_dast_evidence.py:" in location
+    assert "secret-must-not-log" not in location
+
+
 def test_evidence_prints_only_safe_stage_names(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
