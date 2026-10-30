@@ -95,6 +95,7 @@ class FakeDocker:
         self.inspected_id = inspected_id
         self.openapi_bytes = openapi_bytes
         self.report_bytes = report_bytes
+        self.marker_precreated = False
 
     def __call__(
         self,
@@ -168,8 +169,11 @@ class FakeDocker:
             (Path(source) / "zap.json").write_bytes(
                 self.report_bytes if self.report_bytes is not None else _zap_report()
             )
-            if "-S" not in args and self.active_marker:
-                (Path(source) / "active-complete.marker").write_text("completed", encoding="ascii")
+            if "-S" not in args:
+                marker = Path(source) / "active-complete.marker"
+                self.marker_precreated = marker.exists() and marker.read_bytes() == b""
+                if self.active_marker:
+                    marker.write_text("completed", encoding="ascii")
             return subprocess.CompletedProcess(args, 2, b"")
         if args[:2] == ["container", "rm"] or args[:2] == ["network", "disconnect"]:
             return subprocess.CompletedProcess(args, 0, b"")
@@ -265,6 +269,7 @@ def test_active_scan_uses_pinned_id_api_minimal_and_completion_marker(
     assert result.execution.status == "completed"
     assert result.execution.checks == ("openapi-active",)
     assert result.execution.eligible_endpoints == ("GET /public",)
+    assert fake.marker_precreated
     assert "dast_passive_only" not in result.warnings
     assert "dast_active_scan_can_modify_target_state" in result.warnings
     assert "dast_active_seeds_not_request_allowlist" in result.warnings

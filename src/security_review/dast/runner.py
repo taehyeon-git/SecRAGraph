@@ -459,12 +459,14 @@ def run_zap_api_scan(
                             report_file.touch(exist_ok=False)
                             marker_file = working / "active-complete.marker"
                             if active:
+                                marker_file.touch(exist_ok=False)
                                 hook_file = working / "active-hooks.py"
                                 hook_file.write_text(_ACTIVE_HOOK, encoding="ascii")
                             if host_group is not None:
                                 schema_file.chmod(0o640)
                                 report_file.chmod(0o660)
                                 if active:
+                                    marker_file.chmod(0o660)
                                     hook_file.chmod(0o640)
                             child_env = dict(os.environ)
                             child_env["ZAP_AUTH_HEADER_SITE"] = _ALIAS
