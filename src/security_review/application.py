@@ -34,6 +34,7 @@ from security_review.scanner.external_detectors import (
 )
 from security_review.scanner.files import ScanLimits, discover_files
 from security_review.scanner.opengrep_adapter import _SOURCE_EXTENSIONS, OpengrepAdapter
+from security_review.scanner.python_flow import PythonFlowAdapter
 from security_review.scanner.snapshot import safe_snapshot
 
 PROCESSING_TIME_LIMIT_EXCEEDED = "processing_time_limit_exceeded"
@@ -68,6 +69,8 @@ def _eligible_snapshot_files(scanner: str, paths: tuple[str, ...]) -> tuple[str,
         return paths
     if scanner == "opengrep":
         return tuple(path for path in paths if Path(path).suffix.lower() in _SOURCE_EXTENSIONS)
+    if scanner == "python-flow":
+        return tuple(path for path in paths if Path(path).suffix.lower() == ".py")
     if scanner == "checkov":
         return tuple(path for path in paths if _config_candidate(path))
     if scanner == "compose-policy":
@@ -95,6 +98,7 @@ def _language_for_path(path: str) -> str | None:
 def _execution_record(execution: ExternalExecution) -> ScanExecution:
     kind_by_engine = {
         "opengrep": "sast",
+        "python-flow": "sast",
         "gitleaks": "secret",
         "checkov": "configuration",
         "compose-policy": "configuration",
@@ -128,6 +132,7 @@ def _deterministic_scan(
     request: ScanRequest,
     *,
     sast_adapter: _SnapshotAdapter | None = None,
+    flow_adapter: _SnapshotAdapter | None = None,
     secret_adapter: _SnapshotAdapter | None = None,
     config_adapter: _SnapshotAdapter | None = None,
     compose_adapter: _SnapshotAdapter | None = None,
@@ -165,12 +170,14 @@ def _deterministic_scan(
     executions: list[ScanExecution] = []
     adapters: tuple[tuple[str, _SnapshotAdapter], ...] = (
         ("opengrep", sast_adapter or OpengrepAdapter()),
+        ("python-flow", flow_adapter or PythonFlowAdapter()),
         ("gitleaks", secret_adapter or GitleaksAdapter()),
         ("checkov", config_adapter or CheckovAdapter()),
         ("compose-policy", compose_adapter or ComposePolicyAdapter()),
     )
     engine_time_limits = {
         "opengrep": 45.0,
+        "python-flow": 10.0,
         "gitleaks": 10.0,
         "checkov": 20.0,
         "compose-policy": 20.0,

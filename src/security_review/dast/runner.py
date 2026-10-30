@@ -15,6 +15,22 @@ from pathlib import Path
 from time import monotonic
 from typing import Literal
 
+from security_review.dast.differential import (
+    CHECK as DIFFERENTIAL_CHECK,
+)
+from security_review.dast.differential import (
+    ENGINE as DIFFERENTIAL_ENGINE,
+)
+from security_review.dast.differential import (
+    MAX_OUTPUT_BYTES as MAX_DIFFERENTIAL_OUTPUT_BYTES,
+)
+from security_review.dast.differential import (
+    PROBE_SCRIPT,
+    DifferentialProbeError,
+    NumericSeed,
+    numeric_query_seeds,
+    parse_probe_output,
+)
 from security_review.dast.zap import (
     MAX_OPENAPI_BYTES,
     MAX_ZAP_REPORT_BYTES,
@@ -81,6 +97,7 @@ class DastScanResult:
     findings: tuple[Finding, ...]
     warnings: tuple[str, ...]
     execution: ScanExecution
+    supplemental_executions: tuple[ScanExecution, ...] = ()
 
 
 def _docker(
@@ -204,7 +221,13 @@ def _execution(
         checks=("openapi-active" if active else "openapi-passive",),
         eligible_endpoints=eligible,
         observed_alert_endpoints=tuple(
-            sorted({f"{item.http_method} {item.http_path}" for item in findings})
+            sorted(
+                {
+                    f"{item.http_method} {item.http_path}"
+                    for item in findings
+                    if item.engine == "zap"
+                }
+            )
         ),
         reason=reason,
     )
@@ -218,6 +241,7 @@ def _result(
     findings: tuple[Finding, ...] = (),
     reason: str | None = None,
     active: bool = False,
+    supplemental_executions: tuple[ScanExecution, ...] = (),
 ) -> DastScanResult:
     warnings: tuple[str, ...] = ("dast_redirects_within_isolated_network_possible",)
     if active:
@@ -246,12 +270,114 @@ def _result(
             reason=reason,
             active=active,
         ),
+        supplemental_executions=supplemental_executions,
     )
+
+
+def _numeric_differential_probe(
+    *,
+    seeds: tuple[NumericSeed, ...],
+    origin: str,
+    network: str,
+    name: str,
+    auth_value: str | None,
+    deadline: float,
+) -> tuple[tuple[Finding, ...], ScanExecution]:
+    """Probe only approved seeds from the existing isolated scan network."""
+
+    started = monotonic()
+    eligible = tuple(sorted({f"GET {seed.path}" for seed in seeds}))
+    env = dict(os.environ)
+    env["DAST_PROBE_FINGERPRINT_KEY"] = secrets.token_hex(32)
+    args = [
+        "run",
+        "--rm",
+        "--name",
+        name,
+        "--network",
+        network,
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "64",
+        "--memory",
+        "256m",
+        "--cpus",
+        "1",
+        "-e",
+        "DAST_PROBE_FINGERPRINT_KEY",
+    ]
+    if auth_value is not None:
+        env["ZAP_AUTH_HEADER_VALUE"] = auth_value
+        args.extend(["-e", "ZAP_AUTH_HEADER_VALUE"])
+    args.extend(
+        [
+            "--entrypoint",
+            "python3",
+            ZAP_IMAGE,
+            "-I",
+            "-B",
+            "-c",
+            PROBE_SCRIPT,
+            origin,
+            json.dumps([(seed.path, seed.parameter, seed.baseline) for seed in seeds]),
+        ]
+    )
+    findings: tuple[Finding, ...] = ()
+    status: Literal["completed", "partial"] = "partial"
+    try:
+        completed = _docker(
+            args,
+            timeout=min(150.0, max(0.1, deadline - monotonic())),
+            env=env,
+            capture=True,
+        )
+        if completed.returncode == 0 and completed.stdout is not None:
+            raw = completed.stdout
+            if len(raw) <= MAX_DIFFERENTIAL_OUTPUT_BYTES:
+                findings = parse_probe_output(raw, seeds)
+                status = "completed"
+    except (OSError, subprocess.TimeoutExpired, DifferentialProbeError):
+        pass
+    execution = ScanExecution(
+        engine=DIFFERENTIAL_ENGINE,
+        kind="dast",
+        status=status,
+        version="1",
+        elapsed_ms=max(0, int((monotonic() - started) * 1_000)),
+        checks=(
+            DIFFERENTIAL_CHECK,
+            f"numeric-sqli-requests-{len(seeds) * 8}"
+            if status == "completed"
+            else f"numeric-sqli-request-limit-{len(seeds) * 8}",
+        ),
+        eligible_endpoints=eligible,
+        observed_alert_endpoints=tuple(
+            sorted({f"GET {finding.http_path}" for finding in findings})
+        ),
+        reason="dast_differential_incomplete" if status == "partial" else None,
+    )
+    return findings, execution
 
 
 def _cleanup(args: list[str]) -> bool:
     try:
         return _docker(args, timeout=_DOCKER_CLEANUP_SECONDS).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _cleanup_auto_removed_probe(name: str) -> bool:
+    """Force-remove a timed-out probe; a completed --rm probe is already gone."""
+
+    if _cleanup(["container", "rm", "-f", name]):
+        return True
+    try:
+        absent = _docker(["container", "inspect", name], timeout=_DOCKER_CLEANUP_SECONDS)
+        return absent.returncode != 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -363,11 +489,13 @@ def run_zap_api_scan(
     network = f"secragraph-dast-{nonce}"
     helper_name = f"secragraph-dast-fetch-{nonce}"
     zap_name = f"secragraph-dast-zap-{nonce}"
+    probe_name = f"secragraph-dast-diff-{nonce}"
     origin = f"http://{_ALIAS}:{port}"
     network_attempted = False
     connect_attempted = False
     helper_attempted = False
     zap_attempted = False
+    probe_attempted = False
     eligible: tuple[str, ...] = ()
     outcome: DastScanResult | None = None
     cleanup_failed = False
@@ -457,6 +585,7 @@ def run_zap_api_scan(
                             )
                         else:
                             eligible = safe.eligible_endpoints
+                            numeric_seeds = numeric_query_seeds(safe.document) if active else ()
                             schema_file = working / "openapi.json"
                             schema_file.write_bytes(safe.document)
                             report_file = working / "zap.json"
@@ -578,6 +707,41 @@ def run_zap_api_scan(
                                         eligible=eligible,
                                         findings=findings,
                                     )
+                                    if numeric_seeds:
+                                        probe_attempted = True
+                                        differential_findings, differential_execution = (
+                                            _numeric_differential_probe(
+                                                seeds=numeric_seeds,
+                                                origin=origin,
+                                                network=network,
+                                                name=probe_name,
+                                                auth_value=auth_value,
+                                                deadline=deadline,
+                                            )
+                                        )
+                                        outcome = DastScanResult(
+                                            findings=(*findings, *differential_findings),
+                                            warnings=outcome.warnings,
+                                            execution=outcome.execution,
+                                            supplemental_executions=(differential_execution,),
+                                        )
+                                    elif active:
+                                        outcome = DastScanResult(
+                                            findings=outcome.findings,
+                                            warnings=outcome.warnings,
+                                            execution=outcome.execution,
+                                            supplemental_executions=(
+                                                ScanExecution(
+                                                    engine=DIFFERENTIAL_ENGINE,
+                                                    kind="dast",
+                                                    status="skipped",
+                                                    version="1",
+                                                    elapsed_ms=0,
+                                                    checks=(DIFFERENTIAL_CHECK,),
+                                                    reason="no_numeric_query_seed",
+                                                ),
+                                            ),
+                                        )
         except subprocess.TimeoutExpired:
             outcome = mode_result(
                 started=started, status="partial", eligible=eligible, reason="dast_scan_timeout"
@@ -587,6 +751,8 @@ def run_zap_api_scan(
                 started=started, status="error", eligible=eligible, reason="dast_docker_failed"
             )
         finally:
+            if probe_attempted and not _cleanup_auto_removed_probe(probe_name):
+                cleanup_failed = True
             if zap_attempted and not _cleanup(["container", "rm", "-f", zap_name]):
                 cleanup_failed = True
             if helper_attempted and not _cleanup(["container", "rm", "-f", helper_name]):
@@ -606,5 +772,6 @@ def run_zap_api_scan(
             execution=outcome.execution.model_copy(
                 update={"status": "error", "reason": "dast_cleanup_failed"}
             ),
+            supplemental_executions=outcome.supplemental_executions,
         )
     return outcome

@@ -43,7 +43,7 @@ def scan_dast_container(
             {
                 "findings": result.findings,
                 "warnings": result.warnings,
-                "executions": (result.execution,),
+                "executions": (result.execution, *result.supplemental_executions),
                 "target_name": container,
                 "enrichment_budget_seconds": enrichment_budget_seconds,
             }

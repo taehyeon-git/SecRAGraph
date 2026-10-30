@@ -130,6 +130,75 @@ def test_exact_labels_score_tp_fp_fn_tn_and_exclude_other_alerts(tmp_path: Path)
     assert result["manifest_sha256"] == manifest.sha256
 
 
+def test_numeric_differential_rule_scores_only_its_own_engine(tmp_path: Path) -> None:
+    cases = _cases()
+    for case in cases[:2]:
+        case["rule_id"] = "DIFF/NUMERIC_SQLI"
+    manifest = _manifest(tmp_path, cases)
+    passive = _report("passive")
+    active = _report(
+        "active",
+        (
+            SimpleNamespace(
+                engine="dast-differential",
+                rule_id="DIFF/NUMERIC_SQLI",
+                http_method="GET",
+                http_path="/sql-vulnerable",
+                cwe_ids=("CWE-89",),
+            ),
+        ),
+    )
+    active.executions += (
+        SimpleNamespace(
+            engine="dast-differential",
+            kind="dast",
+            status="completed",
+            elapsed_ms=321,
+            checks=("numeric-sqli-differential",),
+            eligible_endpoints=("GET /sql-vulnerable", "GET /sql-safe"),
+        ),
+    )
+
+    result = _evaluate(manifest, passive, active)
+
+    assert {
+        case.id: case.outcome for case in result.cases if case.rule_id == "DIFF/NUMERIC_SQLI"
+    } == {
+        "sql-vulnerable": "TP",
+        "sql-safe": "TN",
+    }
+    assert result.to_dict()["differential"] == {
+        "engine": "dast-differential",
+        "status": "completed",
+        "elapsed_ms": 321,
+        "requests": 16,
+        "requests_per_seed": 8,
+    }
+
+
+def test_numeric_differential_requires_completed_separate_execution(tmp_path: Path) -> None:
+    cases = _cases()
+    for case in cases[:2]:
+        case["rule_id"] = "DIFF/NUMERIC_SQLI"
+    manifest = _manifest(tmp_path, cases)
+    active = _report("active")
+
+    with pytest.raises(DastBenchmarkInputError, match="incomplete_differential_execution"):
+        _evaluate(manifest, _report("passive"), active)
+
+    active.executions += (
+        SimpleNamespace(
+            engine="dast-differential",
+            kind="dast",
+            status="partial",
+            checks=("numeric-sqli-differential",),
+            eligible_endpoints=("GET /sql-vulnerable", "GET /sql-safe"),
+        ),
+    )
+    with pytest.raises(DastBenchmarkInputError, match="incomplete_differential_execution"):
+        _evaluate(manifest, _report("passive"), active)
+
+
 @pytest.mark.parametrize(
     "change", ["duplicate", "unbalanced", "wrong_proof", "wrong_method", "bad_path"]
 )

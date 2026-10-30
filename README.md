@@ -33,7 +33,7 @@ uv run security-review scan examples/insecure/sample.py --format markdown
 flowchart LR
   A["회원 API · CLI"] --> B["입력 검증 · 제한된 텍스트 스냅샷"]
   B --> C["LangGraph 스캔"]
-  C --> D["SAST · 비밀정보 · 설정 · OSV"]
+  C --> D["Opengrep · Python 파일 간 흐름 · 비밀정보 · 설정 · OSV"]
   D --> E["CWE · 선택적 RAG 근거"]
   E --> F["Finding + 검사 범위"]
   F --> G["JSON · Markdown · SARIF"]
@@ -43,13 +43,13 @@ flowchart LR
 
 | 경로 | 검사 대상과 도구 |
 | --- | --- |
-| **회원 업로드·CLI** | Opengrep SAST, Gitleaks 비밀정보, Checkov와 Docker Compose 정책, 잠금 파일의 정확한 패키지 버전에 대한 OSV.dev 조회 |
+| **회원 업로드·CLI** | Opengrep SAST와 정적 Python 파일 간 흐름, Gitleaks 비밀정보, Checkov와 Docker Compose 정책, 잠금 파일의 정확한 패키지 버전에 대한 OSV.dev 조회 |
 | **신뢰된 Git 체크아웃** | Gitleaks로 선택한 커밋의 비밀정보 검사. 회원 업로드에서 Git 이력 검사를 시작할 수 없음 |
 | **격리된 테스트 API** | ZAP 패시브 검사와 명시적으로 허용한 능동 검사. 운영 URL을 받는 회원 API 기능은 없음 |
 | **CI 빌드 이미지** | Trivy로 OS·언어 패키지와 이미지 설정 검사, CycloneDX SBOM 생성. 회원 업로드에서 이미지 빌드·검사를 시작할 수 없음 |
 | **공개 저장소 자체** | GitHub Actions의 CodeQL `security-extended`. 회원이 업로드한 비공개 코드에는 적용하지 않음 |
 
-Opengrep은 Python·JavaScript/TypeScript의 규칙 패턴과 **같은 파일 안의 함수 간** 일부 웹 입력 흐름을 검사합니다. 지원 규칙·파일 형식, 실제 실행 엔진과 검사 실패는 보고서에 남깁니다. 검사별 상세 범위와 신뢰 경계는 [아키텍처](docs/architecture.md) 및 [위협 모델](docs/threat-model.md)에 있습니다.
+Opengrep은 Python·JavaScript/TypeScript의 규칙 패턴과 **같은 파일 안의 함수 간** 일부 웹 입력 흐름을 검사합니다. 별도 `python-flow` 엔진은 Python의 정적 로컬 import와 단순 함수 호출을 따라 파일 간 명령 실행·SQL 쿼리 문자열 흐름을 검사합니다. 지원 규칙·파일 형식, 실제 실행 엔진과 검사 실패는 보고서에 남깁니다. 검사별 상세 범위와 신뢰 경계는 [아키텍처](docs/architecture.md) 및 [위협 모델](docs/threat-model.md)에 있습니다.
 
 ## LangGraph 워크플로
 
@@ -64,20 +64,20 @@ PDF는 자동 탐색·다운로드하지 않습니다. [공식 문서 수집 절
 
 ## 검증 결과
 
-아래 수치는 [2026-10-30 `main` CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41074726955)의 **서로 분리된 평가**입니다. 대상과 분모가 달라 하나의 탐지율로 합산하지 않습니다.
+스캐너와 DAST는 2026-10-31 로컬 Docker 재측정, 나머지 항목은 [2026-10-30 `main` CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41074726955)의 결과입니다. 평가별 대상과 분모가 달라 하나의 탐지율로 합산하지 않습니다.
 
 | 평가 | 결과 |
 | --- | --- |
-| 회원 API 전체 왕복 | 로그인·혼합 ZIP·4개 엔진·저장 보고서·소유권 등 **10/10 계약 통과**, finding 10건, 경고 0건 |
-| 스캐너 제작 사례 | **25개 사례**, TP 37 · FP 1 · FN 1 |
+| 회원 API 전체 왕복 (2026-10-30) | 로그인·혼합 ZIP·4개 엔진·저장 보고서·소유권 등 **10/10 계약 통과**, finding 10건, 경고 0건 |
+| 스캐너 제작 사례 (2026-10-31) | **29/29 사례, 162/162 라벨**, TP 44 · FP 0 · FN 0, 파일 간 흐름 경로 포함 **6/6** 확인. 실행 189,926ms |
 | RAG·OSV/CWE 연동 계약 | 오프라인 RAG 4/4, 주입형 제공자 계약 1/1. 같은 검색 질의를 사용하는 finding 20건의 호출을 **20회에서 1회**로 개선 |
-| 격리 API DAST | **8개 사례**, TP 3 · FP 0 · FN 1 · TN 4 |
+| 격리 API DAST (2026-10-31) | **8/8 사례**, TP 4 · FP 0 · FN 0 · TN 4. 숫자형 SQLi 별도 차등 엔진 16회 요청, 827ms |
 | CI 이미지·SBOM | 구성요소 386개, Trivy 권고 383건 기록. 기존 고위험 항목은 해결 과제 |
 | Git 이력·의존성 감사 | 선택 커밋의 새 비밀정보 finding 0건, 의존성 감사 통과 |
 
-회원 API의 업로드·검사 단계는 해당 CI 러너에서 **24,445ms**였습니다. 시간은 환경과 캐시에 따라 달라집니다. 제작 사례의 점수는 회귀 시험 결과이며 임의 저장소의 탐지율이나 실제 악용 가능성을 뜻하지 않습니다.
+회원 API의 업로드·검사 단계는 2026-10-30 CI 러너에서 **24,445ms**였습니다. 시간은 환경과 캐시에 따라 달라집니다. 제작 사례의 점수는 회귀 시험 결과이며 임의 저장소의 탐지율이나 실제 악용 가능성을 뜻하지 않습니다. 외부 OWASP BenchmarkPython 90개 사례의 별도 결과는 **TP 27 · FP 19 · FN 9 · TN 35**로 유지됩니다.
 
-분모와 재현 방법: [전체 파이프라인 측정과 개선 내역](docs/evidence/pipeline-benchmark-2026-10-30.md) · [외부 스캐너 도전](docs/evidence/multiengine-external-2026-10-27.md) · [DAST 평가](docs/evidence/dast-benchmark.md)
+분모와 재현 방법: [스캐너 평가](docs/demo.md) · [전체 파이프라인 측정과 개선 내역](docs/evidence/pipeline-benchmark-2026-10-30.md) · [외부 스캐너 도전](docs/evidence/multiengine-external-2026-10-27.md) · [DAST 평가](docs/evidence/dast-benchmark.md)
 
 ## 테스트와 CI
 
@@ -93,7 +93,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 
 ## 한계
 
-- **탐지 범위:** 업로드 SAST의 흐름 추적은 같은 파일 안에 한정됩니다. 스캐너 제작 사례에 FP 1건·FN 1건, DAST 제작 사례에 숫자형 SQL 주입 FN 1건이 남아 있습니다.
+- **탐지 범위:** Python 파일 간 분석은 정적 로컬 import와 지원 함수·sink에 한정됩니다. 동적 import, 복잡한 객체 흐름과 다른 언어의 파일 간 흐름은 남은 과제입니다. DAST의 숫자형 SQL 주입은 승인된 일회용 대상의 응답 비교로 검사하며, 응답이 불안정하거나 의미 있는 차이가 없는 취약점은 놓칠 수 있습니다. 작성자 회귀 사례의 FP·FN이 0이어도 임의 저장소의 정확도를 보장하지 않습니다.
 - **외부 근거:** OSV는 지원 잠금 파일의 정확한 버전만 조회합니다. 모델 답변과 수집 문서의 품질은 별도 검증이 필요하며, 주입형 제공자 계약은 실시간 제공자의 정확도를 측정하지 않습니다.
 - **운영 보안:** 회원 로그인은 로컬 데모용입니다. 속도 제한·MFA·계정 복구가 없어 인터넷에 그대로 배포할 수 없습니다. 외부 검사기는 API 컨테이너와 네트워크 네임스페이스를 공유합니다.
 - **이미지 위험:** 위 고정 CI 실행의 Trivy 권고 383건에는 HIGH 107건·CRITICAL 6건이 포함됩니다. CI 기준선은 새 고위험 항목을 차단하지만 기존 항목을 해결하지는 않습니다. 권고가 곧 실제 악용 가능성을 증명하는 것은 아닙니다.

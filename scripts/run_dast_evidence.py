@@ -33,8 +33,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
 _BENCHMARK_MANIFEST = _ROOT / "data" / "evaluation" / "dast_cases.json"
-_BENCHMARK_SHA = "32ecbfb19e6eabd27d9988d71fdb60058740fa44f4d3cb69cdc1c2c0a0d2fdff"
-_BENCHMARK_RULE_FLOORS = ("ZAP/10021", "ZAP/20019", "ZAP/40018")
+_BENCHMARK_SHA = "5ebdae87db7af9c06637beb7d6ef581853445b633901a3b1e792b317323cc2b7"
+_BENCHMARK_RULE_FLOORS = ("ZAP/10021", "ZAP/20019", "ZAP/40018", "DIFF/NUMERIC_SQLI")
 _ARTIFACT_NAMES = (
     "dast.json",
     "dast.md",
@@ -493,13 +493,16 @@ def _require_completion(report: ScanReport) -> None:
 
 
 def _require_benchmark_floor(manifest: DastBenchmarkManifest, result: DastBenchmarkResult) -> None:
-    """Guard the reviewed corpus without treating its known numeric FN as success."""
+    """Guard every reviewed rule's positive and negative control."""
 
     if manifest.sha256 != _BENCHMARK_SHA or result.manifest_sha256 != manifest.sha256:
         raise RuntimeError("benchmark_manifest_unreviewed")
     scores = dict(result.rules)
-    if set(scores) != set(_BENCHMARK_RULE_FLOORS) or any(
-        scores[rule].tp < 1 or scores[rule].fp != 0 for rule in _BENCHMARK_RULE_FLOORS
+    if (
+        result.metrics.fn != 0
+        or result.metrics.fp != 0
+        or set(scores) != set(_BENCHMARK_RULE_FLOORS)
+        or any(scores[rule].tp < 1 or scores[rule].fp != 0 for rule in _BENCHMARK_RULE_FLOORS)
     ):
         raise RuntimeError("benchmark_regression")
 

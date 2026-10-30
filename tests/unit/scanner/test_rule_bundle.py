@@ -17,3 +17,26 @@ def test_vendored_opengrep_rules_match_pinned_manifest() -> None:
     }
     assert actual == manifest["files"]
     assert len(actual) == 79
+    assert {
+        path: patch["upstream_sha256"] for path, patch in manifest["local_patches"].items()
+    } == {
+        "python/sql/rule-hardcoded-sql-expression.yml": (
+            "f054dce5ef49e24a0b1faa12f3787ea657f539f2b9c733498313c78681271559"
+        ),
+    }
+    assert all(
+        patch["upstream_sha256"] != actual[path] and patch["reason"]
+        for path, patch in manifest["local_patches"].items()
+    )
+
+
+def test_owasp_challenge_rule_hashes_follow_bundled_rules() -> None:
+    root = Path(__file__).resolve().parents[3] / "data" / "engines"
+    challenge = json.loads(
+        (root.parent / "evaluation" / "owasp_python_v0.1_challenge.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    for rule in challenge["rules"]:
+        actual = sha256(root.joinpath(*Path(rule["config_path"]).parts).read_bytes()).hexdigest()
+        assert actual == rule["sha256"]

@@ -77,13 +77,16 @@ def test_multiengine_pipeline_preserves_findings_and_incomplete_coverage(tmp_pat
     assert result.findings == (finding,)
     assert [item.engine for item in result.executions] == [
         "opengrep",
+        "python-flow",
         "gitleaks",
         "checkov",
         "compose-policy",
     ]
     assert result.executions[0].languages == ("python",)
-    assert result.executions[1].status == "not_run"
-    assert result.executions[1].reason == "tool_unavailable"
+    assert result.executions[1].kind == "sast"
+    assert result.executions[1].eligible_files == ("app.py",)
+    assert result.executions[2].status == "not_run"
+    assert result.executions[2].reason == "tool_unavailable"
     assert all(adapter.calls for adapter in (sast, secrets, config, compose))
 
 
@@ -121,16 +124,17 @@ def test_compose_target_has_distinct_configuration_coverage(tmp_path: Path) -> N
 
     assert [item.engine for item in result.executions] == [
         "opengrep",
+        "python-flow",
         "gitleaks",
         "checkov",
         "compose-policy",
     ]
-    assert result.executions[2].eligible_files == ()
-    assert result.executions[2].status == "skipped"
-    assert result.executions[3].kind == "configuration"
-    assert result.executions[3].eligible_files == ("compose.override.yaml",)
-    assert result.executions[3].languages == ("docker-compose",)
-    assert result.executions[3].scanned_files == ("compose.override.yaml",)
+    assert result.executions[3].eligible_files == ()
+    assert result.executions[3].status == "skipped"
+    assert result.executions[4].kind == "configuration"
+    assert result.executions[4].eligible_files == ("compose.override.yaml",)
+    assert result.executions[4].languages == ("docker-compose",)
+    assert result.executions[4].scanned_files == ("compose.override.yaml",)
     assert result.findings == (finding,)
     assert compose.timeouts[0] <= 20.0
 
@@ -144,14 +148,16 @@ def test_compose_finding_survives_langgraph_report_serialization(tmp_path: Path)
 
     assert [item.engine for item in restored.executions] == [
         "opengrep",
+        "python-flow",
         "gitleaks",
         "checkov",
         "compose-policy",
     ]
-    assert restored.executions[2].eligible_files == ()
-    assert restored.executions[2].status == "skipped"
-    assert restored.executions[3].languages == ("docker-compose",)
-    assert restored.executions[3].status == "completed"
+    assert restored.executions[1].eligible_files == ()
+    assert restored.executions[3].eligible_files == ()
+    assert restored.executions[3].status == "skipped"
+    assert restored.executions[4].languages == ("docker-compose",)
+    assert restored.executions[4].status == "completed"
     assert [(item.rule_id, item.file_path, item.line_start) for item in restored.findings] == [
         ("COMPOSE/PRIVILEGED", "compose.yaml", 3)
     ]
@@ -174,6 +180,7 @@ def test_deadline_coverage_uses_each_engine_supported_files(
 
     by_engine = {execution.engine: execution for execution in result.executions}
     assert by_engine["opengrep"].eligible_files == ("app.py",)
+    assert by_engine["python-flow"].eligible_files == ("app.py",)
     assert by_engine["gitleaks"].eligible_files == (
         ".env.local",
         "app.py",
@@ -185,6 +192,34 @@ def test_deadline_coverage_uses_each_engine_supported_files(
     assert by_engine["compose-policy"].status == "not_run"
     assert by_engine["compose-policy"].languages == ("docker-compose",)
     assert all(execution.status == "not_run" for execution in result.executions)
+
+
+def test_cross_file_python_flow_survives_report_serialization(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "from relay import command\nimport subprocess\n\n"
+        "def route(request):\n"
+        "    value = request.query_params.get('cmd')\n"
+        "    subprocess.run(command(value), shell=True)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "relay.py").write_text(
+        "def command(value):\n    return 'echo ' + value\n", encoding="utf-8"
+    )
+
+    report = ScanReport.model_validate_json(scan_path(tmp_path, ScanLimits()).model_dump_json())
+
+    flow = [finding for finding in report.findings if finding.engine == "python-flow"]
+    assert len(flow) == 1
+    assert flow[0].rule_id == "PYFLOW/SHELL"
+    assert [(point.file_path, point.line_start, point.role) for point in flow[0].trace] == [
+        ("app.py", 5, "source"),
+        ("relay.py", 1, "step"),
+        ("relay.py", 2, "step"),
+        ("app.py", 6, "sink"),
+    ]
+    coverage = next(item for item in report.executions if item.engine == "python-flow")
+    assert coverage.status == "completed"
+    assert coverage.scanned_files == ("app.py", "relay.py")
 
 
 def test_coverage_languages_include_extensionless_and_compound_formats() -> None:

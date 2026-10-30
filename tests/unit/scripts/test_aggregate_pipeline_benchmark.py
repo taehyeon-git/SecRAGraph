@@ -78,6 +78,7 @@ def _fixture(root: Path) -> None:
                 }
                 for engine, kind in (
                     ("opengrep", "sast"),
+                    ("python-flow", "sast"),
                     ("gitleaks", "secret"),
                     ("checkov", "configuration"),
                     ("compose-policy", "configuration"),
@@ -361,13 +362,25 @@ def test_gitleaks_reported_paths_cannot_claim_full_file_receipt(tmp_path: Path) 
         _aggregate(tmp_path)
 
 
-def test_api_benchmark_requires_findings_from_all_four_engines(tmp_path: Path) -> None:
+def test_api_benchmark_requires_four_fixture_findings_with_five_engines(tmp_path: Path) -> None:
     _fixture(tmp_path)
     payload = json.loads((tmp_path / "api/pipeline-api.json").read_text(encoding="utf-8"))
-    payload["report"]["finding_count"] = 0
+    payload["report"]["finding_count"] = 3
     _write(tmp_path, "api", "pipeline-api.json", payload)
 
     with pytest.raises(PipelineEvidenceError, match="api_report_incomplete"):
+        _aggregate(tmp_path)
+
+
+def test_api_benchmark_requires_python_cross_file_engine(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    payload = json.loads((tmp_path / "api/pipeline-api.json").read_text(encoding="utf-8"))
+    payload["executions"] = [
+        item for item in payload["executions"] if item["engine"] != "python-flow"
+    ]
+    _write(tmp_path, "api", "pipeline-api.json", payload)
+
+    with pytest.raises(PipelineEvidenceError, match="api_engine_missing"):
         _aggregate(tmp_path)
 
 

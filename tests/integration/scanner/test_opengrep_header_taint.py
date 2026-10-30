@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +14,18 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RULE_ID = "OG/python-web-sql-taint"
 
 
-@unittest.skipUnless(shutil.which("opengrep"), "pinned Opengrep binary is unavailable")
 class FlaskHeaderTaintTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        executable = shutil.which("opengrep")
+        if executable is None:
+            raise unittest.SkipTest("pinned Opengrep binary is unavailable")
+        version = subprocess.run(  # noqa: S603  # nosec B603
+            [executable, "--version"], capture_output=True, text=True, check=False
+        )
+        if version.returncode != 0 or version.stdout.strip() != "1.32.0":
+            raise unittest.SkipTest("pinned Opengrep 1.32.0 is unavailable")
+
     def _scan(self, source: str):
         with tempfile.TemporaryDirectory(prefix="secragraph-header-test-") as directory:
             root = Path(directory)

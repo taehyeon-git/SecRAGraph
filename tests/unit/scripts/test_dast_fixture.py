@@ -185,7 +185,12 @@ def test_manifest_covers_equal_vulnerable_and_benign_cases_by_rule() -> None:
     assert (
         len({(case["mode"], case["rule_id"], case["method"], case["path"]) for case in cases}) == 8
     )
-    for rule, count in (("ZAP/40018", 4), ("ZAP/20019", 2), ("ZAP/10021", 2)):
+    for rule, count in (
+        ("ZAP/40018", 2),
+        ("DIFF/NUMERIC_SQLI", 2),
+        ("ZAP/20019", 2),
+        ("ZAP/10021", 2),
+    ):
         selected = [case for case in cases if case["rule_id"] == rule]
         assert len(selected) == count
         assert sum(case["expected"] for case in selected) == count // 2

@@ -4,30 +4,31 @@
 
 ## 1. 작성자 회귀 사례
 
-[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 및 Docker Compose 설정의 취약·정상 파일을 함께 담습니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다. Compose 정책의 선언 한정 범위와 직접 대조 결과는 [전용 증거](evidence/compose-iac-2026-10-30.md)에 있습니다.
+[현재 manifest](../data/evaluation/multiengine_cases.json)는 Python·JavaScript SAST, 비밀정보, Terraform 및 Docker Compose 설정의 취약·정상 파일을 함께 담습니다. Python 파일 간 source→sink 흐름 4개 사례도 포함합니다. 평가는 실제 `scan_path`를 호출하고 (`사례, 엔진, 규칙, 파일, 시작 줄`) 라벨을 비교합니다. 탐지 결과가 없는 정상 라벨도 채점합니다. 제출 코드는 실행하지 않습니다. Compose 정책의 선언 한정 범위와 직접 대조 결과는 [전용 증거](evidence/compose-iac-2026-10-30.md)에 있습니다.
 
-- 입력 SHA-256: `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`
-- 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30, `compose-policy` 2026.10.30.1; 잠금 파일이 없어 OSV는 이 자료에서 미채점
-- 결과: 사례 25/25, 라벨 152/152 채점, 라벨 밖 finding 0건, 흐름 경로 4/4 확인
-- 합계: TP 37, FP 1, FN 1; 정밀도·재현율·F1 모두 37/38 ≈ 0.974
-- 총 경과: 166,237 ms. 엔진별 누적 시간은 해당 엔진이 적격인 사례의 실행 시간 합계이며 총 경과와 정확히 같을 필요는 없습니다.
+- 입력 SHA-256: `e7a1a9cc8e497be3872db6f604f249b6c1a13113ed5b57d0108ad500e969a126`
+- 도구: Opengrep 1.32.0, Gitleaks 8.30.1, Checkov 3.3.30, `compose-policy` 2026.10.30.1, 독립 `python-flow`; 잠금 파일이 없어 OSV는 이 자료에서 미채점
+- 2026-10-31 로컬 Docker 결과: 사례 29/29, 라벨 162/162 채점, 라벨 밖 finding 0건, 흐름 경로 6/6 확인
+- 합계: TP 44, FP 0, FN 0; 이 **작성자 회귀 자료 안에서만** 정밀도·재현율·F1 모두 1.000
+- 총 경과: 189,926 ms. 같은 호스트의 전체 테스트와 병행한 실행 시간입니다. 엔진별 누적 시간은 해당 엔진이 적격인 사례의 실행 시간 합계이며 총 경과와 정확히 같을 필요는 없습니다.
 
 | 엔진 | TP | FP | FN | 엔진 누적 시간 |
 | --- | ---: | ---: | ---: | ---: |
-| Opengrep | 13 | 1 | 1 | 130,910 ms |
-| Gitleaks | 1 | 0 | 0 | 17,672 ms |
-| Checkov | 12 | 0 | 0 | 17,071 ms |
-| Compose 정책 | 11 | 0 | 0 | 11 ms |
+| Opengrep | 18 | 0 | 0 | 157,614 ms |
+| Gitleaks | 1 | 0 | 0 | 15,330 ms |
+| Checkov | 12 | 0 | 0 | 16,394 ms |
+| Compose 정책 | 11 | 0 | 0 | 1 ms |
+| Python 파일 간 흐름 | 2 | 0 | 0 | 0 ms |
 
-동봉한 벤더 SQL 패턴 규칙은 외부 입력으로 만든 f-string 쿼리 한 건을 놓쳤습니다. 별도 웹 입력 taint 규칙은 평가에서 라벨을 붙인 다른 SQL 흐름을 탐지했습니다. 개별 규칙의 분모·시간·누락과 각 실행의 파일 범위는 `build/evidence/multiengine-scanner.json` 및 `.md`에 생성됩니다. 이 사례들은 작성자가 만들었으므로 회귀 평가이지 임의 저장소의 탐지율 추정이 아닙니다. 과거 8개 자체 규칙의 120건 결과는 [역사적 증거](evidence/expanded-scanner-2026-10-27.md)로만 보존하며 현재 수치와 합치지 않습니다.
+이전 25개 사례에서 남았던 f-string SQL 누락과 정수로 제한한 셸 인수의 오경보를 수정했습니다. SQL 보강은 로컬 벤더 규칙에, 셸 오경보 억제는 정적 AST 검증에 한정합니다. 원래 25개 파일의 27개 정확 일치 판정은 TP 13 · FP 1 · FN 1에서 TP 14 · FP 0 · FN 0으로 바뀌었습니다. 독립 OWASP 90개 사례의 결과는 변경되지 않았습니다. 개별 규칙의 분모·시간·누락과 각 실행의 파일 범위는 `build/evidence/multiengine-scanner.json` 및 `.md`에 생성됩니다. 이 사례들은 작성자가 만들었으므로 회귀 평가이지 임의 저장소의 탐지율 추정이 아닙니다. 과거 8개 자체 규칙의 120건 결과는 [역사적 증거](evidence/expanded-scanner-2026-10-27.md)로만 보존하며 현재 수치와 합치지 않습니다.
 
 CI는 [고정 도구 이미지](../Dockerfile)를 빌드한 다음, 네트워크를 끈 읽기 전용 컨테이너에서 다음 평가를 실행합니다. Opengrep 보조 실행 파일용 `/tmp/secragraph`는 실행 가능한 임시 영역이고 제출 소스 스냅샷용 `/tmp/secragraph-snapshots`는 `noexec`입니다. 전체 Docker 옵션은 [CI 설정](../.github/workflows/ci.yml)을 참고하세요.
 
 ```text
-python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_cases.json --staging-dir /tmp/secragraph --require-complete --require-traces
+python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_cases.json --staging-dir /tmp/secragraph --require-complete --require-traces --require-match
 ```
 
-`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로가 확인되지 않은 사례를 실패로 처리합니다. 알려진 FN을 숨기지 않기 위해 `--require-match`는 CI 게이트로 사용하지 않습니다. 이어서 `scripts.check_compose_evidence`가 같은 JSON을 실제 manifest와 대조해 Compose 사례의 완료 범위, 규칙별 양성·음성 평가, 새 미평가 finding, FP/FN을 확인합니다. 호스트에서 직접 전체 평가 명령을 실행하려면 Opengrep·Gitleaks·Checkov가 PATH에 있어야 합니다. Compose 정책에는 별도 실행 파일이 필요하지 않습니다.
+`--require-complete`는 미채점 엔진을, `--require-traces`는 예상한 source→sink 경로 누락을, `--require-match`는 작성자 회귀 자료의 FP/FN을 실패로 처리합니다. 이어서 `scripts.check_compose_evidence`가 같은 JSON을 실제 manifest와 대조해 Compose 사례의 완료 범위, 규칙별 양성·음성 평가, 새 미평가 finding, FP/FN을 확인합니다. 호스트에서 직접 전체 평가 명령을 실행하려면 Opengrep·Gitleaks·Checkov가 PATH에 있어야 합니다. Compose 정책과 Python 파일 간 분석에는 별도 실행 파일이 필요하지 않습니다.
 
 ## 2. 독립 라벨 코퍼스
 
@@ -47,7 +48,7 @@ python -m scripts.run_multiengine_benchmark --cases data/evaluation/multiengine_
 
 ## 6. 코드 흐름 검증
 
-공개 저장소의 [CodeQL 워크플로](../.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 로컬 [교차 파일 검증 기록](evidence/codeql-cross-file-smoke.md)에서 내장 `py/command-line-injection` 쿼리는 FastAPI 입력→다른 파일의 명령 실행 경로를 확인했지만 사용자 정의 허용 목록을 거친 안전 경로에도 경고를 냈습니다. [FastAPI 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 여러 파일을 거치는 합성 source→sink와 명시적 차단 함수를 검증하기 위한 테스트 자료이며 제품 경고 규칙은 아닙니다. 회원의 비공개 업로드는 CodeQL 라이선스 범위 밖이므로 Opengrep의 파일 내부 taint 분석을 사용합니다.
+공개 저장소의 [CodeQL 워크플로](../.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 로컬 [교차 파일 검증 기록](evidence/codeql-cross-file-smoke.md)에서 내장 `py/command-line-injection` 쿼리는 FastAPI 입력→다른 파일의 명령 실행 경로를 확인했지만 사용자 정의 허용 목록을 거친 안전 경로에도 경고를 냈습니다. [FastAPI 픽스처 쿼리](../codeql/FastApiCrossFileFlow.ql)는 여러 파일을 거치는 합성 source→sink와 명시적 차단 함수를 검증하기 위한 테스트 자료이며 제품 경고 규칙은 아닙니다. 회원의 비공개 업로드는 CodeQL 라이선스 범위 밖이므로 Opengrep의 파일 내부 taint 분석과 독립적인 Python AST 파일 간 흐름 분석을 사용합니다. 작성자 코퍼스에는 파일 간 명령 실행·SQL 흐름의 취약·정상 4개 사례와 source·step·sink 위치 대조를 추가했습니다.
 
 ## 7. 격리 테스트 API DAST
 
@@ -57,7 +58,7 @@ Docker가 실행 중인 환경에서 다음 평가 명령을 실행합니다. �
 uv run python -m scripts.run_dast_evidence
 ```
 
-스크립트는 임의 이름의 Compose 프로젝트에서 [고정 테스트 API](../apps/dast_fixture/main.py)를 실행합니다. 테스트 API는 호스트 포트를 열지 않고 `io.secragraph.dast.disposable=true`와 `io.secragraph.dast.active-permitted=true` 표시가 붙습니다. 패시브 단계는 OpenAPI의 GET/HEAD/OPTIONS 시작 경로에 ZAP `-S` 모드로 요청하고, 임시 세션 토큰으로 `/protected`의 인증 요청을 확인합니다. 능동 단계는 `x-secragraph-dast-active: true`가 표시된 GET 경로만 시작점으로 사용하고 ZAP의 API-Minimal 능동 정책을 실행합니다. SQL 주입·외부 리디렉션·보안 헤더의 [취약·정상 8개 사례](../data/evaluation/dast_cases.json)가 각 단계에서 실제 요청 또는 공격형 입력을 받았는지 확인한 뒤 탐지·오경보·누락을 채점합니다. 검사·검증이 실패해도 Compose 프로젝트와 볼륨을 정리하며, 증거가 없으면 채점하지 않습니다.
+스크립트는 임의 이름의 Compose 프로젝트에서 [고정 테스트 API](../apps/dast_fixture/main.py)를 실행합니다. 테스트 API는 호스트 포트를 열지 않고 `io.secragraph.dast.disposable=true`와 `io.secragraph.dast.active-permitted=true` 표시가 붙습니다. 패시브 단계는 OpenAPI의 GET/HEAD/OPTIONS 시작 경로에 ZAP `-S` 모드로 요청하고, 임시 세션 토큰으로 `/protected`의 인증 요청을 확인합니다. 능동 단계는 `x-secragraph-dast-active: true`가 표시된 GET 경로만 시작점으로 사용하고 ZAP의 API-Minimal 능동 정책을 실행합니다. 같은 격리 네트워크에서 별도 `dast-differential` 엔진이 숫자 예제가 있는 GET query seed에 반복 baseline·참·거짓·동등성 대조 요청을 수행합니다. SQL 주입·외부 리디렉션·보안 헤더의 [취약·정상 8개 사례](../data/evaluation/dast_cases.json)가 각 단계에서 실제 요청 또는 공격형 입력을 받았는지 확인한 뒤 탐지·오경보·누락을 채점합니다. 검사·검증이 실패해도 Compose 프로젝트와 볼륨을 정리하며, 증거가 없으면 채점하지 않습니다.
 
 Linux CI에서는 별도의 일회용 네트워크 시험도 실행합니다. 같은 숨겨진 테스트 API 리디렉션 경로를 일반 내부 브리지와 격리 브리지에서 각각 호출합니다. 일반 브리지에서는 브리지 게이트웨이에만 바인딩한 임시 마커 서버에 실제로 도달해야 하고, 격리 브리지에서는 같은 리디렉션을 따라가도 마커에 도달하지 못해야 합니다. 모든 네트워크·마커를 정리합니다. 이 시험은 **스캐너의 호스트 게이트웨이 경계**를 검증하며, 동일 격리 네트워크 안의 다른 경로나 포트 또는 원래 Compose 네트워크를 유지하는 테스트 API 자신의 외부 연결까지 차단한다는 뜻은 아닙니다. Windows 로컬 실행은 Docker 네트워크 구성 검증과 ZAP 스캔을 실행하고 이 Linux 전용 마커 시험은 건너뜁니다.
 
@@ -65,6 +66,6 @@ Linux CI에서는 별도의 일회용 네트워크 시험도 실행합니다. �
 
 2026-10-28 로컬 실행에서는 ZAP 검사 실행 상태가 `completed`였고 `/public`의 `ZAP/10021` 경고 1건을 반환했습니다. 보고서 상태는 `dast_passive_only` 범위 경고를 포함해 `completed_with_warnings`였으며, SARIF에는 파일 위치 없이 논리적 HTTP 위치만 있었습니다. 이 값은 의도적으로 보안 헤더를 뺀 **합성 테스트 API 한 개**의 결과입니다.
 
-2026-10-30 최종 로컬 Docker 실행은 8/8 사례를 채점해 **TP 3, FP 0, FN 1, TN 4**였습니다. SQL 주입 2개 중 문자열형은 탐지됐고 숫자형은 놓쳤습니다. 외부 리디렉션과 누락된 `nosniff` 헤더는 각 취약 경로에서만 탐지됐습니다. [커밋·manifest 해시, 규칙별 분모·검사 시간·남은 한계](evidence/dast-benchmark.md)에 실측을 기록했습니다. 능동 보고서에는 다른 ZAP 규칙의 경고도 있으므로 전체 경고 건수를 SQL 주입 탐지 수로 해석하지 않습니다. Linux 전용 호스트 게이트웨이 마커 시험과 배포 환경 재현은 CI에서 별도로 확인합니다.
+2026-10-30 ZAP 단독 로컬 Docker 기준 측정은 8/8 사례에서 **TP 3, FP 0, FN 1, TN 4**였고 숫자형 SQLi를 놓쳤습니다. 2026-10-31 별도 차등 엔진을 추가한 로컬 실행은 같은 8개 경로·라벨에서 **TP 4, FP 0, FN 0, TN 4**였습니다. 숫자형 TP는 `DIFF/NUMERIC_SQLI`의 결과이며 `ZAP/40018` 경고로 계산하지 않습니다. [두 manifest 해시, 규칙별 분모·요청 수·검사 시간·남은 한계](evidence/dast-benchmark.md)에 실측을 분리해 기록했습니다. 능동 보고서에는 다른 ZAP 규칙의 경고도 있으므로 전체 경고 건수를 SQL 주입 탐지 수로 해석하지 않습니다. Linux 전용 호스트 게이트웨이 마커 시험과 배포 환경 재현은 CI에서 별도로 확인합니다.
 
 위 2026-10-28 수치는 과거 패시브 실행 기록입니다. 현재 8개 DAST 사례도 작성자 합성 회귀 시험이며 실제 운영 API 탐지율이나 모든 능동 규칙의 성능을 뜻하지 않습니다. 능동 검사는 대상 상태를 바꿀 수 있으므로 CLI에서 `--active`를 명시하고, 전체 64자리 컨테이너 ID·두 허용 라벨·표시된 GET 경로가 있는 일회용 테스트 대상만 사용합니다. 현재 회원 API에는 URL을 받는 DAST 엔드포인트가 없습니다. 다른 일회용 컨테이너를 검사할 때는 `security-review dast --help`의 대상 컨테이너·포트·OpenAPI 경로 옵션을 확인하세요.

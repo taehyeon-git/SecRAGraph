@@ -61,7 +61,7 @@ jobs:
             --cases data/evaluation/multiengine_cases.json \
             --staging-dir /tmp/secragraph \
             --output-dir /app/build/evidence \
-            --require-complete --require-traces
+            --require-complete --require-traces --require-match
       - name: Require multi-engine JSON evidence
         run: test -s build/evidence/multiengine-scanner.json
       - name: Require multi-engine Markdown evidence
