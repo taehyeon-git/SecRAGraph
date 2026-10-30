@@ -508,6 +508,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         (output_dir / name).unlink(missing_ok=True)
     _docker_executable()
     _prepare_zap_image()
+    print("DAST stage: image-ready", flush=True)
     project = f"secragraph-dast-{uuid4().hex[:12]}"
     token = secrets.token_urlsafe(32)
     environment = os.environ.copy()
@@ -524,6 +525,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         container = _fixture_container(project, environment)
         if _fetch_fixture_json(container, "/health").get("status") != "ok":
             raise RuntimeError("fixture_unhealthy")
+        print("DAST stage: fixture-ready", flush=True)
 
         previous_header = os.environ.get("ZAP_AUTH_HEADER_VALUE")
         os.environ["ZAP_AUTH_HEADER_VALUE"] = f"Session {token}"
@@ -535,6 +537,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
                 auth_header_env="ZAP_AUTH_HEADER_VALUE",
                 active=False,
             )
+            print("DAST stage: passive-returned", flush=True)
             before_active = _fetch_fixture_json(container, "/stats")
             active_report = _scan(
                 container,
@@ -543,6 +546,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
                 auth_header_env="ZAP_AUTH_HEADER_VALUE",
                 active=True,
             )
+            print("DAST stage: active-returned", flush=True)
         finally:
             if previous_header is None:
                 os.environ.pop("ZAP_AUTH_HEADER_VALUE", None)
@@ -556,6 +560,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
             raise RuntimeError("authenticated_route_not_tested")
         _require_active_evidence(active_report, before=before_active, after=after_active)
         _assert_host_redirect_isolated(container)
+        print("DAST stage: evidence-checked", flush=True)
 
         rendered = {
             "dast.json": render_report(report, ReportFormat.JSON),
@@ -576,6 +581,7 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         )
         if stopped.returncode != 0:
             raise RuntimeError("fixture_cleanup_failed")
+    print("DAST stage: cleanup-complete", flush=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     for name, content in rendered.items():
         (output_dir / name).write_text(content, encoding="utf-8")
@@ -588,7 +594,7 @@ def main() -> int:
         code = (
             str(error)
             if type(error) is RuntimeError and str(error) in _SAFE_FAILURE_CODES
-            else "unknown"
+            else f"unknown:{type(error).__name__}"
         )
         print(f"DAST evidence generation failed ({code}).", file=sys.stderr)
         return 1

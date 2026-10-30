@@ -384,6 +384,24 @@ def test_main_prints_generic_failure_without_exception_text(
     output = capsys.readouterr()
     assert "test-token" not in output.out + output.err
     assert "DAST evidence" in output.err
+    assert "unknown:RuntimeError" in output.err
+
+
+def test_evidence_prints_only_safe_stage_names(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _install_fakes(monkeypatch)
+    run_dast_evidence.run_evidence(tmp_path)
+    output = capsys.readouterr().out
+    for stage in (
+        "image-ready",
+        "fixture-ready",
+        "passive-returned",
+        "active-returned",
+        "evidence-checked",
+        "cleanup-complete",
+    ):
+        assert f"DAST stage: {stage}" in output
 
 
 def test_ci_has_separate_dast_gate_and_only_normalized_artifacts() -> None:
