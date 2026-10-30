@@ -25,6 +25,7 @@ _MAX_ARTIFACT_BYTES = 32 * 1024 * 1024
 _EXPECTED_MESSAGE = "Potential exposed credential in Git history."
 _EXPECTED_EVIDENCE = "[REDACTED: secret value omitted]"
 _DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "build" / "evidence"
+RESCAN_BASE_SHA = "313a2adc3968a37a1ce63d41a3d7531468a93d00"
 
 
 @dataclass(frozen=True)
@@ -82,7 +83,7 @@ def _require_commit(root: Path, sha: str) -> None:
 
 
 def select_event_history(root: Path, event: Mapping[str, str]) -> HistorySelection:
-    """Pin PR/push scan bounds to the webhook's real commits."""
+    """Pin PR, push and trusted main re-scan bounds to real commits."""
 
     event_name = event.get("GITHUB_EVENT_NAME")
     if event_name == "pull_request":
@@ -110,6 +111,20 @@ def select_event_history(root: Path, event: Mapping[str, str]) -> HistorySelecti
             raise ValueError("history_event_range_empty")
         _git_output(root, "merge-base", "--is-ancestor", before, head)
         return HistorySelection(before, head)
+    if event_name in {"schedule", "workflow_dispatch"}:
+        if event.get("GITHUB_REF") != "refs/heads/main":
+            raise ValueError("history_event_ref_untrusted")
+        head = _full_sha(event.get("GITHUB_SHA"))
+        checkout_head = _full_sha(_git_output(root, "rev-parse", "HEAD"))
+        if head != checkout_head:
+            raise ValueError("history_event_head_mismatch")
+        base = _full_sha(RESCAN_BASE_SHA)
+        _require_commit(root, base)
+        _require_commit(root, head)
+        if base == head:
+            raise ValueError("history_event_range_empty")
+        _git_output(root, "merge-base", "--is-ancestor", base, head)
+        return HistorySelection(base, head)
     raise ValueError("history_event_unsupported")
 
 

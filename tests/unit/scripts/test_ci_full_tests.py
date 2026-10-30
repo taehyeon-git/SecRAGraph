@@ -51,13 +51,18 @@ def test_ci_workflow_bootstraps_qdrant_before_live_api_full_suite() -> None:
     assert not any("uv run pytest --cov=" in command for command in commands)
 
 
-def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_push() -> None:
+def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_runs() -> None:
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     quality_steps = workflow["jobs"]["quality"]["steps"]
     uploads = [step for step in quality_steps if "actions/upload-artifact@" in step.get("uses", "")]
 
     assert len(uploads) == 1
-    assert uploads[0]["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    condition = uploads[0]["if"]
+    assert "github.ref == 'refs/heads/main'" in condition
+    assert all(
+        f"github.event_name == '{event}'" in condition
+        for event in ("push", "schedule", "workflow_dispatch")
+    )
     assert set(uploads[0]["with"]["path"].splitlines()) == {
         "build/evidence/rag.json",
         "build/evidence/rag.md",

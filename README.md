@@ -127,9 +127,11 @@ flowchart LR
 
 ## 테스트와 CI
 
-[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 도구가 설치된 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 새 이미지에서 실제로 발견된 기존 결과만 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 결과의 정규화된 보고서를 검증한 뒤 발견 건을 차단합니다. 과거 파일명에도 비밀이 있을 수 있어 공개 Actions 아티팩트는 검사가 완료되고 발견 건이 없는 `main` push에서만 올립니다. DAST 작업은 보호된 경로에 인증 요청이 도달했는지, 예상 보안 헤더 경고가 있는지 확인하고 정규화한 JSON·Markdown·SARIF만 아티팩트로 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
+[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 새 이미지에서 실제로 발견된 기존 결과만 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 정규화 보고서를 검증한 뒤 발견 건을 차단합니다. DAST 작업은 보호된 경로의 인증 요청과 예상 보안 헤더 경고를 확인하고 JSON·Markdown·SARIF 보고서를 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
 
-현재 `main`에는 보호 규칙이 없어 CI 실패가 병합이나 직접 push를 강제로 막지는 않습니다. PR의 워크플로·게이트 스크립트도 PR에서 수정할 수 있으므로, 이 검사는 신뢰된 기여자의 회귀와 우발적 기준선 변경을 잡는 범위입니다. 악의적 PR까지 차단하려면 보호된 필수 검사와 PR 밖의 신뢰된 검증 절차가 필요합니다.
+두 워크플로는 `main` push·PR 외에 **매주 일요일 03:17 UTC**와 GitHub Actions의 수동 실행에서도 같은 작업을 재실행합니다. 주간 범위는 이 공개 저장소 소스의 CodeQL, 고정된 Python 의존성의 OSV 감사, 새로 빌드한 런타임 이미지의 Trivy·SBOM, 일회용 테스트 API의 DAST, 작성자 합성 사례의 스캐너 회귀입니다. 회원 업로드나 임의 외부 저장소를 주기적으로 다시 검사하는 기능은 아닙니다. Git 이력은 [검토된 기준 커밋](docs/evidence/git-history-baseline-2026-10-30.md) 이후의 모든 커밋을 다시 검사하며 기존 20개 후보는 기록에서 유지합니다. 검사·게이트가 통과한 신뢰된 `main` push·주간·수동 실행에서만 정규화된 증거를 아티팩트로 게시합니다. [GitHub 일정 실행](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)은 지연되거나 공개 저장소의 비활동 기간에 비활성화될 수 있으므로 수동 재검사를 보조 경로로 둡니다. [재검사 설계와 실패 처리](docs/design/ci-rescan.md)를 참고하세요.
+
+[`main` 보호 규칙](https://github.com/taehyeon-git/SecRAGraph/rules/26191220)은 [버전 관리된 정책](infra/github/main-ruleset.json)에 따라 PR, 최신 `main` 기준의 CI 7개·CodeQL 2개 필수 검사, 강제 push·삭제 금지를 요구하며 우회자를 두지 않았습니다. 승인 리뷰 수는 0명이라 단독 유지보수는 가능하지만, PR 작성자가 워크플로·게이트 코드를 바꿔 자기 검사를 약화시키는 경우까지 막지는 못합니다. 적대적 변경 방지에는 독립 리뷰 또는 PR 밖에서 관리되는 신뢰된 필수 워크플로가 추가로 필요합니다.
 
 이 CI 범위를 적용하기 전에 `main`의 기존 전체 이력도 한 번 확인했습니다. 고정 커밋의 19개 커밋에서 Gitleaks 후보 20건이 나왔으며, 값·파일명을 공개하지 않고 맥락과 체크섬을 확인했습니다. 기존 후보를 숨기는 허용 목록은 두지 않습니다. [검사 범위와 분류 기록](docs/evidence/git-history-baseline-2026-10-30.md)을 참고하세요.
 
