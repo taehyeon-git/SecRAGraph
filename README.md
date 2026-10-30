@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml) · [Code Scanning](https://github.com/taehyeon-git/SecRAGraph/security/code-scanning) · [아키텍처](docs/architecture.md) · [데모 절차](docs/demo.md)
 
-**로그인한 사용자가 소스 파일이나 ZIP을 제출하면 여러 보안 검사기의 결과를 하나의 근거 있는 보고서로 정리하는 백엔드·DevSecOps 포트폴리오입니다.** 별도의 DAST 경로는 격리된 일회용 테스트 API를 실행해 HTTP 응답을 검사합니다. 신뢰된 로컬 Git 체크아웃은 독립된 CLI·CI 경로에서 과거 커밋의 비밀정보도 검사합니다. CI가 빌드한 SecRAGraph 런타임 이미지는 별도 Trivy 검사와 CycloneDX SBOM으로 배포 구성요소를 확인합니다. LangGraph가 검사 결과의 근거 검색과 위험도 계산을 조정합니다. FastAPI와 CLI는 소스 스캔 경로를 공유하고 Streamlit은 로컬 데모 화면입니다.
+**로그인한 사용자가 소스 파일이나 ZIP을 제출하면 여러 보안 검사기의 결과를 하나의 근거 있는 보고서로 정리하는 백엔드·DevSecOps 포트폴리오입니다.** 별도의 DAST 경로는 격리된 일회용 테스트 API의 응답을 검사하고, 명시적으로 허용한 경우 능동 취약점 요청도 수행합니다. 신뢰된 로컬 Git 체크아웃은 독립된 CLI·CI 경로에서 과거 커밋의 비밀정보도 검사합니다. CI가 빌드한 SecRAGraph 런타임 이미지는 별도 Trivy 검사와 CycloneDX SBOM으로 배포 구성요소를 확인합니다. LangGraph가 검사 결과의 근거 검색과 위험도 계산을 조정합니다. FastAPI와 CLI는 소스 스캔 경로를 공유하고 Streamlit은 로컬 데모 화면입니다.
 
 ## 문제 정의
 
@@ -64,7 +64,7 @@ flowchart LR
   SCAN --> OSV["잠금 파일 → OSV.dev"]
   SCAN --> CWE["Finding CWE → MITRE"]
   SCAN --> EVIDENCE["Qdrant 문서 근거 · 선택"]
-  DAST["일회용 테스트 API → ZAP 패시브 검사"] --> CWE
+  DAST["일회용 테스트 API → ZAP 패시브·명시적 능동 검사"] --> CWE
   SAST --> REPORT["Finding + 검사 범위 → JSON · Markdown · SARIF"]
   SECRET --> REPORT
   HISTSECRET --> REPORT
@@ -90,7 +90,7 @@ flowchart LR
 | **설정 오류** | Checkov 3.3.30이 지원 Terraform·Dockerfile·Kubernetes 등 구성 파일을 검사하며 [간접 의존성도 해시로 고정](infra/scanners/checkov-requirements.txt)합니다. 별도 `compose-policy`는 Docker Compose의 명시적 고위험 설정 10종을 검사합니다. Compose 파일은 Checkov 검사 범위에서 제외하고 전용 엔진의 실행 기록에 표시합니다. [규칙·검증·한계](docs/evidence/compose-iac-2026-10-30.md)를 참고하세요. |
 | **패키지 권고** | `uv.lock`·npm `package-lock.json`의 정확한 버전을 OSV.dev에서 확인합니다. 코드나 잠금 파일 원문은 전송하지 않습니다. |
 | **컨테이너 이미지·SBOM** | CI가 빌드한 `linux/amd64` 런타임 이미지 tar의 OS·언어 패키지와 이미지 설정을 Trivy 0.76.1로 검사하고, 같은 tar의 CycloneDX SBOM을 생성합니다. JSON·Markdown·SARIF에는 이미지의 논리적 위치와 이미지/DB 신원을 기록합니다. [설계·범위](docs/design/container-image-sbom.md)를 참고하세요. |
-| **테스트 API DAST** | `io.secragraph.dast.disposable=true`가 붙은 실행 중인 Docker 컨테이너만 ZAP의 패시브 검사 모드로 확인합니다. 호스트 게이트웨이가 없는 내부 전용 네트워크에서 인증된 API 요청과 응답 보안 헤더를 검사하고 HTTP 경로를 별도 위치로 보고합니다. [격리 데모와 검증 절차](docs/demo.md#7-격리-테스트-api-dast)를 참고하세요. |
+| **테스트 API DAST** | 기본은 승인 표시가 있는 일회용 Docker 컨테이너의 ZAP 패시브 검사입니다. `--active`는 전체 컨테이너 ID, 추가 허용 라벨, 명시적으로 표시한 OpenAPI GET 작업을 요구하며 ZAP API 능동 검사를 실행합니다. 두 모드 모두 호스트 게이트웨이가 없는 내부 전용 네트워크를 사용하고 HTTP 경로를 별도 위치로 보고합니다. [격리 데모와 검증 절차](docs/demo.md#7-격리-테스트-api-dast)를 참고하세요. |
 | **공개 저장소 자체** | [GitHub Actions의 CodeQL `security-extended`](.github/workflows/security-scan.yml)를 사용합니다. 별도 [FastAPI 흐름 픽스처 쿼리](codeql/FastApiCrossFileFlow.ql)는 파일을 넘나드는 추적·차단 모델의 테스트이며 실제 코드 경고 규칙은 아닙니다. 무료 CodeQL 허용 범위인 공개 코드에만 적용합니다. |
 
 회원이 업로드한 비공개 코드는 CodeQL로 검사하지 않습니다. 업로드 코드의 Opengrep 흐름 추적은 **파일 내부의 함수 간** 범위이고 확인한 source·중간 단계·sink 위치를 소스 내용 없이 기록합니다. CodeQL의 여러 파일을 가로지르는 흐름 검사는 이 공개 저장소에 적용합니다. 검사기 실행 실패나 지원하지 않는 언어는 성공으로 숨기지 않고 범위 기록에 남깁니다.
@@ -127,7 +127,7 @@ flowchart LR
 
 ## 테스트와 CI
 
-[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 새 이미지에서 실제로 발견된 기존 결과만 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 정규화 보고서를 검증한 뒤 발견 건을 차단합니다. DAST 작업은 보호된 경로의 인증 요청과 예상 보안 헤더 경고를 확인하고 JSON·Markdown·SARIF 보고서를 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
+[CI](.github/workflows/ci.yml)는 Ruff·mypy·pytest·Bandit, RAG 평가, 격리 Docker 이미지의 다중 엔진 회귀 평가, 이미지 빌드와 SBOM, Compose 스모크와 일회용 API의 패시브·능동 DAST를 실행합니다. 이미지 검사는 빠진 패키지·설정 검사나 DB·이미지 신원 불일치를 실패로 처리하고, 검토된 기존 고위험 기준선에 없는 HIGH·CRITICAL·UNKNOWN 권고 및 위험한 이미지 설정을 차단합니다. 새 이미지에서 실제로 발견된 기존 결과만 보고서에 남으며 기준선은 자동으로 늘어나지 않습니다. Git 이력 작업은 별도 전체 깊이 체크아웃에서 PR의 실제 head 또는 push의 선택 범위를 검사하고, 완료된 정규화 보고서를 검증한 뒤 발견 건을 차단합니다. DAST 작업은 인증 경로·보안 헤더 경고와 별도의 합성 SQL 주입 능동 검사 증거를 확인하고, 모드별 JSON·Markdown·SARIF 보고서를 보관합니다. 공개 저장소의 [CodeQL 워크플로](.github/workflows/security-scan.yml)는 `security-extended`를 실행합니다. 회원 API 통합 테스트는 로그인→업로드→저장 보고서→소유자 접근을 확인합니다.
 
 두 워크플로는 `main` push·PR 외에 **매주 일요일 03:17 UTC**와 GitHub Actions의 수동 실행에서도 같은 작업을 재실행합니다. 주간 범위는 이 공개 저장소 소스의 CodeQL, 고정된 Python 의존성의 OSV 감사, 새로 빌드한 런타임 이미지의 Trivy·SBOM, 일회용 테스트 API의 DAST, 작성자 합성 사례의 스캐너 회귀입니다. 회원 업로드나 임의 외부 저장소를 주기적으로 다시 검사하는 기능은 아닙니다. Git 이력은 [검토된 기준 커밋](docs/evidence/git-history-baseline-2026-10-30.md) 이후의 모든 커밋을 다시 검사하며 기존 20개 후보는 기록에서 유지합니다. 검사·게이트가 통과한 신뢰된 `main` push·주간·수동 실행에서만 정규화된 증거를 아티팩트로 게시합니다. [GitHub 일정 실행](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)은 지연되거나 공개 저장소의 비활동 기간에 비활성화될 수 있으므로 수동 재검사를 보조 경로로 둡니다. [재검사 설계와 실패 처리](docs/design/ci-rescan.md)를 참고하세요.
 
@@ -152,7 +152,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 - OSV 조회는 명시된 패키지 버전에 한정됩니다. 보고서의 파일 경로·대상 이름·인용 메타데이터는 민감할 수 있습니다. 모델 답변은 오류나 프롬프트 인젝션 영향을 받을 수 있고, 문서 근거의 품질은 수집 자료에 좌우됩니다. [위협 모델](docs/threat-model.md)에 신뢰 경계와 남은 위험을 기록했습니다.
 - 외부 검사기는 현재 API 컨테이너와 같은 네트워크 네임스페이스에서 실행됩니다. 프록시·다운로드 금지 설정을 완전한 네트워크 격리로 간주하지 않습니다.
 - Docker Compose 검사는 선언된 값만 읽습니다. 파일 병합·환경 변수 치환·외부 참조·실제 실행 상태를 확인하지 않으며, 해석할 수 없는 설정이나 같은 디렉터리의 여러 Compose 파일은 부분 검사로 표시합니다. 파일 내용이나 참조 파일을 실행·로드하지 않습니다.
-- 현재 DAST는 승인 표시가 있는 일회용 Docker 테스트 API의 GET/HEAD/OPTIONS OpenAPI 경로를 시작점으로 패시브 응답 검사를 보여줍니다. ZAP의 리디렉션은 격리 네트워크 안에서 다른 경로나 포트로 이어질 수 있으므로 보고서의 경로 목록은 모든 요청의 기록이나 정확한 경로 허용 목록이 아닙니다. 호스트 게이트웨이 없는 내부 네트워크를 확인하고 지원하지 않는 Docker 환경에서는 실패합니다. 임의 운영 URL이나 업로드한 코드를 실행하지 않으며 SQL 주입 같은 능동 취약점 검증을 주장하지 않습니다. DAST SARIF의 위치는 HTTP 경로이므로 GitHub Code Scanning의 소스 줄 주석으로 올리지 않습니다.
+- DAST 능동 모드는 별도로 허용한 일회용 Docker 테스트 API의 표시된 GET 작업을 시작점으로 ZAP 요청을 보냅니다. CI의 합성 SQLite SQL 주입과 매개변수화된 정상 대조 경로는 규칙 `40018`의 한정된 증거이며 운영 API 탐지율을 나타내지 않습니다. OpenAPI 경로 목록은 요청 시점의 허용 목록이 아니어서 리디렉션·발견을 통해 격리 네트워크의 다른 경로나 포트로 요청할 수 있습니다. 호스트 게이트웨이 없는 내부 네트워크를 확인하고 지원하지 않는 Docker 환경에서는 실패합니다. 임의 운영 URL이나 업로드 코드를 실행하지 않습니다. DAST SARIF는 HTTP 논리 위치를 쓰므로 소스 줄의 Code Scanning 주석으로 올리지 않습니다.
 - 이미지 검사는 이 저장소가 빌드한 런타임 이미지의 알려진 권고와 설정에 한정됩니다. Trivy의 취약점 기록은 실제 악용 가능성을 증명하지 않으며, 현재 이미지의 기존 HIGH·CRITICAL 항목은 해결 과제로 남아 있습니다. 기준선은 이를 감추지 않고 새 항목을 막기 위한 비교 자료입니다. 회원 업로드 이미지, 임의 레지스트리, 여러 아키텍처, 실행 중 컨테이너를 검사했다고 주장하지 않습니다. 이미지 SARIF는 논리적 패키지 위치이므로 소스 줄 주석으로 올리지 않습니다.
 
 ## 출처와 기여

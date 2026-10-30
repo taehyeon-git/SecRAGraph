@@ -1,5 +1,7 @@
 # Isolated API DAST design
 
+This document records the original passive phase. The opt-in active extension, its stricter target authorization, separate evidence gate, and remaining request-boundary limitation are specified in [Bounded active API DAST](dast-active-sql.md).
+
 ## Goal and boundary
 
 SecRAGraph will scan a **running, disposable test API container** with OWASP ZAP and put the HTTP findings through the same LangGraph evidence and reporting pipeline as source findings. The member upload API will never accept a URL or launch DAST. Source scanning will continue to avoid executing submitted code.
