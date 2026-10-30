@@ -310,6 +310,17 @@ def test_incomplete_report_surfaces_only_known_runner_reason() -> None:
         run_dast_evidence._require_evidence(report)
 
 
+def test_missing_active_completion_marker_surfaces_safe_reason() -> None:
+    report = _report(active=True, completed=False)
+    report.executions[0].reason = "dast_active_scan_incomplete"
+    with pytest.raises(RuntimeError, match="dast_active_scan_incomplete"):
+        run_dast_evidence._require_active_evidence(
+            report,
+            before={"sql_vulnerable_mutations": 0, "sql_safe_mutations": 0},
+            after={"sql_vulnerable_mutations": 1, "sql_safe_mutations": 1},
+        )
+
+
 def test_public_route_must_be_requested_before_expected_alert_check(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

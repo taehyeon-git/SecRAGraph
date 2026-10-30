@@ -41,6 +41,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "active_safe_route_not_attacked",
         "active_sql_alert_missing",
         "active_vulnerable_route_not_attacked",
+        "dast_active_scan_incomplete",
         "authenticated_route_not_tested",
         "credential_in_report",
         "dast_cleanup_failed",
