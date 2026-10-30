@@ -1,13 +1,14 @@
-"""Small disposable API used only for authenticated passive DAST evidence."""
+"""Disposable API containing explicit passive and active DAST canaries."""
 
 from __future__ import annotations
 
 import os
+import sqlite3
 from hmac import compare_digest
 from threading import Lock
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import RequestResponseEndpoint
 
@@ -24,6 +25,8 @@ _counter_lock = Lock()
 _public_requests = 0
 _authenticated_protected_requests = 0
 _host_redirect_requests = 0
+_sql_vulnerable_mutations = 0
+_sql_safe_mutations = 0
 
 
 @app.middleware("http")
@@ -65,16 +68,67 @@ def protected(authorization: Annotated[str | None, Header()] = None) -> dict[str
     return {"ok": True}
 
 
+def _sql_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE fixture_users (username TEXT NOT NULL)")
+    connection.executemany(
+        "INSERT INTO fixture_users (username) VALUES (?)", [("alice",), ("bob",)]
+    )
+    return connection
+
+
+@app.get("/sql-vulnerable", openapi_extra={"x-secragraph-dast-active": True})
+def sql_vulnerable(username: Annotated[str, Query(examples=["alice"])]) -> dict[str, int]:
+    """Deliberately injectable SQLite query, confined to this disposable fixture."""
+
+    global _sql_vulnerable_mutations
+    if username != "alice":
+        with _counter_lock:
+            _sql_vulnerable_mutations += 1
+    connection = _sql_connection()
+    try:
+        # Intentional SQL injection canary; never copy this pattern into product code.
+        query = f"SELECT username FROM fixture_users WHERE username = '{username}'"  # noqa: S608, E501  # nosec B608
+        rows = connection.execute(query).fetchall()
+        return {"matches": len(rows)}
+    except sqlite3.Error as error:
+        raise HTTPException(status_code=500, detail="SQLite query error") from error
+    finally:
+        connection.close()
+
+
+@app.get("/sql-safe", openapi_extra={"x-secragraph-dast-active": True})
+def sql_safe(username: Annotated[str, Query(examples=["alice"])]) -> dict[str, int]:
+    """Parameterized control with the same records and response shape."""
+
+    global _sql_safe_mutations
+    if username != "alice":
+        with _counter_lock:
+            _sql_safe_mutations += 1
+    connection = _sql_connection()
+    try:
+        rows = connection.execute(
+            "SELECT username FROM fixture_users WHERE username = ?", (username,)
+        ).fetchall()
+        return {"matches": len(rows)}
+    finally:
+        connection.close()
+
+
 @app.get("/stats", include_in_schema=False)
 def stats() -> dict[str, int]:
     with _counter_lock:
         public_requests = _public_requests
         count = _authenticated_protected_requests
         redirects = _host_redirect_requests
+        vulnerable_mutations = _sql_vulnerable_mutations
+        safe_mutations = _sql_safe_mutations
     return {
         "public_requests": public_requests,
         "authenticated_protected_requests": count,
         "host_redirect_requests": redirects,
+        "sql_vulnerable_mutations": vulnerable_mutations,
+        "sql_safe_mutations": safe_mutations,
     }
 
 

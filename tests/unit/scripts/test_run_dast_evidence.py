@@ -15,22 +15,29 @@ from scripts import run_dast_evidence
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def _report(*, completed: bool = True, finding: bool = True) -> Any:
+def _report(*, completed: bool = True, finding: bool = True, active: bool = False) -> Any:
     findings = (
         (
             SimpleNamespace(
                 engine="zap",
-                rule_id="ZAP/10021",
+                rule_id="ZAP/40018" if active else "ZAP/10021",
                 http_method="GET",
-                http_path="/public",
+                http_path="/sql-vulnerable" if active else "/public",
                 file_path=None,
+                cwe_ids=("CWE-89",) if active else (),
             ),
         )
         if finding
         else ()
     )
     execution = SimpleNamespace(
-        engine="zap", kind="dast", status="completed" if completed else "error"
+        engine="zap",
+        kind="dast",
+        status="completed" if completed else "error",
+        checks=("openapi-active",) if active else ("openapi-passive",),
+        eligible_endpoints=("GET /sql-vulnerable", "GET /sql-safe")
+        if active
+        else ("GET /public", "GET /protected"),
     )
     return SimpleNamespace(findings=findings, executions=(execution,))
 
@@ -39,36 +46,46 @@ def _install_fakes(
     monkeypatch: pytest.MonkeyPatch,
     *,
     report: Any | None = None,
+    active_report: Any | None = None,
     authenticated_requests: int = 1,
     public_requests: int = 1,
+    vulnerable_mutations: int = 1,
+    safe_mutations: int = 1,
 ) -> tuple[list[tuple[str, tuple[str, ...]]], list[Any]]:
     calls: list[tuple[str, tuple[str, ...]]] = []
     scans: list[Any] = []
+    stats_calls = 0
 
     def compose(project: str, args: list[str], _environment: dict[str, str], _timeout: int):
         calls.append((project, tuple(args)))
         return subprocess.CompletedProcess(args, 0, "", "")
 
-    def scan(container: str, port: int, openapi_path: str, *, auth_header_env: str):
-        scans.append((container, port, openapi_path, auth_header_env))
+    def scan(
+        container: str, port: int, openapi_path: str, *, auth_header_env: str, active: bool = False
+    ):
+        scans.append((container, port, openapi_path, auth_header_env, active))
+        if active:
+            return active_report if active_report is not None else _report(active=True)
         return report if report is not None else _report()
 
     monkeypatch.setattr(run_dast_evidence, "_run_compose", compose)
     monkeypatch.setattr(run_dast_evidence, "_docker_executable", lambda: "docker")
     monkeypatch.setattr(run_dast_evidence, "_prepare_zap_image", lambda: None)
     monkeypatch.setattr(run_dast_evidence, "_fixture_container", lambda *_args: "a" * 64)
-    monkeypatch.setattr(
-        run_dast_evidence,
-        "_fetch_fixture_json",
-        lambda _container, path: (
-            {"status": "ok"}
-            if path == "/health"
-            else {
-                "authenticated_protected_requests": authenticated_requests,
-                "public_requests": public_requests,
-            }
-        ),
-    )
+
+    def fixture_json(_container: str, path: str) -> dict[str, object]:
+        nonlocal stats_calls
+        if path == "/health":
+            return {"status": "ok"}
+        stats_calls += 1
+        return {
+            "authenticated_protected_requests": authenticated_requests,
+            "public_requests": public_requests,
+            "sql_vulnerable_mutations": vulnerable_mutations if stats_calls > 1 else 0,
+            "sql_safe_mutations": safe_mutations if stats_calls > 1 else 0,
+        }
+
+    monkeypatch.setattr(run_dast_evidence, "_fetch_fixture_json", fixture_json)
     monkeypatch.setattr(run_dast_evidence, "_scan", scan)
     monkeypatch.setattr(
         run_dast_evidence, "_assert_host_redirect_isolated", lambda _container: None
@@ -78,15 +95,17 @@ def _install_fakes(
     return calls, scans
 
 
-def test_one_scan_renders_three_formats_and_cleans_fixture(
+def test_two_scans_render_separate_formats_and_clean_fixture(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls, scans = _install_fakes(monkeypatch)
 
     run_dast_evidence.run_evidence(tmp_path)
 
-    assert len(scans) == 1
-    assert scans[0] == ("a" * 64, 8000, "/openapi.json", "ZAP_AUTH_HEADER_VALUE")
+    assert scans == [
+        ("a" * 64, 8000, "/openapi.json", "ZAP_AUTH_HEADER_VALUE", False),
+        ("a" * 64, 8000, "/openapi.json", "ZAP_AUTH_HEADER_VALUE", True),
+    ]
     assert [args[0] for _, args in calls] == ["up", "down"]
     assert calls[0][0] == calls[1][0]
     assert calls[0][0].startswith("secragraph-dast-")
@@ -94,6 +113,8 @@ def test_one_scan_renders_three_formats_and_cleans_fixture(
     assert (tmp_path / "dast.json").read_text(encoding="utf-8") == "json"
     assert (tmp_path / "dast.md").read_text(encoding="utf-8") == "markdown"
     assert (tmp_path / "dast.sarif").read_text(encoding="utf-8") == "sarif"
+    for suffix in ("json", "md", "sarif"):
+        assert (tmp_path / f"dast-active.{suffix}").exists()
 
 
 def test_fixture_start_failure_still_tears_down(
@@ -112,6 +133,23 @@ def test_fixture_start_failure_still_tears_down(
 
     assert [args[0] for _, args in calls] == ["up", "down"]
     assert not list(tmp_path.glob("dast.*"))
+
+
+def test_fixture_cleanup_failure_leaves_no_new_evidence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls, _ = _install_fakes(monkeypatch)
+    (tmp_path / "dast.json").write_text("stale", encoding="utf-8")
+    (tmp_path / "dast-active.json").write_text("stale", encoding="utf-8")
+
+    def failing_down(project: str, args: list[str], environment: dict[str, str], timeout: int):
+        calls.append((project, tuple(args)))
+        return subprocess.CompletedProcess(args, 1 if args[0] == "down" else 0, "", "")
+
+    monkeypatch.setattr(run_dast_evidence, "_run_compose", failing_down)
+    with pytest.raises(RuntimeError, match="fixture_cleanup_failed"):
+        run_dast_evidence.run_evidence(tmp_path)
+    assert not list(tmp_path.glob("dast*"))
 
 
 @pytest.mark.parametrize(
@@ -167,6 +205,72 @@ def test_host_redirect_escape_fails_evidence_and_still_cleans_fixture(
 
     assert [args[0] for _, args in calls] == ["up", "down"]
     assert not list(tmp_path.glob("dast.*"))
+
+
+@pytest.mark.parametrize(
+    ("active_report", "vulnerable_mutations", "safe_mutations", "reason"),
+    [
+        (_report(active=True, completed=False), 1, 1, "dast_incomplete"),
+        (_report(active=True, finding=False), 1, 1, "active_sql_alert_missing"),
+        (_report(active=True), 0, 1, "active_vulnerable_route_not_attacked"),
+        (_report(active=True), 1, 0, "active_safe_route_not_attacked"),
+    ],
+)
+def test_active_evidence_must_complete_and_probe_both_routes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    active_report: Any,
+    vulnerable_mutations: int,
+    safe_mutations: int,
+    reason: str,
+) -> None:
+    _install_fakes(
+        monkeypatch,
+        active_report=active_report,
+        vulnerable_mutations=vulnerable_mutations,
+        safe_mutations=safe_mutations,
+    )
+    with pytest.raises(RuntimeError, match=reason):
+        run_dast_evidence.run_evidence(tmp_path)
+    assert not list(tmp_path.glob("dast*"))
+
+
+def test_active_sqli_on_safe_route_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report = _report(active=True)
+    report.findings = (
+        *report.findings,
+        SimpleNamespace(
+            engine="zap",
+            rule_id="ZAP/40018",
+            http_method="GET",
+            http_path="/sql-safe",
+            cwe_ids=("CWE-89",),
+            file_path=None,
+        ),
+    )
+    _install_fakes(monkeypatch, active_report=report)
+    with pytest.raises(RuntimeError, match="active_safe_control_alert"):
+        run_dast_evidence.run_evidence(tmp_path)
+    assert not list(tmp_path.glob("dast*"))
+
+
+def test_active_finding_requires_cwe_89_and_active_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report = _report(active=True)
+    report.findings[0].cwe_ids = ("CWE-79",)
+    _install_fakes(monkeypatch, active_report=report)
+    with pytest.raises(RuntimeError, match="active_sql_alert_missing"):
+        run_dast_evidence.run_evidence(tmp_path)
+
+    report = _report(active=True)
+    report.executions[0].checks = ("openapi-passive",)
+    _install_fakes(monkeypatch, active_report=report)
+    with pytest.raises(RuntimeError, match="active_execution_missing"):
+        run_dast_evidence.run_evidence(tmp_path)
 
 
 def test_probe_docker_cleanup_timeout_is_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -287,5 +391,8 @@ def test_ci_has_separate_dast_gate_and_only_normalized_artifacts() -> None:
         "build/evidence/dast.json",
         "build/evidence/dast.md",
         "build/evidence/dast.sarif",
+        "build/evidence/dast-active.json",
+        "build/evidence/dast-active.md",
+        "build/evidence/dast-active.sarif",
     }
     assert upload["with"]["if-no-files-found"] == "error"

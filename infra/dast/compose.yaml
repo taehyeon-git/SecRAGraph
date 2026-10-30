@@ -15,6 +15,7 @@ services:
       SECRAGRAPH_DAST_TEST_TOKEN: ${SECRAGRAPH_DAST_TEST_TOKEN:?disposable fixture token required}
     labels:
       io.secragraph.dast.disposable: "true"
+      io.secragraph.dast.active-permitted: "true"
     networks: [fixture]
     user: "10001:10001"
     read_only: true

@@ -1,4 +1,4 @@
-"""Run one passive DAST scan against an isolated disposable API fixture."""
+"""Prove passive and active DAST against one isolated disposable API fixture."""
 
 from __future__ import annotations
 
@@ -24,10 +24,23 @@ from security_review.reporting.types import ReportFormat, render_report
 _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
-_CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}\Z")
+_ARTIFACT_NAMES = (
+    "dast.json",
+    "dast.md",
+    "dast.sarif",
+    "dast-active.json",
+    "dast-active.md",
+    "dast-active.sarif",
+)
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _UNSET = object()
 _SAFE_FAILURE_CODES = frozenset(
     {
+        "active_execution_missing",
+        "active_safe_control_alert",
+        "active_safe_route_not_attacked",
+        "active_sql_alert_missing",
+        "active_vulnerable_route_not_attacked",
         "authenticated_route_not_tested",
         "credential_in_report",
         "dast_cleanup_failed",
@@ -39,6 +52,7 @@ _SAFE_FAILURE_CODES = frozenset(
         "dast_openapi_size_limit",
         "dast_report_invalid",
         "dast_scan_timeout",
+        "dast_scope_violation",
         "dast_network_failed",
         "dast_network_isolation_failed",
         "dast_unknown_failure",
@@ -349,23 +363,23 @@ def _fetch_fixture_json(container: str, path: str) -> dict[str, object]:
     return payload
 
 
-def _scan(container: str, port: int, openapi_path: str, *, auth_header_env: str) -> ScanReport:
+def _scan(
+    container: str,
+    port: int,
+    openapi_path: str,
+    *,
+    auth_header_env: str,
+    active: bool = False,
+) -> ScanReport:
     from security_review.dast.application import scan_dast_container
 
-    return scan_dast_container(container, port, openapi_path, auth_header_env=auth_header_env)
+    return scan_dast_container(
+        container, port, openapi_path, auth_header_env=auth_header_env, active=active
+    )
 
 
 def _require_evidence(report: ScanReport, *, public_requests: object = _UNSET) -> None:
-    if not any(
-        item.engine == "zap" and item.kind == "dast" and item.status == "completed"
-        for item in report.executions
-    ):
-        for item in report.executions:
-            if item.engine == "zap" and item.kind == "dast":
-                reason = getattr(item, "reason", None)
-                if reason in _SAFE_FAILURE_CODES:
-                    raise RuntimeError(reason)
-        raise RuntimeError("dast_incomplete")
+    _require_completion(report)
     if public_requests is not _UNSET and (
         not isinstance(public_requests, int)
         or isinstance(public_requests, bool)
@@ -408,15 +422,89 @@ def _require_evidence(report: ScanReport, *, public_requests: object = _UNSET) -
     if any(
         finding.file_path is not None
         or finding.http_method != "GET"
-        or finding.http_path not in {"/public", "/protected"}
+        or finding.http_path not in {"/public", "/protected", "/sql-vulnerable", "/sql-safe"}
         for finding in report.findings
     ):
         raise RuntimeError("dast_scope_violation")
 
 
+def _require_active_evidence(
+    report: ScanReport, *, before: dict[str, object], after: dict[str, object]
+) -> None:
+    """Require a completed active scan and a distinct positive/control pair."""
+
+    _require_completion(report)
+    active_executions = [
+        item
+        for item in report.executions
+        if item.engine == "zap"
+        and item.kind == "dast"
+        and item.status == "completed"
+        and "openapi-active" in item.checks
+    ]
+    expected = {"GET /sql-vulnerable", "GET /sql-safe"}
+    if not active_executions or not any(
+        set(item.eligible_endpoints) == expected for item in active_executions
+    ):
+        raise RuntimeError("active_execution_missing")
+    if any(
+        finding.file_path is not None
+        or finding.http_method != "GET"
+        or finding.http_path not in {"/sql-vulnerable", "/sql-safe"}
+        for finding in report.findings
+    ):
+        raise RuntimeError("dast_scope_violation")
+    if any(
+        finding.engine == "zap"
+        and finding.rule_id == "ZAP/40018"
+        and finding.http_path == "/sql-safe"
+        for finding in report.findings
+    ):
+        raise RuntimeError("active_safe_control_alert")
+    if not any(
+        finding.engine == "zap"
+        and finding.rule_id == "ZAP/40018"
+        and finding.http_method == "GET"
+        and finding.http_path == "/sql-vulnerable"
+        and "CWE-89" in finding.cwe_ids
+        for finding in report.findings
+    ):
+        raise RuntimeError("active_sql_alert_missing")
+    for key, reason in (
+        ("sql_vulnerable_mutations", "active_vulnerable_route_not_attacked"),
+        ("sql_safe_mutations", "active_safe_route_not_attacked"),
+    ):
+        previous = before.get(key)
+        current = after.get(key)
+        if (
+            not isinstance(previous, int)
+            or isinstance(previous, bool)
+            or not isinstance(current, int)
+            or isinstance(current, bool)
+            or current <= previous
+        ):
+            raise RuntimeError(reason)
+
+
+def _require_completion(report: ScanReport) -> None:
+    if any(
+        item.engine == "zap" and item.kind == "dast" and item.status == "completed"
+        for item in report.executions
+    ):
+        return
+    for item in report.executions:
+        if item.engine == "zap" and item.kind == "dast":
+            reason = getattr(item, "reason", None)
+            if reason in _SAFE_FAILURE_CODES:
+                raise RuntimeError(reason)
+    raise RuntimeError("dast_incomplete")
+
+
 def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
     """Build, scan and remove one labelled fixture, writing only normalized reports."""
 
+    for name in _ARTIFACT_NAMES:
+        (output_dir / name).unlink(missing_ok=True)
     _docker_executable()
     _prepare_zap_image()
     project = f"secragraph-dast-{uuid4().hex[:12]}"
@@ -440,7 +528,19 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         os.environ["ZAP_AUTH_HEADER_VALUE"] = f"Session {token}"
         try:
             report = _scan(
-                container, 8000, "/openapi.json", auth_header_env="ZAP_AUTH_HEADER_VALUE"
+                container,
+                8000,
+                "/openapi.json",
+                auth_header_env="ZAP_AUTH_HEADER_VALUE",
+                active=False,
+            )
+            before_active = _fetch_fixture_json(container, "/stats")
+            active_report = _scan(
+                container,
+                8000,
+                "/openapi.json",
+                auth_header_env="ZAP_AUTH_HEADER_VALUE",
+                active=True,
             )
         finally:
             if previous_header is None:
@@ -448,23 +548,24 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
             else:
                 os.environ["ZAP_AUTH_HEADER_VALUE"] = previous_header
 
-        stats = _fetch_fixture_json(container, "/stats")
-        _require_evidence(report, public_requests=stats.get("public_requests"))
-        count = stats.get("authenticated_protected_requests")
+        after_active = _fetch_fixture_json(container, "/stats")
+        _require_evidence(report, public_requests=before_active.get("public_requests"))
+        count = before_active.get("authenticated_protected_requests")
         if not isinstance(count, int) or isinstance(count, bool) or count < 1:
             raise RuntimeError("authenticated_route_not_tested")
+        _require_active_evidence(active_report, before=before_active, after=after_active)
         _assert_host_redirect_isolated(container)
 
         rendered = {
             "dast.json": render_report(report, ReportFormat.JSON),
             "dast.md": render_report(report, ReportFormat.MARKDOWN),
             "dast.sarif": render_report(report, ReportFormat.SARIF),
+            "dast-active.json": render_report(active_report, ReportFormat.JSON),
+            "dast-active.md": render_report(active_report, ReportFormat.MARKDOWN),
+            "dast-active.sarif": render_report(active_report, ReportFormat.SARIF),
         }
         if any(token in content or f"Session {token}" in content for content in rendered.values()):
             raise RuntimeError("credential_in_report")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        for name, content in rendered.items():
-            (output_dir / name).write_text(content, encoding="utf-8")
     finally:
         stopped = _run_compose(
             project,
@@ -474,6 +575,9 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         )
         if stopped.returncode != 0:
             raise RuntimeError("fixture_cleanup_failed")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in rendered.items():
+        (output_dir / name).write_text(content, encoding="utf-8")
 
 
 def main() -> int:
