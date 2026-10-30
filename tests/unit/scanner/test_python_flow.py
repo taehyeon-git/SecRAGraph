@@ -453,6 +453,28 @@ def test_import_after_function_definition_blocks_stale_local_function(tmp_path: 
     assert "import_rebinding_unresolved" in result.execution.warnings
 
 
+def test_cross_file_builtin_eval_is_code_injection_sink(tmp_path: Path) -> None:
+    result = scan(
+        tmp_path,
+        {
+            "app.py": "from worker import relay\neval(relay(input()))\n",
+            "worker.py": "def relay(value):\n    return value\n",
+        },
+    )
+
+    assert [(item.rule_id, item.cwe_ids) for item in result.findings] == [
+        ("PYFLOW/CODE", ("CWE-94",))
+    ]
+    assert result.execution.status == "completed"
+
+
+def test_same_file_builtin_eval_is_scoped_to_opengrep(tmp_path: Path) -> None:
+    result = scan(tmp_path, {"app.py": "x = eval(input())\n"})
+
+    assert result.findings == ()
+    assert result.execution.status == "completed"
+
+
 def test_expression_budget_carries_across_nested_function_calls(tmp_path: Path) -> None:
     functions = []
     for index in range(16):

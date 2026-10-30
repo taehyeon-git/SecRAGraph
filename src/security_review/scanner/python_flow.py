@@ -176,7 +176,24 @@ class _Analyzer:
             ).hexdigest()[:20]
             if any(item.id == f"{rule}:{identifier}" for item in self.findings):
                 continue
-            shell = rule == "PYFLOW/SHELL"
+            details = {
+                "PYFLOW/SHELL": (
+                    "Untrusted input reaches a shell command.",
+                    "CWE-78",
+                    "Avoid shell interpretation of untrusted input.",
+                ),
+                "PYFLOW/SQL": (
+                    "Untrusted input reaches SQL query text.",
+                    "CWE-89",
+                    "Use a constant SQL query with bound parameters.",
+                ),
+                "PYFLOW/CODE": (
+                    "Untrusted input reaches dynamic Python code execution.",
+                    "CWE-94",
+                    "Avoid evaluating untrusted input as Python code.",
+                ),
+            }
+            message, cwe, remediation = details[rule]
             self.findings.append(
                 Finding(
                     id=f"{rule}:{identifier}",
@@ -186,19 +203,11 @@ class _Analyzer:
                     file_path=module.path,
                     line_start=node.lineno,
                     line_end=getattr(node, "end_lineno", node.lineno),
-                    message=(
-                        "Untrusted input reaches a shell command."
-                        if shell
-                        else "Untrusted input reaches SQL query text."
-                    ),
+                    message=message,
                     redacted_evidence="[source omitted]",
                     confidence=Confidence.MEDIUM,
-                    cwe_ids=("CWE-78",) if shell else ("CWE-89",),
-                    remediation=(
-                        "Avoid shell interpretation of untrusted input."
-                        if shell
-                        else "Use a constant SQL query with bound parameters."
-                    ),
+                    cwe_ids=(cwe,),
+                    remediation=remediation,
                     engine=_ENGINE,
                     trace=trace,
                 )
@@ -301,6 +310,14 @@ class _Analyzer:
                 for item in node.keywords
                 if item.arg is not None
             }
+            if (
+                name in {"eval", "exec"}
+                and name not in shadowed
+                and name not in module.function_imports
+            ):
+                if args and args[0]:
+                    self.finding("PYFLOW/CODE", module, node, args[0])
+                return None
             if name == "str" and "str" not in shadowed and "str" not in module.function_imports:
                 return self.merge(*args, *kw.values())
             if name and name.endswith(".format"):
