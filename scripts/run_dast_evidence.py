@@ -20,6 +20,8 @@ from uuid import uuid4
 from security_review.dast.runner import ZAP_IMAGE, _network_isolated, prepare_zap_image
 from security_review.domain.models import ScanReport
 from security_review.evaluation.dast_benchmark import (
+    DastBenchmarkManifest,
+    DastBenchmarkResult,
     evaluate_dast_benchmark,
     load_manifest,
     render_benchmark_json,
@@ -31,6 +33,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 _COMPOSE_FILE = _ROOT / "infra" / "dast" / "compose.yaml"
 _DEFAULT_OUTPUT = _ROOT / "build" / "evidence"
 _BENCHMARK_MANIFEST = _ROOT / "data" / "evaluation" / "dast_cases.json"
+_BENCHMARK_SHA = "32ecbfb19e6eabd27d9988d71fdb60058740fa44f4d3cb69cdc1c2c0a0d2fdff"
+_BENCHMARK_RULE_FLOORS = ("ZAP/10021", "ZAP/20019", "ZAP/40018")
 _ARTIFACT_NAMES = (
     "dast.json",
     "dast.md",
@@ -49,6 +53,8 @@ _SAFE_FAILURE_CODES = frozenset(
         "active_execution_missing",
         "dast_active_scan_incomplete",
         "authenticated_route_not_tested",
+        "benchmark_manifest_unreviewed",
+        "benchmark_regression",
         "credential_in_report",
         "dast_cleanup_failed",
         "dast_connect_failed",
@@ -486,6 +492,18 @@ def _require_completion(report: ScanReport) -> None:
     raise RuntimeError("dast_incomplete")
 
 
+def _require_benchmark_floor(manifest: DastBenchmarkManifest, result: DastBenchmarkResult) -> None:
+    """Guard the reviewed corpus without treating its known numeric FN as success."""
+
+    if manifest.sha256 != _BENCHMARK_SHA or result.manifest_sha256 != manifest.sha256:
+        raise RuntimeError("benchmark_manifest_unreviewed")
+    scores = dict(result.rules)
+    if set(scores) != set(_BENCHMARK_RULE_FLOORS) or any(
+        scores[rule].tp < 1 or scores[rule].fp != 0 for rule in _BENCHMARK_RULE_FLOORS
+    ):
+        raise RuntimeError("benchmark_regression")
+
+
 def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
     """Build, scan and remove one labelled fixture, writing only normalized reports."""
 
@@ -597,13 +615,6 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         source_dirty=source_dirty,
         total_elapsed_ms=max(0, int((monotonic() - started_at) * 1000)),
     )
-    rendered["dast-benchmark.json"] = render_benchmark_json(result)
-    rendered["dast-benchmark.md"] = render_benchmark_markdown(result)
-    if any(token in content or f"Session {token}" in content for content in rendered.values()):
-        raise RuntimeError("credential_in_report")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for name, content in rendered.items():
-        (output_dir / name).write_text(content, encoding="utf-8")
     metrics = result.metrics
     print(
         "DAST benchmark: "
@@ -611,6 +622,14 @@ def run_evidence(output_dir: Path = _DEFAULT_OUTPUT) -> None:
         f"manifest_sha256={manifest.sha256}",
         flush=True,
     )
+    _require_benchmark_floor(manifest, result)
+    rendered["dast-benchmark.json"] = render_benchmark_json(result)
+    rendered["dast-benchmark.md"] = render_benchmark_markdown(result)
+    if any(token in content or f"Session {token}" in content for content in rendered.values()):
+        raise RuntimeError("credential_in_report")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for name, content in rendered.items():
+        (output_dir / name).write_text(content, encoding="utf-8")
 
 
 def _safe_failure_location(error: BaseException) -> str:

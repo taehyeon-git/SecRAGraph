@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -22,6 +23,25 @@ ACTIVE_PATHS = (
     "/redirect-safe",
 )
 PASSIVE_PATHS = ("/public", "/protected", *ACTIVE_PATHS)
+BENCHMARK_SHA = "32ecbfb19e6eabd27d9988d71fdb60058740fa44f4d3cb69cdc1c2c0a0d2fdff"
+
+
+def test_reviewed_manifest_digest_matches_file() -> None:
+    assert (
+        sha256((ROOT / "data/evaluation/dast_cases.json").read_bytes()).hexdigest() == BENCHMARK_SHA
+    )
+    assert run_dast_evidence._BENCHMARK_SHA == BENCHMARK_SHA
+
+
+def _benchmark_result(*, sqli_tp: int = 1, sqli_fp: int = 0) -> Any:
+    header = SimpleNamespace(tp=1, fp=0, fn=0, tn=1)
+    redirect = SimpleNamespace(tp=1, fp=0, fn=0, tn=1)
+    sqli = SimpleNamespace(tp=sqli_tp, fp=sqli_fp, fn=2 - sqli_tp, tn=2 - sqli_fp)
+    return SimpleNamespace(
+        manifest_sha256=BENCHMARK_SHA,
+        metrics=SimpleNamespace(tp=2 + sqli_tp, fp=sqli_fp, fn=2 - sqli_tp, tn=4 - sqli_fp),
+        rules=(("ZAP/10021", header), ("ZAP/20019", redirect), ("ZAP/40018", sqli)),
+    )
 
 
 def _manifest() -> Any:
@@ -33,7 +53,7 @@ def _manifest() -> Any:
         )
         for path in PASSIVE_PATHS
     )
-    return SimpleNamespace(cases=cases, sha256="a" * 64)
+    return SimpleNamespace(cases=cases, sha256=BENCHMARK_SHA)
 
 
 def _report(*, completed: bool = True, finding: bool = True, active: bool = False) -> Any:
@@ -97,7 +117,7 @@ def _install_fakes(
     monkeypatch.setattr(run_dast_evidence, "_source_identity", lambda: ("c" * 40, True))
     monkeypatch.setattr(run_dast_evidence, "load_manifest", lambda _path: _manifest())
 
-    result = SimpleNamespace(metrics=SimpleNamespace(tp=1, fp=0, fn=0, tn=1))
+    result = _benchmark_result()
     monkeypatch.setattr(
         run_dast_evidence, "evaluate_dast_benchmark", lambda *_args, **_kwargs: result
     )
@@ -299,12 +319,38 @@ def test_benchmark_refusal_leaves_no_artifacts_after_cleanup(
     assert not list(tmp_path.glob("dast*"))
 
 
+@pytest.mark.parametrize("result", [_benchmark_result(sqli_tp=0), _benchmark_result(sqli_fp=1)])
+def test_benchmark_regression_fails_after_cleanup_without_publishing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, result: Any
+) -> None:
+    calls, _ = _install_fakes(monkeypatch)
+    monkeypatch.setattr(
+        run_dast_evidence, "evaluate_dast_benchmark", lambda *_args, **_kwargs: result
+    )
+    with pytest.raises(RuntimeError, match="benchmark_regression"):
+        run_dast_evidence.run_evidence(tmp_path)
+    assert [args[0] for _, args in calls] == ["up", "down"]
+    assert not list(tmp_path.glob("dast*"))
+
+
+def test_benchmark_manifest_change_requires_new_review(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fakes(monkeypatch)
+    altered = _manifest()
+    altered.sha256 = "b" * 64
+    monkeypatch.setattr(run_dast_evidence, "load_manifest", lambda _path: altered)
+    with pytest.raises(RuntimeError, match="benchmark_manifest_unreviewed"):
+        run_dast_evidence.run_evidence(tmp_path)
+    assert not list(tmp_path.glob("dast*"))
+
+
 def test_stats_phases_and_identity_reach_benchmark(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls, _ = _install_fakes(monkeypatch)
     captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
-    result = SimpleNamespace(metrics=SimpleNamespace(tp=1, fp=0, fn=0, tn=1))
+    result = _benchmark_result()
 
     def evaluate(*args: object, **kwargs: object) -> Any:
         assert calls[-1][1][0] == "down"
