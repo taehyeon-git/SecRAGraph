@@ -488,7 +488,9 @@ def _stage_checkov_input(
                 if not stat.S_ISREG(opened.st_mode) or (
                     opened.st_dev,
                     opened.st_ino,
-                ) != (before.st_dev, before.st_ino):
+                    opened.st_size,
+                    opened.st_mtime_ns,
+                ) != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
                     raise _UnsafeSnapshot("snapshot_changed")
                 if opened.st_size + total_bytes > _MAX_STAGED_BYTES:
                     raise _UnsafeSnapshot("input_limit_exceeded")

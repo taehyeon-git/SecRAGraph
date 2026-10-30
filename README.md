@@ -119,7 +119,7 @@ flowchart LR
 
 ## 스캐너 평가
 
-현재 [다중 엔진 사례 manifest](data/evaluation/multiengine_cases.json)는 취약·정상 파일과 웹 입력의 함수 간 흐름을 함께 기록합니다. 고정 Docker 이미지에서 14/14 사례, 42/42 라벨을 평가해 **TP=26, FP=1, FN=1**이었습니다(정밀도·재현율·F1 각각 약 0.963). Flask 헤더 입력을 포함한 4개 taint 흐름의 source·중간 단계·sink 위치가 모두 확인됐고, 라벨 밖 finding은 0건이었습니다. 기존 패턴 규칙은 숫자 변환으로 안전해진 셸 인자를 한 번 잘못 경고했으며 SQL f-string 한 건을 놓쳤습니다. 입력 SHA-256은 `682c1c180ed5e8e20c6fc937bc919f8d3bef5da3af35328800496134f3624152`입니다. **이 수치는 작성자가 만든 회귀 사례의 결과이며 실제 저장소 탐지율이 아닙니다.** 규칙별 수치와 분모는 [고정 평가 증거](docs/evidence/multiengine-scanner-2026-10-27.md)에 있습니다.
+현재 [다중 엔진 사례 manifest](data/evaluation/multiengine_cases.json)는 취약·정상 파일, 웹 입력의 함수 간 흐름, Docker Compose 선언을 함께 기록합니다. [고정 CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41017926046)에서 **25/25 사례, 152/152 라벨**을 평가해 **TP=37, FP=1, FN=1**이었습니다(정밀도·재현율·F1 각각 37/38 ≈ 0.974). 라벨 밖 finding은 0건이었고 Compose 전용 110개 평가는 TP=11, FP=0, FN=0으로 게이트를 통과했습니다. 기존 SAST에는 정상 셸 인자 오경보 1건과 SQL f-string 누락 1건이 남습니다. 입력 SHA-256은 `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`입니다. **작성자가 만든 회귀 사례의 결과이며 실제 저장소 탐지율이 아닙니다.** [기존 규칙별 증거](docs/evidence/multiengine-scanner-2026-10-27.md)와 [Compose 규칙·범위 증거](docs/evidence/compose-iac-2026-10-30.md)에 분모와 한계를 나누어 기록했습니다.
 
 별도 [OWASP BenchmarkPython 90개 사례](docs/evidence/multiengine-external-2026-10-27.md)는 넓은 CWE 단위로 **TP 27, FP 19, FN 9, TN 35**였고, 고정 [Starlette 저장소](docs/evidence/multiengine-external-2026-10-27.md#pinned-real-repository-workload)는 라벨이 없어 실행 범위·시간과 미판정 finding만 기록했습니다. 서로 다른 라벨·분모의 점수는 합산하지 않습니다. [평가 방법](docs/demo.md)을 참고하세요.
 
