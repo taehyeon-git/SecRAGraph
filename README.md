@@ -119,6 +119,21 @@ flowchart LR
 
 ## 스캐너 평가
 
+### 전체 도구 벤치마크
+
+[전체 파이프라인 실측과 개선 전후 기록](docs/evidence/pipeline-benchmark-2026-10-30.md)은 **회원 로그인 → 혼합 ZIP 업로드 → SAST·비밀정보·설정 검사 → LangGraph 보고서 → 저장 JSON·Markdown·SARIF**의 실제 Compose 왕복을 측정합니다. 개발 중 로컬 실행에서 계약 10/10, 검사기 4/4 완료, finding 10건·경고 0건, 업로드·검사 17,890ms였습니다. 외부 OSV·CWE·RAG는 고정 응답을 주입한 별도 그래프 계약에서 검증하며 실제 제공자 품질로 표시하지 않습니다.
+
+같은 질의 20개 finding에서 반복되던 RAG 검색은 **20회→1회**로 줄였고, 통제된 10ms 지연 실험의 한 번 실행은 219ms→31ms였습니다. 평가 과정에서 발견한 OSV finding의 RAG 인용 누락도 수정했습니다. 시간 차이는 운영 환경 성능 수치가 아닙니다. 신뢰된 `main` CI는 기존 스캐너·RAG·DAST·이미지/SBOM·Git 이력·의존성 감사와 새 API·제공자 계약을 **8개 분리 트랙**의 `secragraph-pipeline-benchmark` 아티팩트로 게시합니다. 서로 다른 분모의 점수는 합산하지 않으며 CodeQL은 별도 워크플로입니다.
+
+```powershell
+uv run python -m scripts.compose_smoke
+uv run python -m scripts.run_pipeline_contract_benchmark
+```
+
+첫 명령은 Docker Compose가 필요합니다. 완료된 JSON·Markdown은 `build/evidence/`에 생성됩니다. [CI 실행과 아티팩트](https://github.com/taehyeon-git/SecRAGraph/actions/workflows/ci.yml)를 확인할 수 있습니다.
+
+### 검사별 평가
+
 현재 [다중 엔진 사례 manifest](data/evaluation/multiengine_cases.json)는 취약·정상 파일, 웹 입력의 함수 간 흐름, Docker Compose 선언을 함께 기록합니다. [고정 CI 품질 작업](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41018714959/job/123940852364)에서 **25/25 사례, 152/152 라벨**을 평가해 **TP=37, FP=1, FN=1**이었습니다(정밀도·재현율·F1 각각 37/38 ≈ 0.974). 라벨 밖 finding은 0건이었고 Compose 전용 110개 평가는 TP=11, FP=0, FN=0으로 게이트를 통과했습니다. 기존 SAST에는 정상 셸 인자 오경보 1건과 SQL f-string 누락 1건이 남습니다. 입력 SHA-256은 `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`입니다. **작성자가 만든 회귀 사례의 결과이며 실제 저장소 탐지율이 아닙니다.** [기존 규칙별 증거](docs/evidence/multiengine-scanner-2026-10-27.md)와 [Compose 규칙·범위 증거](docs/evidence/compose-iac-2026-10-30.md)에 분모와 한계를 나누어 기록했습니다.
 
 별도 [OWASP BenchmarkPython 90개 사례](docs/evidence/multiengine-external-2026-10-27.md)는 넓은 CWE 단위로 **TP 27, FP 19, FN 9, TN 35**였고, 고정 [Starlette 저장소](docs/evidence/multiengine-external-2026-10-27.md#pinned-real-repository-workload)는 라벨이 없어 실행 범위·시간과 미판정 finding만 기록했습니다. 서로 다른 라벨·분모의 점수는 합산하지 않습니다. [평가 방법](docs/demo.md)을 참고하세요.

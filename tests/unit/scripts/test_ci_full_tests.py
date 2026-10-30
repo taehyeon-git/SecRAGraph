@@ -68,6 +68,8 @@ def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_runs() -> 
         "build/evidence/rag.md",
         "build/evidence/multiengine-scanner.json",
         "build/evidence/multiengine-scanner.md",
+        "build/evidence/pipeline-contract.json",
+        "build/evidence/pipeline-contract.md",
     }
     assert uploads[0]["with"]["if-no-files-found"] == "error"
 

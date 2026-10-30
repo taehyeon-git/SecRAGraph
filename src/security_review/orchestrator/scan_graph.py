@@ -293,28 +293,31 @@ def build_scan_graph(services: ScanGraphServices) -> ScanGraph:
         baseline = _required_findings(state, "deterministic_findings")
         current = _required_findings(state, "findings")
         warnings = _required_warnings(state)
-        if services.retriever is None or not baseline:
+        if services.retriever is None or not current:
             return {"findings": current}
         if PROCESSING_TIME_LIMIT_EXCEEDED in warnings:
             return {"findings": current}
 
         current_by_id = {finding.id: finding for finding in current}
         enriched = [current_by_id.get(finding.id, finding) for finding in baseline]
+        baseline_ids = {finding.id for finding in baseline}
+        enriched.extend(finding for finding in current if finding.id not in baseline_ids)
         limited = enriched[: services.max_enriched_findings]
         if len(enriched) > len(limited):
             warnings = _append_warning(warnings, "enrichment_finding_limit_reached")
         active_phase = "rag"
+        retrieved_by_query: dict[str, tuple[DocumentChunk, ...]] = {}
         try:
             for index, finding in enumerate(limited):
                 _require_enrichment_time(state)
                 active_phase = "rag"
-                chunks = _validated_chunks(
-                    services.retriever.search(
-                        _finding_query(finding),
-                        limit=services.retrieval_limit,
-                    ),
-                    services.retrieval_limit,
-                )
+                query = _finding_query(finding)
+                if query not in retrieved_by_query:
+                    retrieved_by_query[query] = _validated_chunks(
+                        services.retriever.search(query, limit=services.retrieval_limit),
+                        services.retrieval_limit,
+                    )
+                chunks = retrieved_by_query[query]
                 _require_enrichment_time(state)
                 if not chunks:
                     continue
