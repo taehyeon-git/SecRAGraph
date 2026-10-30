@@ -241,10 +241,13 @@ jobs:
           test -s build/evidence/dast-active.json
           test -s build/evidence/dast-active.md
           test -s build/evidence/dast-active.sarif
+          test -s build/evidence/dast-benchmark.json
+          test -s build/evidence/dast-benchmark.md
           uv run python -m json.tool build/evidence/dast.json > /dev/null
           uv run python -m json.tool build/evidence/dast.sarif > /dev/null
           uv run python -m json.tool build/evidence/dast-active.json > /dev/null
           uv run python -m json.tool build/evidence/dast-active.sarif > /dev/null
+          uv run python -m json.tool build/evidence/dast-benchmark.json > /dev/null
       - name: Publish normalized DAST evidence
         if: >-
           github.ref == 'refs/heads/main' &&
@@ -260,6 +263,8 @@ jobs:
             build/evidence/dast-active.json
             build/evidence/dast-active.md
             build/evidence/dast-active.sarif
+            build/evidence/dast-benchmark.json
+            build/evidence/dast-benchmark.md
           if-no-files-found: error
           retention-days: 14
 

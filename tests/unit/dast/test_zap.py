@@ -183,7 +183,6 @@ def test_zap_report_uses_route_template_and_discards_secrets() -> None:
     "raw",
     [
         _report("http://outside.example/items/123"),
-        _report(f"{ORIGIN}/unlisted"),
         b"not-json",
         b"{}",
         b'{"site":[]}',
@@ -191,7 +190,6 @@ def test_zap_report_uses_route_template_and_discards_secrets() -> None:
     ],
     ids=[
         "off-origin",
-        "unlisted-route",
         "invalid-json",
         "missing-site",
         "empty-site",
@@ -202,6 +200,21 @@ def test_zap_report_rejects_off_scope_or_malformed_output(raw: bytes) -> None:
     safe = sanitize_openapi(_schema(), origin=ORIGIN)
     with pytest.raises(DastReportError):
         parse_zap_report(raw, origin=ORIGIN, eligible_endpoints=safe.eligible_endpoints)
+
+
+def test_passive_report_omits_same_origin_alerts_outside_openapi_routes() -> None:
+    payload = json.loads(_report())
+    payload["site"][0]["alerts"][0]["instances"].append(
+        {"uri": f"{ORIGIN}/unlisted?token=secret-value", "method": "GET"}
+    )
+    findings = parse_zap_report(
+        json.dumps(payload).encode(),
+        origin=ORIGIN,
+        eligible_endpoints=("GET /items/{item_id}",),
+    )
+    assert len(findings) == 1
+    assert findings[0].http_path == "/items/{item_id}"
+    assert "secret-value" not in findings[0].model_dump_json()
 
 
 def test_active_report_omits_same_origin_alerts_outside_marked_seeds() -> None:
