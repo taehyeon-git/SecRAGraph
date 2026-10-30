@@ -156,6 +156,25 @@ def test_redirect_probe_accepts_hosted_http_references(monkeypatch, candidate: s
     assert module.stats()["attack_probes"]["/redirect-safe"] == 1
 
 
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "http://secragraph-target:8000/public",
+        "https://secragraph-target/public",
+        "//secragraph-target:8000/public",
+        "HTTP://SECRAGRAPH-TARGET.:8000/public",
+        "http://user@secragraph-target:8000/public",
+    ],
+)
+def test_redirect_probe_excludes_fixture_origin(monkeypatch, candidate: str) -> None:
+    monkeypatch.setenv("SECRAGRAPH_DAST_TEST_TOKEN", "fixture-secret")
+    module = importlib.reload(importlib.import_module("apps.dast_fixture.main"))
+
+    assert not module._is_external_redirect_probe(candidate)
+    module.redirect_safe(candidate)
+    assert module.stats()["attack_probes"]["/redirect-safe"] == 0
+
+
 def test_manifest_covers_equal_vulnerable_and_benign_cases_by_rule() -> None:
     manifest = json.loads((ROOT / "data/evaluation/dast_cases.json").read_text(encoding="utf-8"))
     cases = manifest["cases"]

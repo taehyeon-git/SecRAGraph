@@ -295,7 +295,7 @@ def test_active_scan_missing_hook_marker_is_incomplete(monkeypatch: pytest.Monke
     assert result.execution.reason == "dast_active_scan_incomplete"
 
 
-def test_active_runner_discards_out_of_seed_alert_without_losing_in_scope_finding(
+def test_runner_discards_out_of_seed_alert_without_losing_in_scope_finding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     report = json.loads(_zap_report())
@@ -308,8 +308,9 @@ def test_active_runner_discards_out_of_seed_alert_without_losing_in_scope_findin
     assert active.execution.status == "completed"
     assert active.execution.observed_alert_endpoints == ("GET /public",)
     passive = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
-    assert passive.execution.status == "error"
-    assert passive.execution.reason == "dast_report_invalid"
+    assert passive.execution.status == "completed"
+    assert passive.execution.observed_alert_endpoints == ("GET /public",)
+    assert "dast_passive_findings_limited_to_openapi_routes" in passive.warnings
 
 
 def test_active_timeout_keeps_partial_coverage_and_cleans_up(

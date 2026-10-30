@@ -306,10 +306,10 @@ def evaluate_dast_benchmark(
         active_seeds
     ):
         raise DastBenchmarkInputError("active_seed_mismatch")
-    passive_seeds = {
-        f"{case.method} {case.path}" for case in manifest.cases if case.mode == "passive"
-    }
-    if not passive_seeds.issubset(set(passive.eligible_endpoints)):
+    passive_seeds = {f"{case.method} {case.path}" for case in manifest.cases}
+    if set(passive.eligible_endpoints) != passive_seeds or len(passive.eligible_endpoints) != len(
+        passive_seeds
+    ):
         raise DastBenchmarkInputError("passive_seed_mismatch")
     proof_deltas: dict[str, int] = {}
     for case in manifest.cases:

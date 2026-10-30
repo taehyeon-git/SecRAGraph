@@ -343,7 +343,7 @@ def parse_zap_report(
                 try:
                     route = routes.route_for(method, actual, deadline)
                 except DastReportError as error:
-                    if active and str(error) == "unlisted_zap_endpoint":
+                    if str(error) == "unlisted_zap_endpoint":
                         continue
                     raise
                 if confidence == 0:  # ZAP explicitly marked this alert false positive.

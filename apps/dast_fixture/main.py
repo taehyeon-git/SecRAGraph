@@ -74,6 +74,7 @@ def _is_external_redirect_probe(value: str) -> bool:
         (is_http or is_scheme_relative)
         and target.netloc
         and host
+        and host.rstrip(".").casefold() != "secragraph-target"
         and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]*", host)
     )
 

@@ -228,7 +228,11 @@ def _result(
             *warnings,
         )
     else:
-        warnings = ("dast_passive_only", *warnings)
+        warnings = (
+            "dast_passive_only",
+            "dast_passive_findings_limited_to_openapi_routes",
+            *warnings,
+        )
     if reason is not None:
         warnings = (*warnings, reason)
     return DastScanResult(

@@ -56,7 +56,7 @@ def _manifest(tmp_path: Path, cases: list[dict[str, object]] | None = None) -> A
 
 
 def _report(mode: str, findings: tuple[Any, ...] = (), *, completed: bool = True) -> Any:
-    paths = [case["path"] for case in _cases() if case["mode"] == mode]
+    paths = [case["path"] for case in _cases() if mode == "passive" or case["mode"] == mode]
     execution = SimpleNamespace(
         engine="zap",
         kind="dast",
@@ -189,6 +189,22 @@ def test_missing_seed_and_passive_visit_are_unscored_failures(tmp_path: Path) ->
             source_revision="c" * 40,
             total_elapsed_ms=987,
         )
+
+
+@pytest.mark.parametrize("change", ["missing", "extra", "duplicate"])
+def test_passive_seed_set_must_equal_all_manifest_routes(tmp_path: Path, change: str) -> None:
+    manifest = _manifest(tmp_path)
+    passive = _report("passive")
+    seeds = list(passive.executions[0].eligible_endpoints)
+    if change == "missing":
+        seeds.remove("GET /sql-vulnerable")
+    elif change == "extra":
+        seeds.append("GET /unlisted")
+    else:
+        seeds.append(seeds[0])
+    passive.executions[0].eligible_endpoints = tuple(seeds)
+    with pytest.raises(DastBenchmarkInputError, match="passive_seed_mismatch"):
+        _evaluate(manifest, passive, _report("active"))
 
 
 def test_unpinned_zap_or_missing_manifest_fails_closed(tmp_path: Path) -> None:
