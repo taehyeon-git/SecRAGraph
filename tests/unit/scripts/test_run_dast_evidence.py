@@ -277,7 +277,12 @@ def test_ci_has_separate_dast_gate_and_only_normalized_artifacts() -> None:
     steps = job["steps"]
     assert any("scripts.run_dast_evidence" in step.get("run", "") for step in steps)
     upload = next(step for step in steps if "actions/upload-artifact@" in step.get("uses", ""))
-    assert upload["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    condition = upload["if"]
+    assert "github.ref == 'refs/heads/main'" in condition
+    assert all(
+        f"github.event_name == '{event}'" in condition
+        for event in ("push", "schedule", "workflow_dispatch")
+    )
     assert set(upload["with"]["path"].splitlines()) == {
         "build/evidence/dast.json",
         "build/evidence/dast.md",

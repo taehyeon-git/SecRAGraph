@@ -103,6 +103,69 @@ def test_push_uses_before_after_and_initial_push_scans_full_history(history) -> 
     assert (initial.base_sha, initial.head_sha) == (None, base_head)
 
 
+@pytest.mark.parametrize("event_name", ["schedule", "workflow_dispatch"])
+def test_rescan_selects_only_commits_after_reviewed_baseline(
+    history, monkeypatch: pytest.MonkeyPatch, event_name: str
+) -> None:
+    root, ancestor, _, _, checkout_head = history
+    monkeypatch.setattr(run_history_evidence, "RESCAN_BASE_SHA", ancestor)
+
+    selected = run_history_evidence.select_event_history(
+        root,
+        {
+            "GITHUB_EVENT_NAME": event_name,
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_SHA": checkout_head,
+        },
+    )
+
+    assert selected == run_history_evidence.HistorySelection(ancestor, checkout_head)
+    assert selected.base_sha is not None
+    commits = set(_git(root, "rev-list", f"{selected.base_sha}..{selected.head_sha}").splitlines())
+    assert ancestor not in commits
+    assert checkout_head in commits
+
+
+@pytest.mark.parametrize(
+    "event_name,ref,sha_kind,base_kind",
+    [
+        ("schedule", "refs/heads/feature", "checkout", "ancestor"),
+        ("workflow_dispatch", "refs/heads/feature", "checkout", "ancestor"),
+        ("schedule", "refs/heads/main", "missing", "ancestor"),
+        ("schedule", "refs/heads/main", "mismatch", "ancestor"),
+        ("schedule", "refs/heads/main", "checkout", "missing"),
+        ("schedule", "refs/heads/main", "checkout", "unrelated"),
+    ],
+)
+def test_rescan_rejects_untrusted_ref_commit_or_baseline(
+    history,
+    monkeypatch: pytest.MonkeyPatch,
+    event_name: str,
+    ref: str,
+    sha_kind: str,
+    base_kind: str,
+) -> None:
+    root, ancestor, _, base_head, checkout_head = history
+    if base_kind == "unrelated":
+        _git(root, "switch", "-q", "--orphan", "unrelated")
+        baseline = _commit(root, "unrelated.txt")
+        _git(root, "switch", "-q", "main")
+    else:
+        baseline = {"ancestor": ancestor, "missing": "f" * 40}[base_kind]
+    monkeypatch.setattr(run_history_evidence, "RESCAN_BASE_SHA", baseline)
+    sha = {
+        "checkout": checkout_head,
+        "missing": "",
+        "mismatch": base_head,
+    }[sha_kind]
+
+    with pytest.raises(ValueError):
+        run_history_evidence.select_event_history(
+            root,
+            {"GITHUB_EVENT_NAME": event_name, "GITHUB_REF": ref, "GITHUB_SHA": sha},
+        )
+
+
 @pytest.mark.parametrize("before,after", [("feature", "main"), ("bad", "main")])
 def test_push_rejects_nonancestor_and_malformed_sha(history, before: str, after: str) -> None:
     root, _, feature_head, base_head, _ = history
@@ -333,7 +396,10 @@ def test_history_ci_gate_precedes_clean_main_only_upload() -> None:
     assert installer < generate < gate < upload
     upload_step = steps[upload]
     condition = upload_step["if"]
-    assert "github.event_name == 'push'" in condition
+    assert all(
+        f"github.event_name == '{event}'" in condition
+        for event in ("push", "schedule", "workflow_dispatch")
+    )
     assert "github.ref == 'refs/heads/main'" in condition
     assert "steps.history_generate.outcome == 'success'" in condition
     assert "steps.history_gate.outcome == 'success'" in condition
