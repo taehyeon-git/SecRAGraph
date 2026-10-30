@@ -223,7 +223,7 @@ jobs:
 
   dast-evidence:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -231,15 +231,20 @@ jobs:
           version: "0.12.12"
       - run: uv python install 3.11
       - run: uv sync --frozen --dev
-      - name: Run passive DAST against disposable local API
+      - name: Run passive and active DAST against disposable local API
         run: uv run python -m scripts.run_dast_evidence
       - name: Parse normalized DAST evidence
         run: |
           test -s build/evidence/dast.json
           test -s build/evidence/dast.md
           test -s build/evidence/dast.sarif
+          test -s build/evidence/dast-active.json
+          test -s build/evidence/dast-active.md
+          test -s build/evidence/dast-active.sarif
           uv run python -m json.tool build/evidence/dast.json > /dev/null
           uv run python -m json.tool build/evidence/dast.sarif > /dev/null
+          uv run python -m json.tool build/evidence/dast-active.json > /dev/null
+          uv run python -m json.tool build/evidence/dast-active.sarif > /dev/null
       - name: Publish normalized DAST evidence
         if: >-
           github.ref == 'refs/heads/main' &&
@@ -252,6 +257,9 @@ jobs:
             build/evidence/dast.json
             build/evidence/dast.md
             build/evidence/dast.sarif
+            build/evidence/dast-active.json
+            build/evidence/dast-active.md
+            build/evidence/dast-active.sarif
           if-no-files-found: error
           retention-days: 14
 

@@ -89,6 +89,26 @@ def test_sanitize_openapi_removes_mutations_and_overrides_external_server() -> N
     )
 
 
+def test_active_openapi_imports_only_explicitly_marked_get_routes() -> None:
+    schema = json.loads(_schema())
+    schema["paths"]["/public"]["get"]["x-secragraph-dast-active"] = True
+    schema["paths"]["/protected"]["get"]["x-secragraph-dast-active"] = "true"
+    schema["paths"]["/items/{item_id}"]["get"]["x-secragraph-dast-active"] = False
+    schema["paths"]["/public"]["head"] = {"x-secragraph-dast-active": True}
+
+    safe = sanitize_openapi(json.dumps(schema).encode(), origin=ORIGIN, active=True)
+    payload = json.loads(safe.document)
+
+    assert safe.eligible_endpoints == ("GET /public",)
+    assert list(payload["paths"]) == ["/public"]
+    assert list(payload["paths"]["/public"]) == ["get"]
+
+
+def test_active_openapi_requires_marked_get_route() -> None:
+    with pytest.raises(DastInputError, match="no_active_openapi_operations"):
+        sanitize_openapi(_schema(), origin=ORIGIN, active=True)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -182,6 +202,49 @@ def test_zap_report_rejects_off_scope_or_malformed_output(raw: bytes) -> None:
     safe = sanitize_openapi(_schema(), origin=ORIGIN)
     with pytest.raises(DastReportError):
         parse_zap_report(raw, origin=ORIGIN, eligible_endpoints=safe.eligible_endpoints)
+
+
+def test_active_report_omits_same_origin_alerts_outside_marked_seeds() -> None:
+    payload = json.loads(_report())
+    instances = payload["site"][0]["alerts"][0]["instances"]
+    instances.extend(
+        [
+            {"uri": f"{ORIGIN}/", "method": "GET", "evidence": "private-root"},
+            {"uri": f"{ORIGIN}/items/123/", "method": "GET"},
+            {"uri": f"{ORIGIN}/unlisted?token=secret-value", "method": "GET"},
+        ]
+    )
+    findings = parse_zap_report(
+        json.dumps(payload).encode(),
+        origin=ORIGIN,
+        eligible_endpoints=("GET /items/{item_id}",),
+        active=True,
+    )
+    assert len(findings) == 1
+    assert findings[0].http_path == "/items/{item_id}"
+    assert "secret-value" not in findings[0].model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("uri", "method"),
+    [
+        ("http://outside.example/unlisted", "GET"),
+        (f"{ORIGIN}/unlisted", "POST"),
+        (42, "GET"),
+    ],
+)
+def test_active_report_still_rejects_off_origin_or_malformed_instances(
+    uri: object, method: str
+) -> None:
+    payload = json.loads(_report())
+    payload["site"][0]["alerts"][0]["instances"] = [{"uri": uri, "method": method}]
+    with pytest.raises(DastReportError):
+        parse_zap_report(
+            json.dumps(payload).encode(),
+            origin=ORIGIN,
+            eligible_endpoints=("GET /items/{item_id}",),
+            active=True,
+        )
 
 
 def test_zap_report_rejects_deeply_nested_json_as_report_error() -> None:

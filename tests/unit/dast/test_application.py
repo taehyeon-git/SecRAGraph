@@ -34,7 +34,7 @@ def test_dast_application_preserves_http_findings_coverage_and_warnings(
         observed_alert_endpoints=("GET /ready",),
         checks=("openapi-passive",),
     )
-    calls: list[tuple[str, int, str, str | None]] = []
+    calls: list[tuple[str, int, str, str | None, bool]] = []
 
     def fake_runner(
         container: str,
@@ -42,14 +42,15 @@ def test_dast_application_preserves_http_findings_coverage_and_warnings(
         openapi_path: str,
         *,
         auth_header_env: str | None = None,
+        active: bool = False,
     ) -> DastScanResult:
-        calls.append((container, port, openapi_path, auth_header_env))
+        calls.append((container, port, openapi_path, auth_header_env, active))
         return DastScanResult((finding,), ("dast_passive_only",), execution)
 
     monkeypatch.setattr("security_review.dast.application.run_zap_api_scan", fake_runner)
     report = scan_dast_container("fixture", 8000, "/openapi.json", auth_header_env="TOKEN_ENV")
 
-    assert calls == [("fixture", 8000, "/openapi.json", "TOKEN_ENV")]
+    assert calls == [("fixture", 8000, "/openapi.json", "TOKEN_ENV", False)]
     assert report.findings == (finding,)
     assert report.executions == (execution,)
     assert report.warnings == ("dast_passive_only",)
@@ -74,3 +75,23 @@ def test_dast_application_keeps_error_coverage(monkeypatch: pytest.MonkeyPatch) 
     assert report.summary.total == 0
     assert report.status is ScanStatus.COMPLETED_WITH_WARNINGS
     assert report.executions[0].status == "error"
+
+
+def test_dast_application_forwards_active_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    execution = ScanExecution(
+        engine="zap",
+        kind="dast",
+        status="completed",
+        elapsed_ms=1,
+        checks=("openapi-active",),
+    )
+    calls: list[bool] = []
+
+    def fake_runner(*args: object, active: bool = False, **kwargs: object) -> DastScanResult:
+        calls.append(active)
+        return DastScanResult((), (), execution)
+
+    monkeypatch.setattr("security_review.dast.application.run_zap_api_scan", fake_runner)
+    report = scan_dast_container("a" * 64, 8000, "/openapi.json", active=True)
+    assert calls == [True]
+    assert report.executions[0].checks == ("openapi-active",)

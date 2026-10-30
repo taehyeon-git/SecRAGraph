@@ -29,7 +29,12 @@ def _openapi() -> bytes:
             "openapi": "3.1.0",
             "info": {"title": "Fixture", "version": "1"},
             "paths": {
-                "/public": {"get": {"responses": {"200": {"description": "ok"}}}},
+                "/public": {
+                    "get": {
+                        "x-secragraph-dast-active": True,
+                        "responses": {"200": {"description": "ok"}},
+                    }
+                },
                 "/protected": {"get": {"responses": {"200": {"description": "ok"}}}},
             },
         }
@@ -72,12 +77,25 @@ class FakeDocker:
         cleanup_failure: bool = False,
         image_present: bool = True,
         pull_fails: bool = False,
+        active_marker: bool = True,
+        active_permitted: bool = True,
+        disposable: bool = True,
+        inspected_id: str = "a" * 64,
+        openapi_bytes: bytes | None = None,
+        report_bytes: bytes | None = None,
     ) -> None:
         self.calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
         self.timeout_zap = timeout_zap
         self.cleanup_failure = cleanup_failure
         self.image_present = image_present
         self.pull_fails = pull_fails
+        self.active_marker = active_marker
+        self.active_permitted = active_permitted
+        self.disposable = disposable
+        self.inspected_id = inspected_id
+        self.openapi_bytes = openapi_bytes
+        self.report_bytes = report_bytes
+        self.marker_precreated = False
 
     def __call__(
         self,
@@ -90,6 +108,27 @@ class FakeDocker:
         assert timeout > 0
         self.calls.append((tuple(args), dict(env) if env is not None else None))
         if args[:2] == ["inspect", "--format"]:
+            if "{{json .}}" in args:
+                return subprocess.CompletedProcess(
+                    args,
+                    0,
+                    json.dumps(
+                        {
+                            "Id": self.inspected_id,
+                            "State": {"Running": True},
+                            "Config": {
+                                "Labels": {
+                                    "io.secragraph.dast.disposable": "true"
+                                    if self.disposable
+                                    else "false",
+                                    "io.secragraph.dast.active-permitted": "true"
+                                    if self.active_permitted
+                                    else "false",
+                                }
+                            },
+                        }
+                    ).encode(),
+                )
             output = b"true\n" if ".State.Running" in args[2] else b"true\n"
             return subprocess.CompletedProcess(args, 0, output)
         if args[:2] == ["image", "inspect"]:
@@ -118,16 +157,23 @@ class FakeDocker:
         if args[0] == "run" and "--entrypoint" in args:
             assert capture
             assert "--network" in args and "--read-only" in args
-            return subprocess.CompletedProcess(args, 0, _openapi())
+            return subprocess.CompletedProcess(args, 0, self.openapi_bytes or _openapi())
         if args[0] == "run":
-            assert "-S" in args and "-f" in args and "openapi" in args
+            assert "-f" in args and "openapi" in args
             assert "--network" in args and "--mount" in args
             assert not capture
             if self.timeout_zap:
                 raise subprocess.TimeoutExpired(args, timeout)
             mount = args[args.index("--mount") + 1]
             source = mount.split("src=", 1)[1].split(",dst=", 1)[0]
-            (Path(source) / "zap.json").write_bytes(_zap_report())
+            (Path(source) / "zap.json").write_bytes(
+                self.report_bytes if self.report_bytes is not None else _zap_report()
+            )
+            if "-S" not in args:
+                marker = Path(source) / "active-complete.marker"
+                self.marker_precreated = marker.exists() and marker.read_bytes() == b""
+                if self.active_marker:
+                    marker.write_text("completed", encoding="ascii")
             return subprocess.CompletedProcess(args, 2, b"")
         if args[:2] == ["container", "rm"] or args[:2] == ["network", "disconnect"]:
             return subprocess.CompletedProcess(args, 0, b"")
@@ -184,6 +230,113 @@ def test_dast_runner_isolated_auth_and_sanitized_result(monkeypatch: pytest.Monk
     zap_env = next(env for args, env in fake.calls if args == zap_run)
     assert zap_env is not None and zap_env["ZAP_AUTH_HEADER_VALUE"] == "Session do-not-save"
     assert zap_env["ZAP_AUTH_HEADER_SITE"] == "secragraph-target"
+
+
+def test_active_scan_requires_full_id_and_second_permission_label_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(active_permitted=False)
+    monkeypatch.setattr(runner, "_docker", fake)
+    with pytest.raises(runner.DastScanError, match="invalid_active_dast_container"):
+        runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json", active=True)
+    with pytest.raises(runner.DastScanError, match="target_not_active_permitted"):
+        runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert not any(args[:2] == ("network", "create") for args, _ in fake.calls)
+
+
+@pytest.mark.parametrize(
+    ("fake", "reason"),
+    [
+        (FakeDocker(disposable=False), "target_not_disposable"),
+        (FakeDocker(inspected_id="b" * 64), "dast_target_unavailable"),
+    ],
+)
+def test_active_scan_rejects_mislabelled_or_mismatched_target(
+    monkeypatch: pytest.MonkeyPatch, fake: FakeDocker, reason: str
+) -> None:
+    monkeypatch.setattr(runner, "_docker", fake)
+    with pytest.raises(runner.DastScanError, match=reason):
+        runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert not any(args[:2] == ("network", "create") for args, _ in fake.calls)
+
+
+def test_active_scan_uses_pinned_id_api_minimal_and_completion_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    monkeypatch.setattr(runner, "_docker", fake)
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert result.execution.status == "completed"
+    assert result.execution.checks == ("openapi-active",)
+    assert result.execution.eligible_endpoints == ("GET /public",)
+    assert fake.marker_precreated
+    assert "dast_passive_only" not in result.warnings
+    assert "dast_active_scan_can_modify_target_state" in result.warnings
+    assert "dast_active_seeds_not_request_allowlist" in result.warnings
+    assert "dast_active_findings_limited_to_seed_routes" in result.warnings
+    commands = [args for args, _ in fake.calls]
+    assert any(args[:2] == ("network", "connect") and args[-1] == "a" * 64 for args in commands)
+    assert any(
+        args[:3] == ("network", "disconnect", "--force") and args[-1] == "a" * 64
+        for args in commands
+    )
+    zap = next(args for args in commands if args[0] == "run" and "zap-api-scan.py" in args)
+    assert ("-e", "PYTHONDONTWRITEBYTECODE=1") in tuple(zip(zap, zap[1:], strict=False))
+    script_args = zap[zap.index("zap-api-scan.py") + 1 :]
+    assert "-S" not in script_args and "-c" not in script_args
+    assert script_args[script_args.index("--hook") + 1] == "/zap/wrk/active-hooks.py"
+
+
+def test_active_scan_missing_hook_marker_is_incomplete(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeDocker(active_marker=False)
+    monkeypatch.setattr(runner, "_docker", fake)
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert result.execution.status == "error"
+    assert result.execution.reason == "dast_active_scan_incomplete"
+
+
+def test_active_runner_discards_out_of_seed_alert_without_losing_in_scope_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report = json.loads(_zap_report())
+    report["site"][0]["alerts"][0]["instances"].append(
+        {"uri": "http://secragraph-target:8765/", "method": "GET"}
+    )
+    fake = FakeDocker(report_bytes=json.dumps(report).encode())
+    monkeypatch.setattr(runner, "_docker", fake)
+    active = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert active.execution.status == "completed"
+    assert active.execution.observed_alert_endpoints == ("GET /public",)
+    passive = runner.run_zap_api_scan("disposable-api", 8765, "/openapi.json")
+    assert passive.execution.status == "error"
+    assert passive.execution.reason == "dast_report_invalid"
+
+
+def test_active_timeout_keeps_partial_coverage_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker(timeout_zap=True)
+    monkeypatch.setattr(runner, "_docker", fake)
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert result.execution.status == "partial"
+    assert result.execution.reason == "dast_scan_timeout"
+    assert result.execution.checks == ("openapi-active",)
+    assert result.execution.eligible_endpoints == ("GET /public",)
+    commands = [args for args, _ in fake.calls]
+    assert any(args[:2] == ("container", "rm") for args in commands)
+    assert any(args[:2] == ("network", "disconnect") for args in commands)
+    assert any(args[:2] == ("network", "rm") for args in commands)
+
+
+def test_active_scan_without_marked_get_never_starts_zap(monkeypatch: pytest.MonkeyPatch) -> None:
+    schema = json.loads(_openapi())
+    del schema["paths"]["/public"]["get"]["x-secragraph-dast-active"]
+    fake = FakeDocker(openapi_bytes=json.dumps(schema).encode())
+    monkeypatch.setattr(runner, "_docker", fake)
+    result = runner.run_zap_api_scan("a" * 64, 8765, "/openapi.json", active=True)
+    assert result.execution.status == "error"
+    assert result.execution.reason == "dast_openapi_invalid"
+    assert not any(args[0] == "run" and "zap-api-scan.py" in args for args, _ in fake.calls)
 
 
 def test_posix_bind_mount_uses_private_host_group_access(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -384,11 +537,17 @@ def test_report_parse_timeout_is_partial_and_still_cleans_up(
     monkeypatch.setattr(runner, "_docker", fake)
 
     def timed_out_parse(
-        _raw: bytes, *, origin: str, eligible_endpoints: tuple[str, ...], deadline: float
+        _raw: bytes,
+        *,
+        origin: str,
+        eligible_endpoints: tuple[str, ...],
+        deadline: float,
+        active: bool,
     ) -> tuple[object, ...]:
         assert origin == "http://secragraph-target:8765"
         assert eligible_endpoints == ("GET /protected", "GET /public")
         assert deadline > 0
+        assert active is False
         raise runner.DastReportError("zap_report_timeout")
 
     monkeypatch.setattr(runner, "parse_zap_report", timed_out_parse)

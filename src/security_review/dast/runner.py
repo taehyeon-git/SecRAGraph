@@ -1,4 +1,4 @@
-"""Run passive ZAP DAST only against explicitly disposable Docker containers."""
+"""Run scoped ZAP DAST against explicitly disposable Docker test containers."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import subprocess  # nosec B404
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import Literal
@@ -29,13 +30,16 @@ ZAP_IMAGE = (
     "sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238"
 )
 _MAX_DURATION_SECONDS = 300.0
+_MAX_ACTIVE_DURATION_SECONDS = 900.0
 _DOCKER_SETUP_SECONDS = 15.0
 _HELPER_SECONDS = 15.0
 _DOCKER_CLEANUP_SECONDS = 15.0
 _CONTAINER_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+_CONTAINER_ID = re.compile(r"[0-9a-f]{64}\Z")
 _OPENAPI_PATH = re.compile(r"/[A-Za-z0-9/._~-]{1,255}\Z")
 _ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,63}\Z")
 _LABEL = "io.secragraph.dast.disposable"
+_ACTIVE_LABEL = "io.secragraph.dast.active-permitted"
 _ALIAS = "secragraph-target"
 _GATEWAY_MODE_IPV4 = "com.docker.network.bridge.gateway_mode_ipv4"
 _GATEWAY_MODE_IPV6 = "com.docker.network.bridge.gateway_mode_ipv6"
@@ -56,6 +60,14 @@ with opener.open(sys.argv[1], timeout=7) as response:
         raise ValueError("openapi_size_limit")
 sys.stdout.buffer.write(payload)
 """.strip()
+_ACTIVE_HOOK = """
+from pathlib import Path
+
+
+def zap_active_scan_wrap(result):
+    Path('/zap/wrk/active-complete.marker').write_text('completed', encoding='ascii')
+    return result
+""".lstrip()
 
 
 class DastScanError(ValueError):
@@ -89,10 +101,18 @@ def _docker(
 
 
 def _validate(
-    container: str, port: int, openapi_path: str, auth_header_env: str | None
+    container: str,
+    port: int,
+    openapi_path: str,
+    auth_header_env: str | None,
+    active: bool,
 ) -> str | None:
+    if type(active) is not bool:
+        raise DastScanError("invalid_dast_mode")
     if not isinstance(container, str) or not _CONTAINER_NAME.fullmatch(container):
         raise DastScanError("invalid_dast_container")
+    if active and not _CONTAINER_ID.fullmatch(container):
+        raise DastScanError("invalid_active_dast_container")
     if type(port) is not int or not 1 <= port <= 65535:
         raise DastScanError("invalid_dast_port")
     if (
@@ -121,7 +141,31 @@ def _validate(
     return value
 
 
-def _inspect_target(container: str) -> None:
+def _inspect_target(container: str, *, active: bool) -> str:
+    if active:
+        try:
+            inspected = _docker(
+                ["inspect", "--format", "{{json .}}", container],
+                timeout=_DOCKER_SETUP_SECONDS,
+                capture=True,
+            )
+            if inspected.returncode != 0 or not inspected.stdout or len(inspected.stdout) > 65_536:
+                raise DastScanError("dast_target_unavailable")
+            details = json.loads(inspected.stdout)
+        except (OSError, subprocess.TimeoutExpired, ValueError, RecursionError) as error:
+            raise DastScanError("dast_target_unavailable") from error
+        if not isinstance(details, dict) or details.get("Id") != container:
+            raise DastScanError("dast_target_unavailable")
+        state = details.get("State")
+        config = details.get("Config")
+        if not isinstance(state, dict) or state.get("Running") is not True:
+            raise DastScanError("dast_target_unavailable")
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        if not isinstance(labels, dict) or labels.get(_LABEL) != "true":
+            raise DastScanError("target_not_disposable")
+        if labels.get(_ACTIVE_LABEL) != "true":
+            raise DastScanError("target_not_active_permitted")
+        return container
     try:
         running = _docker(
             ["inspect", "--format", "{{.State.Running}}", container],
@@ -139,6 +183,7 @@ def _inspect_target(container: str) -> None:
         raise DastScanError("dast_target_unavailable")
     if label.returncode != 0 or (label.stdout or b"").strip() != b"true":
         raise DastScanError("target_not_disposable")
+    return container
 
 
 def _execution(
@@ -148,6 +193,7 @@ def _execution(
     eligible: tuple[str, ...],
     findings: tuple[Finding, ...],
     reason: str | None = None,
+    active: bool = False,
 ) -> ScanExecution:
     return ScanExecution(
         engine="zap",
@@ -155,7 +201,7 @@ def _execution(
         status=status,
         version=ZAP_IMAGE,
         elapsed_ms=max(0, int((monotonic() - started) * 1_000)),
-        checks=("openapi-passive",),
+        checks=("openapi-active" if active else "openapi-passive",),
         eligible_endpoints=eligible,
         observed_alert_endpoints=tuple(
             sorted({f"{item.http_method} {item.http_path}" for item in findings})
@@ -171,18 +217,30 @@ def _result(
     eligible: tuple[str, ...] = (),
     findings: tuple[Finding, ...] = (),
     reason: str | None = None,
+    active: bool = False,
 ) -> DastScanResult:
-    warnings: tuple[str, ...] = (
-        "dast_passive_only",
-        "dast_redirects_within_isolated_network_possible",
-    )
+    warnings: tuple[str, ...] = ("dast_redirects_within_isolated_network_possible",)
+    if active:
+        warnings = (
+            "dast_active_scan_can_modify_target_state",
+            "dast_active_seeds_not_request_allowlist",
+            "dast_active_findings_limited_to_seed_routes",
+            *warnings,
+        )
+    else:
+        warnings = ("dast_passive_only", *warnings)
     if reason is not None:
         warnings = (*warnings, reason)
     return DastScanResult(
         findings=findings,
         warnings=warnings,
         execution=_execution(
-            status=status, started=started, eligible=eligible, findings=findings, reason=reason
+            status=status,
+            started=started,
+            eligible=eligible,
+            findings=findings,
+            reason=reason,
+            active=active,
         ),
     )
 
@@ -199,6 +257,18 @@ def _host_group_id() -> int | None:
 
     getgid = getattr(os, "getgid", None)
     return getgid() if getgid is not None else None
+
+
+def _active_marker_present(path: Path) -> bool:
+    """Require the completion marker written by the post-active-scan hook."""
+
+    try:
+        if path.is_symlink():
+            return False
+        with path.open("rb") as stream:
+            return stream.read(16) == b"completed"
+    except OSError:
+        return False
 
 
 def prepare_zap_image(deadline: float) -> bool:
@@ -274,15 +344,17 @@ def run_zap_api_scan(
     openapi_path: str,
     *,
     auth_header_env: str | None = None,
+    active: bool = False,
 ) -> DastScanResult:
-    """Scan a labelled, running Docker test API with a scope-limited passive ZAP."""
+    """Scan a labelled test API; active probes require separate explicit permission."""
 
-    auth_value = _validate(container, port, openapi_path, auth_header_env)
-    _inspect_target(container)
+    auth_value = _validate(container, port, openapi_path, auth_header_env, active)
+    target_id = _inspect_target(container, active=active)
     started = monotonic()
-    deadline = started + _MAX_DURATION_SECONDS
+    deadline = started + (_MAX_ACTIVE_DURATION_SECONDS if active else _MAX_DURATION_SECONDS)
+    mode_result = partial(_result, active=active)
     if not prepare_zap_image(deadline):
-        return _result(started=started, status="error", reason="dast_zap_image_unavailable")
+        return mode_result(started=started, status="error", reason="dast_zap_image_unavailable")
     nonce = secrets.token_hex(8)
     network = f"secragraph-dast-{nonce}"
     helper_name = f"secragraph-dast-fetch-{nonce}"
@@ -319,19 +391,21 @@ def run_zap_api_scan(
                 timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
             )
             if created.returncode != 0:
-                outcome = _result(started=started, status="error", reason="dast_network_failed")
+                outcome = mode_result(started=started, status="error", reason="dast_network_failed")
             elif not _network_isolated(network, deadline):
-                outcome = _result(
+                outcome = mode_result(
                     started=started, status="error", reason="dast_network_isolation_failed"
                 )
             else:
                 connect_attempted = True
                 connected = _docker(
-                    ["network", "connect", "--alias", _ALIAS, network, container],
+                    ["network", "connect", "--alias", _ALIAS, network, target_id],
                     timeout=min(_DOCKER_SETUP_SECONDS, max(0.1, deadline - monotonic())),
                 )
                 if connected.returncode != 0:
-                    outcome = _result(started=started, status="error", reason="dast_connect_failed")
+                    outcome = mode_result(
+                        started=started, status="error", reason="dast_connect_failed"
+                    )
                 else:
                     helper_attempted = True
                     helper = _docker(
@@ -363,18 +437,18 @@ def run_zap_api_scan(
                         capture=True,
                     )
                     if helper.returncode != 0 or not helper.stdout:
-                        outcome = _result(
+                        outcome = mode_result(
                             started=started, status="error", reason="dast_openapi_fetch_failed"
                         )
                     elif len(helper.stdout) > MAX_OPENAPI_BYTES:
-                        outcome = _result(
+                        outcome = mode_result(
                             started=started, status="error", reason="dast_openapi_size_limit"
                         )
                     else:
                         try:
-                            safe = sanitize_openapi(helper.stdout, origin=origin)
+                            safe = sanitize_openapi(helper.stdout, origin=origin, active=active)
                         except DastInputError:
-                            outcome = _result(
+                            outcome = mode_result(
                                 started=started, status="error", reason="dast_openapi_invalid"
                             )
                         else:
@@ -383,9 +457,17 @@ def run_zap_api_scan(
                             schema_file.write_bytes(safe.document)
                             report_file = working / "zap.json"
                             report_file.touch(exist_ok=False)
+                            marker_file = working / "active-complete.marker"
+                            if active:
+                                marker_file.touch(exist_ok=False)
+                                hook_file = working / "active-hooks.py"
+                                hook_file.write_text(_ACTIVE_HOOK, encoding="ascii")
                             if host_group is not None:
                                 schema_file.chmod(0o640)
                                 report_file.chmod(0o660)
+                                if active:
+                                    marker_file.chmod(0o660)
+                                    hook_file.chmod(0o640)
                             child_env = dict(os.environ)
                             child_env["ZAP_AUTH_HEADER_SITE"] = _ALIAS
                             zap_args = [
@@ -409,6 +491,9 @@ def run_zap_api_scan(
                             ]
                             if host_group is not None:
                                 zap_args.extend(["--group-add", str(host_group)])
+                            if active:
+                                # Keep ZAP-owned bytecode caches out of the mounted workspace.
+                                zap_args.extend(["-e", "PYTHONDONTWRITEBYTECODE=1"])
                             if auth_value is not None:
                                 child_env["ZAP_AUTH_HEADER_VALUE"] = auth_value
                                 zap_args.extend(["-e", "ZAP_AUTH_HEADER_VALUE"])
@@ -422,7 +507,7 @@ def run_zap_api_scan(
                                     "/zap/wrk/openapi.json",
                                     "-f",
                                     "openapi",
-                                    "-S",
+                                    *([] if active else ["-S"]),
                                     "-J",
                                     "/zap/wrk/zap.json",
                                     "-D",
@@ -431,6 +516,7 @@ def run_zap_api_scan(
                                     "3",
                                     "-z",
                                     "-silent",
+                                    *(["--hook", "/zap/wrk/active-hooks.py"] if active else []),
                                 ]
                             )
                             zap_attempted = True
@@ -440,11 +526,18 @@ def run_zap_api_scan(
                                 env=child_env,
                             )
                             if scan.returncode not in {0, 1, 2}:
-                                outcome = _result(
+                                outcome = mode_result(
                                     started=started,
                                     status="error",
                                     eligible=eligible,
                                     reason="dast_zap_failed",
+                                )
+                            elif active and not _active_marker_present(marker_file):
+                                outcome = mode_result(
+                                    started=started,
+                                    status="error",
+                                    eligible=eligible,
+                                    reason="dast_active_scan_incomplete",
                                 )
                             else:
                                 try:
@@ -455,10 +548,11 @@ def run_zap_api_scan(
                                         origin=origin,
                                         eligible_endpoints=eligible,
                                         deadline=deadline,
+                                        active=active,
                                     )
                                 except DastReportError as error:
                                     timed_out = str(error) == "zap_report_timeout"
-                                    outcome = _result(
+                                    outcome = mode_result(
                                         started=started,
                                         status="partial" if timed_out else "error",
                                         eligible=eligible,
@@ -467,25 +561,25 @@ def run_zap_api_scan(
                                         else "dast_report_invalid",
                                     )
                                 except OSError:
-                                    outcome = _result(
+                                    outcome = mode_result(
                                         started=started,
                                         status="error",
                                         eligible=eligible,
                                         reason="dast_report_invalid",
                                     )
                                 else:
-                                    outcome = _result(
+                                    outcome = mode_result(
                                         started=started,
                                         status="completed",
                                         eligible=eligible,
                                         findings=findings,
                                     )
         except subprocess.TimeoutExpired:
-            outcome = _result(
+            outcome = mode_result(
                 started=started, status="partial", eligible=eligible, reason="dast_scan_timeout"
             )
         except OSError:
-            outcome = _result(
+            outcome = mode_result(
                 started=started, status="error", eligible=eligible, reason="dast_docker_failed"
             )
         finally:
@@ -494,13 +588,13 @@ def run_zap_api_scan(
             if helper_attempted and not _cleanup(["container", "rm", "-f", helper_name]):
                 cleanup_failed = True
             if connect_attempted and not _cleanup(
-                ["network", "disconnect", "--force", network, container]
+                ["network", "disconnect", "--force", network, target_id]
             ):
                 cleanup_failed = True
             if network_attempted and not _cleanup(["network", "rm", network]):
                 cleanup_failed = True
     if outcome is None:
-        outcome = _result(started=started, status="error", reason="dast_unknown_failure")
+        outcome = mode_result(started=started, status="error", reason="dast_unknown_failure")
     if cleanup_failed:
         return DastScanResult(
             findings=outcome.findings,

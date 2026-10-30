@@ -2,3 +2,4 @@
 paths-ignore:
   - examples/insecure/**
   - tests/fixtures/**
+  - apps/dast_fixture/**

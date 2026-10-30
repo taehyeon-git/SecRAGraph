@@ -22,6 +22,7 @@ def scan_dast_container(
     openapi_path: str,
     *,
     auth_header_env: str | None = None,
+    active: bool = False,
     cwe_evidence: CweEvidenceProvider | None = None,
     retriever: SecurityDocumentRetriever | None = None,
     enrichment_budget_seconds: float = 30.0,
@@ -33,6 +34,7 @@ def scan_dast_container(
         port,
         openapi_path,
         auth_header_env=auth_header_env,
+        active=active,
     )
     graph = build_scan_graph(ScanGraphServices(cwe_evidence=cwe_evidence, retriever=retriever))
     state = cast(
