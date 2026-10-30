@@ -12,7 +12,7 @@
 
 CI의 전체 `scan_path` 평가와 Compose 전용 증거 게이트는 [워크플로](../../.github/workflows/ci.yml)에서 같은 manifest를 사용합니다. 전체 평가에는 Opengrep·Gitleaks·Checkov의 기존 사례도 포함되며, 해당 엔진의 알려진 오경보·누락을 Compose 점수에 합치지 않습니다.
 
-[PR CI 실행](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41017926046)의 고정 스캐너 이미지에서 25/25 사례와 152/152 라벨이 채점됐고, manifest SHA-256은 `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`였습니다. Compose 엔진은 25회 실행 중 11개 파일을 적격·확인했고 11회 `completed`였습니다. **Compose 라벨 110개에서 TP=11, FP=0, FN=0**, 누적 실행 시간 11ms였으며 새 미평가 finding은 전체 사례에서 0개였습니다. 이 수치는 작은 작성자 회귀 세트에만 적용됩니다.
+[PR CI 품질 작업](https://github.com/taehyeon-git/SecRAGraph/actions/runs/41018714959/job/123940852364)의 고정 스캐너 이미지에서 25/25 사례와 152/152 라벨이 채점됐고, manifest SHA-256은 `9fd021037109a5d1703f4d02b5372157befb99dc80af5962583d29b94244dbc2`였습니다. Compose 엔진은 25회 실행 중 11개 파일을 적격·확인했고 11회 `completed`였습니다. **Compose 라벨 110개에서 TP=11, FP=0, FN=0**, 누적 실행 시간 11ms였으며 새 미평가 finding은 전체 사례에서 0개였습니다. 이 수치는 작은 작성자 회귀 세트에만 적용됩니다.
 
 | Compose 규칙 | TP | FP | FN | 채점 평가 |
 | --- | ---: | ---: | ---: | ---: |
