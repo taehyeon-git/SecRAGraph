@@ -2,7 +2,7 @@
 
 # Docker Hub python:3.11-slim-bookworm multi-platform index, verified at
 # https://hub.docker.com/layers/library/python/3.11-slim-bookworm/ (Python 3.11.17).
-FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS builder
+FROM python:3.15-slim-bookworm@sha256:4e03260adeeebafccd084f3584e6b84823aba5651cfb53ef8a078ed441ddf9cd AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
@@ -27,7 +27,7 @@ COPY infra/scanners/install_tools.py /tmp/install_scanner_tools.py
 RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
 
 
-FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS runtime
+FROM python:3.15-slim-bookworm@sha256:4e03260adeeebafccd084f3584e6b84823aba5651cfb53ef8a078ed441ddf9cd AS runtime
 
 # The pinned base predates Debian's bookworm-security tzdata update.
 # Keep the fix on the same distribution and fail the build if it is unavailable.
