@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 BOOTSTRAP_BASE_SHA = "c8f7800ebd740298478a6c705e51f0c0e04b51f3"
+# The Bookworm-to-Trixie migration is permitted only for these exact reviewed bytes.
+# All later baseline edits still require a separate, explicit policy review.
+REVIEWED_BASE_SHA = "8cab336dedbd7b9a2d777cddbe2fd7bdc8d48e97"
+PREVIOUS_BASELINE_SHA256 = "9a2f7f1e90f7f6a82cdad299cb2df029a92595a99aa9bebb6449c0a35e013283"
+REVIEWED_BASELINE_SHA256 = "0da9f8d9c2897b52a9f1de3dda9ba67dac7e9e69289a4eee56a67ef16b9d6a71"
 TRIVY_VERSION = "0.76.1"
 BASELINE_PATH = Path("data/security/container-image-baseline.json")
 MAX_POLICY_BYTES = 8 * 1024 * 1024
@@ -146,7 +151,7 @@ def load_baseline(path: Path) -> dict[str, Any]:
         or payload["scanner"] != "trivy"
         or payload["scanner_version"] != TRIVY_VERSION
         or not isinstance(payload["source_revision"], str)
-        or payload["source_revision"] != BOOTSTRAP_BASE_SHA
+        or payload["source_revision"] != REVIEWED_BASE_SHA
     ):
         raise BaselineError("unsupported baseline schema or version")
     try:
@@ -422,7 +427,14 @@ def verify_baseline_unchanged(path: Path, *, base_sha: str, repo_root: Path) -> 
         if base_sha == BOOTSTRAP_BASE_SHA:
             return
         raise BaselineError("base commit has no baseline")
-    if len(previous.stdout) > MAX_POLICY_BYTES or previous.stdout != path.read_bytes():
+    current = path.read_bytes()
+    if len(previous.stdout) > MAX_POLICY_BYTES or len(current) > MAX_POLICY_BYTES:
+        raise BaselineError("baseline differs from the base commit")
+    if previous.stdout != current and not (
+        base_sha == REVIEWED_BASE_SHA
+        and hashlib.sha256(previous.stdout).hexdigest() == PREVIOUS_BASELINE_SHA256
+        and hashlib.sha256(current).hexdigest() == REVIEWED_BASELINE_SHA256
+    ):
         raise BaselineError("baseline differs from the base commit")
 
 

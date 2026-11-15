@@ -93,6 +93,9 @@ contained 386 components and 225 vulnerability entries (its representation
 and deduplication differ from the JSON record count). These counts are a
 point-in-time, tool-specific baseline, not a claim of 384 exploitable flaws.
 Several critical records have fixed versions, so remediation remains open.
+This paragraph preserves the original Bookworm baseline measurement. The
+[2026-11-16 Trixie recheck](../evidence/container-image-2026-11-16.md) records
+the current image and reviewed 95-identity baseline.
 
 The CI gate always fails on scan/SBOM/identity incompleteness. It also fails
 on any image-config misconfiguration of medium or higher severity and on any
@@ -101,7 +104,9 @@ reviewed baseline. Baseline identities contain ecosystem/type, advisory ID,
 package identity and installed version; a fixed finding disappears naturally.
 The baseline is explicit, versioned and limited to pre-existing records. It
 is not automatically rewritten by CI. On a PR, CI compares it with the
-baseline at the base commit and rejects any change to the baseline file.
+baseline at the base commit and rejects any change to the baseline file,
+except the one-time Trixie migration bound to the exact old and new file
+SHA-256 values and base commit documented in the current evidence record.
 The initial bootstrap PR may add the file because the base has none; after
 that there is no automatic waiver or baseline-growth path. The exception is
 bound to the fixed pre-feature main SHA `c8f7800ebd740298478a6c705e51f0c0e04b51f3`;
