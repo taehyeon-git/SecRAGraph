@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # Official Python 3.11.18 slim Trixie multi-platform index, verified on 2026-11-16.
-FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS builder
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
@@ -26,7 +26,7 @@ COPY infra/scanners/install_tools.py /tmp/install_scanner_tools.py
 RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
 
 
-FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS runtime
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS runtime
 
 # Debian's security repository fixes both zlib advisories in the pinned base.
 # Runtime commands use the copied virtual environments; remove unused global
