@@ -11,8 +11,10 @@ from pathlib import Path
 
 import pytest
 
+from scripts import ci_container_image
 from scripts.ci_container_image import (
-    BOOTSTRAP_BASE_SHA,
+    REVIEWED_BASE_SHA,
+    REVIEWED_BASELINE_SHA256,
     BaselineError,
     GateError,
     evaluate_gate,
@@ -39,7 +41,7 @@ def _baseline(identities: list[dict[str, object]]) -> dict[str, object]:
         "schema_version": 1,
         "scanner": "trivy",
         "scanner_version": "0.76.1",
-        "source_revision": BOOTSTRAP_BASE_SHA,
+        "source_revision": REVIEWED_BASE_SHA,
         "identities": identities,
     }
 
@@ -256,6 +258,41 @@ def test_pr_baseline_change_is_rejected_against_real_base(tmp_path: Path) -> Non
     path.write_text(json.dumps(_baseline([])), encoding="utf-8")
     with pytest.raises(BaselineError):
         verify_baseline_unchanged(path, base_sha=base_sha, repo_root=tmp_path)
+
+
+def test_reviewed_baseline_refresh_accepts_only_exact_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "user.email", "test@example.com")
+    path = tmp_path / "data" / "security" / "container-image-baseline.json"
+    path.parent.mkdir(parents=True)
+    old = json.dumps(_baseline([_identity()])).encode()
+    path.write_bytes(old)
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "base")
+    base_sha = _git(tmp_path, "rev-parse", "HEAD")
+    new = json.dumps(_baseline([])).encode()
+    path.write_bytes(new)
+    monkeypatch.setattr(ci_container_image, "REVIEWED_BASE_SHA", base_sha)
+    monkeypatch.setattr(
+        ci_container_image, "PREVIOUS_BASELINE_SHA256", hashlib.sha256(old).hexdigest()
+    )
+    monkeypatch.setattr(
+        ci_container_image, "REVIEWED_BASELINE_SHA256", hashlib.sha256(new).hexdigest()
+    )
+    verify_baseline_unchanged(path, base_sha=base_sha, repo_root=tmp_path)
+    path.write_bytes(new + b" ")
+    with pytest.raises(BaselineError):
+        verify_baseline_unchanged(path, base_sha=base_sha, repo_root=tmp_path)
+
+
+def test_checked_in_reviewed_baseline_has_expected_digest() -> None:
+    path = Path(__file__).resolve().parents[3] / ci_container_image.BASELINE_PATH
+    baseline = load_baseline(path)
+    assert len(baseline["identities"]) == 95
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == REVIEWED_BASELINE_SHA256
 
 
 def test_missing_base_baseline_is_not_general_waiver(tmp_path: Path) -> None:

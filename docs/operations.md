@@ -57,7 +57,7 @@ The command writes `container.json`, `container.md`, `container.sarif`,
 binds normalized evidence and SBOM hashes to the tar, local image ID, image
 config digest and DB time. The raw Trivy JSON may include image configuration
 environment variables, so it is never a public Actions artifact. See the
-[image evidence record](evidence/container-image-2026-10-30.md) for actual
+[current image evidence record](evidence/container-image-2026-11-16.md) for actual
 counts, SHA values and the scope of the current high severity backlog.
 
 ## On-demand CWE evidence

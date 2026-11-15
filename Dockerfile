@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# Docker Hub python:3.11-slim-bookworm multi-platform index, verified at
-# https://hub.docker.com/layers/library/python/3.11-slim-bookworm/ (Python 3.11.17).
-FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS builder
+# Official Python 3.11.18 slim Trixie multi-platform index, verified on 2026-11-16.
+FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.23@sha256:61d393e44e249f2e4b526b6c7ddcecce245946826e608e11c93ad4f5bba55b21 /uv /uvx /bin/
 ENV UV_LINK_MODE=copy \
@@ -27,13 +26,14 @@ COPY infra/scanners/install_tools.py /tmp/install_scanner_tools.py
 RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
 
 
-FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS runtime
+FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS runtime
 
-# The pinned base predates Debian's bookworm-security tzdata update.
-# Keep the fix on the same distribution and fail the build if it is unavailable.
+# Debian's security repository fixes both zlib advisories in the pinned base.
+# Runtime commands use the copied virtual environments; remove unused global
+# packaging tools so they are not shipped in the final image.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata=2026f-0+deb12u1 \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
+    && rm -rf /var/lib/apt/lists/* /usr/local/lib/python3.11/site-packages
 
 ENV PATH="/opt/scanners:/opt/checkov-venv/bin:/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
