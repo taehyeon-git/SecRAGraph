@@ -48,6 +48,13 @@ def _verified_download(url: str, digest: str) -> bytes:
 
 
 def install(destination: Path, architecture: str) -> None:
+    install_opengrep(destination, architecture)
+    install_gitleaks(destination, architecture)
+
+
+def install_opengrep(destination: Path, architecture: str) -> None:
+    """Install the verified Opengrep asset without the release Gitleaks binary."""
+
     assets = _ASSETS.get(architecture)
     if assets is None:
         raise ValueError("unsupported scanner architecture")
@@ -56,8 +63,6 @@ def install(destination: Path, architecture: str) -> None:
     opengrep_path = destination / "opengrep"
     opengrep_path.write_bytes(opengrep)
     opengrep_path.chmod(0o755)
-
-    install_gitleaks(destination, architecture)
 
 
 def install_gitleaks(destination: Path, architecture: str) -> None:
@@ -89,7 +94,12 @@ def main(arguments: list[str] | None = None) -> int:
     if len(args) == 3 and args[2] == "--gitleaks-only":
         install_gitleaks(Path(args[0]), args[1])
         return 0
-    raise SystemExit("usage: install_tools.py OUTPUT_DIRECTORY ARCHITECTURE [--gitleaks-only]")
+    if len(args) == 3 and args[2] == "--opengrep-only":
+        install_opengrep(Path(args[0]), args[1])
+        return 0
+    raise SystemExit(
+        "usage: install_tools.py OUTPUT_DIRECTORY ARCHITECTURE [--gitleaks-only | --opengrep-only]"
+    )
 
 
 if __name__ == "__main__":

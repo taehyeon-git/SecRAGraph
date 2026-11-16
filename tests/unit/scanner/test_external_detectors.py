@@ -157,6 +157,8 @@ def test_checkov_normalizes_failures_without_returning_source_snippets(
     monkeypatch.setenv("BC_API_KEY", canary)
     monkeypatch.setenv("GITHUB_TOKEN", canary)
     monkeypatch.setenv("LD_LIBRARY_PATH", str(tmp_path))
+    monkeypatch.setenv("CKV_EXTERNAL_CHECKS_PUBLIC_KEY", canary)
+    monkeypatch.setenv("CKV_EXTERNAL_CHECKS_DIR", str(tmp_path))
 
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         if "--version" in args:
@@ -177,6 +179,8 @@ def test_checkov_normalizes_failures_without_returning_source_snippets(
         assert "BC_API_KEY" not in kwargs["env"]
         assert "GITHUB_TOKEN" not in kwargs["env"]
         assert "LD_LIBRARY_PATH" not in kwargs["env"]
+        assert "CKV_EXTERNAL_CHECKS_PUBLIC_KEY" not in kwargs["env"]
+        assert "CKV_EXTERNAL_CHECKS_DIR" not in kwargs["env"]
         assert kwargs["env"]["HTTPS_PROXY"] == "http://127.0.0.1:9"
         assert kwargs["env"]["CKV_IGNORE_HIDDEN_DIRECTORIES"] == "false"
         payload = {

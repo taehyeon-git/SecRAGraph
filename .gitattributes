@@ -12,3 +12,5 @@ data/evaluation/** text eol=lf
 data/security/container-image-baseline.json text eol=lf
 docs/evidence/multiengine-scanner-2026-10-27.json text eol=lf
 infra/scanners/*.txt text eol=lf
+infra/scanners/gitleaks/go.mod text eol=lf
+infra/scanners/gitleaks/go.sum text eol=lf
