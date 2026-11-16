@@ -66,6 +66,7 @@ def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_runs() -> 
     assert set(uploads[0]["with"]["path"].splitlines()) == {
         "build/evidence/rag.json",
         "build/evidence/rag.md",
+        "build/evidence/gitleaks-parity.json",
         "build/evidence/multiengine-scanner.json",
         "build/evidence/multiengine-scanner.md",
         "build/evidence/pipeline-contract.json",

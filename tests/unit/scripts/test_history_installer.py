@@ -37,6 +37,24 @@ def test_gitleaks_only_installer_never_downloads_opengrep(tmp_path: Path, monkey
     assert "gitleaks_8.30.1_linux_x64.tar.gz" in requested[0]
 
 
+def test_opengrep_only_installer_never_downloads_release_gitleaks(
+    tmp_path: Path, monkeypatch
+) -> None:
+    requested: list[str] = []
+
+    def download(url: str, _digest: str) -> bytes:
+        requested.append(url)
+        return b"verified-opengrep-test-binary"
+
+    monkeypatch.setattr(install_tools, "_verified_download", download)
+
+    assert install_tools.main([str(tmp_path), "amd64", "--opengrep-only"]) == 0
+    assert (tmp_path / "opengrep").read_bytes() == b"verified-opengrep-test-binary"
+    assert not (tmp_path / "gitleaks").exists()
+    assert len(requested) == 1
+    assert "opengrep_manylinux_x86" in requested[0]
+
+
 def test_existing_install_still_installs_both_tools(tmp_path: Path, monkeypatch) -> None:
     requested: list[str] = []
     archive = _fake_gitleaks_archive()

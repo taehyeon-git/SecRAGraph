@@ -1,6 +1,6 @@
 """Run a real pinned Gitleaks history scan when Git and Gitleaks are available.
 
-Usage: PYTHONPATH=src python tests/unit/history/real_gitleaks_smoke.py /path/to/gitleaks
+Usage: PYTHONPATH=src python tests/unit/history/real_gitleaks_smoke.py FIRST [SECOND]
 This is an opt-in integration probe, so ordinary unit runs need no binary.
 """
 
@@ -10,6 +10,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from pathlib import Path
 
 from security_review.history import scan_git_history
@@ -26,7 +27,8 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def main(binary: str) -> None:
+def main(binary: str, comparison_binary: str | None = None) -> None:
+    binaries = (binary,) if comparison_binary is None else (binary, comparison_binary)
     with tempfile.TemporaryDirectory(prefix="secragraph-real-history-") as temporary:
         root = Path(temporary) / "repo"
         root.mkdir()
@@ -36,10 +38,11 @@ def main(binary: str) -> None:
         (root / "note.txt").write_text("safe\n", encoding="utf-8")
         _git(root, "add", ".")
         _git(root, "commit", "-qm", "root")
-        clean = scan_git_history(root, binary=binary)
-        assert clean.execution.status == "completed", clean.execution.reason
-        assert clean.execution.selected_commit_count == 1
-        assert clean.findings == (), "clean root commit must yield an empty template report"
+        for candidate in binaries:
+            clean = scan_git_history(root, binary=candidate)
+            assert clean.execution.status == "completed", clean.execution.reason
+            assert clean.execution.selected_commit_count == 1
+            assert clean.findings == (), "clean root commit must yield an empty template report"
 
         first_key = "github_pat_" + secrets.token_hex(41)
         (root / "deleted.txt").write_text(f"token={first_key}\n", encoding="utf-8")
@@ -71,20 +74,45 @@ def main(binary: str) -> None:
         _git(root, "add", ".")
         _git(root, "commit", "-qm", "remove merge credential")
 
-        result = scan_git_history(root, binary=binary)
-        assert result.execution.status == "completed", result.execution.reason
-        detected = {finding.git_commit for finding in result.findings}
-        assert add_commit in detected, "deleted-file secret missed"
-        assert merge_commit in detected, "merge-resolution-only secret missed"
-        assert all(finding.file_path in {"deleted.txt", "note.txt"} for finding in result.findings)
-        assert first_key not in repr(result)
-        assert second_key not in repr(result)
+        results = [scan_git_history(root, binary=candidate) for candidate in binaries]
+        for result in results:
+            assert result.execution.status == "completed", result.execution.reason
+            detected = {finding.git_commit for finding in result.findings}
+            assert add_commit in detected, "deleted-file secret missed"
+            assert merge_commit in detected, "merge-resolution-only secret missed"
+            assert all(
+                finding.file_path in {"deleted.txt", "note.txt"} for finding in result.findings
+            )
+            assert first_key not in repr(result)
+            assert second_key not in repr(result)
+        result = results[0]
+        if comparison_binary is not None:
+            assert (
+                results[0].execution.selected_commit_count
+                == results[1].execution.selected_commit_count
+            ), "history selection changed"
+            identities = [
+                Counter(
+                    (
+                        finding.git_commit,
+                        finding.rule_id,
+                        finding.file_path,
+                        finding.line_start,
+                        finding.line_end,
+                    )
+                    for finding in item.findings
+                )
+                for item in results
+            ]
+            assert identities[0] == identities[1], "history finding metadata changed"
         print(
             "real_gitleaks_smoke: completed; "
             f"selected_commits={result.execution.selected_commit_count}; "
             f"findings={len(result.findings)}; "
             "clean_root_completed=true; deleted_and_merge_commits_detected=true"
         )
+        if comparison_binary is not None:
+            print("real_gitleaks_parity: same_history=true findings_equal=true")
 
 
 def baseline_from_bundle(binary: str, bundle: Path, head: str) -> None:
@@ -113,10 +141,12 @@ def baseline_from_bundle(binary: str, bundle: Path, head: str) -> None:
 if __name__ == "__main__":
     if len(sys.argv) == 2:
         main(sys.argv[1])
+    elif len(sys.argv) == 3:
+        main(sys.argv[1], sys.argv[2])
     elif len(sys.argv) == 5 and sys.argv[1] == "--bundle":
         baseline_from_bundle(sys.argv[4], Path(sys.argv[2]), sys.argv[3])
     else:
         raise SystemExit(
-            "usage: real_gitleaks_smoke.py GITLEAKS_BINARY | "
+            "usage: real_gitleaks_smoke.py GITLEAKS_BINARY [COMPARISON_BINARY] | "
             "--bundle BUNDLE HEAD_SHA GITLEAKS_BINARY"
         )

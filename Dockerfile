@@ -1,5 +1,27 @@
 # syntax=docker/dockerfile:1.7
 
+# Rebuild the released Gitleaks source with a patched, checksum-verified Go
+# module graph. This is a SecRAGraph-derived binary, not the upstream asset.
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie@sha256:b54b2639de8c1bfe538ec5ffc45f29b1932235ac5f6d63c059853646677112d9 AS gitleaks-builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOTOOLCHAIN=local \
+    GOPROXY=https://proxy.golang.org \
+    GOSUMDB=sum.golang.org
+WORKDIR /src
+RUN git clone --depth 1 --branch v8.30.1 https://github.com/gitleaks/gitleaks.git . \
+    && test "$(git rev-parse HEAD)" = "83d9cd684c87d95d656c1458ef04895a7f1cbd8e"
+COPY infra/scanners/gitleaks/go.mod infra/scanners/gitleaks/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download \
+    && go mod verify \
+    && CGO_ENABLED=0 GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" \
+       go build -mod=readonly -trimpath -tags=gore2regex \
+       -ldflags='-s -w -X=github.com/zricethezav/gitleaks/v8/version.Version=8.30.1' \
+       -o /out/gitleaks ./main.go
+
 # Official Python 3.11.18 slim Trixie multi-platform index, verified on 2026-11-16.
 FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS builder
 
@@ -23,16 +45,19 @@ RUN uv venv /opt/checkov-venv \
 
 ARG TARGETARCH
 COPY infra/scanners/install_tools.py /tmp/install_scanner_tools.py
-RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}"
+RUN python /tmp/install_scanner_tools.py /opt/scanners "${TARGETARCH}" --opengrep-only
+COPY --from=gitleaks-builder /out/gitleaks /opt/scanners/gitleaks
 
 
 FROM python:3.11-slim-trixie@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS runtime
 
 # Debian's security repository fixes both zlib advisories in the pinned base.
-# Runtime commands use the copied virtual environments; remove unused global
-# packaging tools so they are not shipped in the final image.
+# Runtime commands use the copied virtual environments. The mount command is
+# unnecessary inside the non-root service container; keep protected login and
+# essential util-linux packages intact.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
+    && apt-get purge -y mount \
     && rm -rf /var/lib/apt/lists/* /usr/local/lib/python3.11/site-packages
 
 ENV PATH="/opt/scanners:/opt/checkov-venv/bin:/app/.venv/bin:${PATH}" \

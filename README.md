@@ -28,34 +28,29 @@ uv run --frozen security-review scan examples/insecure/sample.py --format markdo
 
 ## 핵심 아키텍처
 
-아래는 **회원 업로드와 CLI가 공유하는 소스 검사 흐름**입니다. 검사기를 순차 실행해 결과를 정규화하고, OSV 취약점 결과와 CWE 근거를 더해 보고서를 만듭니다.
+회원 업로드와 CLI는 같은 LangGraph 검사 흐름을 사용합니다. 그림에는 각 단계의 역할만 짧게 표시하고, 실제 검사 도구와 별도 CI 검사는 아래 표에 정리했습니다.
 
 ```mermaid
-flowchart TD
-  API["회원 API<br/>파일 · ZIP"] --> AUTH["세션 인증"]
-  CLI["CLI<br/>파일 · 디렉터리"] --> INPUT["LangGraph · validate_input<br/>요청·시간 제한 검증"]
-  AUTH --> INPUT
-  INPUT --> SNAP["deterministic_scan<br/>파일 발견 · 제한된 텍스트 스냅샷<br/>제출 코드 실행·import 없음"]
+flowchart TB
+  API["회원 업로드"] --> AUTH["로그인 확인"]
+  AUTH --> VALIDATE
+  CLI["로컬 CLI"] --> VALIDATE["입력 검증"]
 
-  SNAP --> SAST["SAST<br/>Opengrep · Python 파일 간 흐름"]
-  SNAP --> SECRET["비밀정보<br/>Gitleaks"]
-  SNAP --> CONFIG["설정<br/>Checkov · Compose 정책"]
+  subgraph GRAPH["LangGraph 검사 흐름"]
+    direction TB
+    VALIDATE --> SNAP["파일 스냅샷"]
+    SNAP --> DETECT["정적 검사<br/>SAST · 비밀 · 설정"]
+    DETECT --> FINDING["Finding 통합"]
+    FINDING --> OSV["패키지 검사<br/>OSV.dev"]
+    OSV --> EVIDENCE["CWE · RAG 근거<br/>Qdrant 선택"]
+    EVIDENCE --> REPORT["위험도 · 보고서"]
+  end
 
-  SAST --> NORMAL["규칙 결과 정규화"]
-  SECRET --> NORMAL
-  CONFIG --> NORMAL
-  NORMAL --> OSV["audit_dependencies<br/>지원 잠금 파일의 정확한 버전 · OSV.dev"]
-  OSV --> CWE["prepare_cwe_evidence<br/>해당 CWE의 공식 자료 확인"]
-  CWE --> RAG["retrieve_finding_evidence<br/>API: Qdrant 설정 시 검색 · CLI: 건너뜀"]
-  RAG --> RISK["calculate_risk<br/>위험도 계산"]
-  RISK --> REPORT["build_report<br/>Finding · ScanExecution · 검사 범위 · 경고<br/>ScanReport 생성"]
-  REPORT --> DB["회원 API<br/>PostgreSQL 보고서 저장"]
-  DB --> VIEW["회원 API<br/>소유자 확인 · 보고서 조회"]
-  VIEW --> API_FORMAT["JSON · Markdown · SARIF 응답"]
-  REPORT --> CLI_FORMAT["CLI<br/>JSON · Markdown · SARIF 로컬 출력"]
+  REPORT --> FORMAT["JSON · Markdown · SARIF"]
+  REPORT --> STORE["회원 API<br/>PostgreSQL 저장 · 조회"]
 ```
 
-회원 업로드와 다른 신뢰 경계의 검사는 별도 CLI·CI 경로에서 실행됩니다. 결과는 공통 보고서 모델을 사용하지만, 회원 요청이 임의의 URL·Git 이력·이미지 빌드를 실행할 수는 없습니다.
+제출 코드는 실행하지 않고 파일을 읽어 검사합니다. Git 이력·테스트 API·이미지 검사는 별도의 신뢰된 CLI·CI 경로에서 실행합니다. 회원 요청으로 임의의 URL이나 이미지 빌드를 실행할 수는 없습니다.
 
 | 경로 | 검사 대상과 도구 |
 | --- | --- |
@@ -95,7 +90,7 @@ PDF는 자동 탐색·다운로드하지 않습니다. 자료 수집은 [공식 
 | 외부 OWASP BenchmarkPython (2026-10-27) | 지원 범위 90개 사례: TP 27 · FP 19 · FN 9 · TN 35 | CWE-78·89·502의 제한된 사례 단위 도전 |
 | 격리 테스트 API DAST (2026-10-31) | **8/8 사례**, TP 4 · FP 0 · FN 0 · TN 4 | 작성자 합성 API의 패시브·능동 검사 |
 | RAG·그래프 계약 | 동봉 자료 질문 4/4, 주입형 제공자 계약 1/1 | 실제 모델 답변 품질은 측정하지 않음 |
-| 런타임 이미지 (2026-11-16 로컬) | SBOM 구성요소 348개, Trivy 권고 283건 중 고위험·미상 95건 | 기존 95건은 [해결 과제](docs/evidence/container-image-2026-11-16.md) |
+| 런타임 이미지 (2026-11-16 로컬) | SBOM 구성요소 347개, Trivy 권고 206건 중 고위험·미상 49건 | 동일 DB의 수정 전 95건과 [재검사 비교](docs/evidence/container-image-remediation-2026-11-16.md) |
 
 작성자 사례의 높은 점수는 임의 저장소의 탐지율을 뜻하지 않습니다. 외부 사례의 분모와 규칙별 결과는 [스캐너 평가](docs/demo.md), DAST의 요청·시간은 [DAST 평가](docs/evidence/dast-benchmark.md), 전체 경로의 시간은 [파이프라인 측정](docs/evidence/pipeline-benchmark-2026-10-30.md)에 있습니다.
 
@@ -116,7 +111,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 - **탐지 범위:** Python 파일 간 분석은 정적 로컬 import와 지원 함수·sink에 한정됩니다. 다른 언어의 파일 간 흐름과 복잡한 동적 호출은 놓칠 수 있습니다. DAST의 응답 비교도 불안정한 응답이나 차이가 드러나지 않는 취약점을 놓칠 수 있습니다.
 - **근거와 평가:** OSV는 지원 잠금 파일의 정확한 버전을 조회합니다. 모델 답변의 품질은 별도 검증이 필요하며, 작성자 회귀 사례의 FP·FN이 0이어도 일반적인 탐지 성능을 보장하지 않습니다.
 - **배포:** 회원 로그인은 로컬 데모용입니다. 속도 제한·MFA·계정 복구가 없어 인터넷 공개용으로 준비되지 않았습니다. 외부 검사기는 API 컨테이너와 네트워크 네임스페이스를 공유합니다.
-- **이미지 권고:** 2026-11-16 이미지에 HIGH 86건·CRITICAL 1건·UNKNOWN 8건이 남았습니다. CI 기준선은 새 고위험 권고를 차단하지만 기존 권고를 해결하지 않습니다. 권고가 실제 악용 가능성을 증명하는 것은 아닙니다.
+- **이미지 권고:** 재검사 결과 HIGH 44건·UNKNOWN 5건이 남았습니다. Debian 패키지의 서로 다른 권고 14개와 Checkov `ecdsa` 1건을 계속 추적합니다. CI 기준선은 새 고위험 항목을 차단하지만 기존 항목을 해결하지 않습니다. 권고만으로 실제 악용 가능성이 증명되지는 않습니다.
 
 ## 출처와 기여
 

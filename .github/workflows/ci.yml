@@ -25,7 +25,7 @@ jobs:
       - run: uv sync --frozen --dev
       - run: uv run ruff format --check .
       - run: uv run ruff check .
-      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py scripts/run_history_evidence.py scripts/ci_container_image.py scripts/check_compose_evidence.py scripts/compose_smoke.py scripts/aggregate_pipeline_benchmark.py scripts/run_pipeline_contract_benchmark.py infra/scanners/install_trivy.py
+      - run: uv run mypy src apps scripts/local_up.py scripts/prepare_case_corpus.py scripts/run_dast_evidence.py scripts/run_history_evidence.py scripts/compare_gitleaks_rebuild.py scripts/ci_container_image.py scripts/check_compose_evidence.py scripts/compose_smoke.py scripts/aggregate_pipeline_benchmark.py scripts/run_pipeline_contract_benchmark.py infra/scanners/install_trivy.py
       - run: uv run bandit -q -r src apps
       - name: Run keyless RAG evidence
         run: uv run python -m scripts.run_rag_evidence
@@ -44,6 +44,22 @@ jobs:
 
       - name: Build pinned scanner runtime
         run: docker build --target runtime --tag secragraph:benchmark .
+      - name: Compare rebuilt Gitleaks with verified release
+        run: |
+          mkdir -p build/tools/release build/tools/rebuilt build/evidence
+          python infra/scanners/install_tools.py build/tools/release amd64 --gitleaks-only
+          scanner_container="$(docker create secragraph:benchmark)"
+          trap 'docker rm "$scanner_container" > /dev/null' EXIT
+          docker cp "$scanner_container:/opt/scanners/gitleaks" build/tools/rebuilt/gitleaks
+          chmod +x build/tools/rebuilt/gitleaks
+          uv run python -m scripts.compare_gitleaks_rebuild \
+            --release build/tools/release/gitleaks \
+            --rebuilt build/tools/rebuilt/gitleaks \
+            --cases data/evaluation/multiengine_cases.json \
+            --output build/evidence/gitleaks-parity.json
+          PYTHONPATH=src uv run python tests/unit/history/real_gitleaks_smoke.py \
+            "$PWD/build/tools/release/gitleaks" \
+            "$PWD/build/tools/rebuilt/gitleaks"
       - name: Measure authored multi-engine scanner cases
         run: |
           mkdir -p build/evidence
@@ -79,6 +95,7 @@ jobs:
           path: |
             build/evidence/rag.json
             build/evidence/rag.md
+            build/evidence/gitleaks-parity.json
             build/evidence/pipeline-contract.json
             build/evidence/pipeline-contract.md
             build/evidence/multiengine-scanner.json
