@@ -531,9 +531,9 @@ def test_ci_has_separate_dast_gate_and_only_normalized_artifacts() -> None:
     condition = upload["if"]
     assert "github.ref == 'refs/heads/main'" in condition
     assert all(
-        f"github.event_name == '{event}'" in condition
-        for event in ("push", "schedule", "workflow_dispatch")
+        f"github.event_name == '{event}'" in condition for event in ("push", "workflow_dispatch")
     )
+    assert "schedule" not in condition
     assert set(upload["with"]["path"].splitlines()) == {
         "build/evidence/dast.json",
         "build/evidence/dast.md",

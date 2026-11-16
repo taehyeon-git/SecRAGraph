@@ -1,4 +1,4 @@
-"""Scheduled and manual scans reuse the same guarded CI jobs."""
+"""Change-triggered and manual scans reuse the same guarded CI jobs."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _events(workflow: dict) -> dict:
     return value
 
 
-def test_both_workflows_run_weekly_and_on_demand_without_renaming_checks() -> None:
+def test_workflows_run_on_changes_and_demand_without_scheduled_scans() -> None:
     ci = _workflow("ci.yml")
     codeql = _workflow("security-scan.yml")
 
@@ -40,7 +40,8 @@ def test_both_workflows_run_weekly_and_on_demand_without_renaming_checks() -> No
         events = _events(workflow)
         assert "push" in events and "pull_request" in events
         assert "workflow_dispatch" in events
-        assert events["schedule"] == [{"cron": "17 3 * * 0"}]
+        assert "schedule" not in events
+    assert not (ROOT / ".github" / "dependabot.yml").exists()
     assert set(ci["jobs"]) == EXPECTED_CI_JOBS
     assert set(codeql["jobs"]) == {"codeql"}
     assert codeql["jobs"]["codeql"]["name"] == "CodeQL (${{ matrix.language }})"
@@ -92,8 +93,9 @@ def test_normalized_evidence_uploads_cover_only_trusted_main_events() -> None:
         assert len(uploads) == 1
         condition = uploads[0]["if"]
         assert "github.ref == 'refs/heads/main'" in condition
-        for event_name in ("push", "schedule", "workflow_dispatch"):
+        for event_name in ("push", "workflow_dispatch"):
             assert f"github.event_name == '{event_name}'" in condition
+        assert "schedule" not in condition
         assert "pull_request" not in condition
         assert uploads[0]["with"]["if-no-files-found"] == "error"
 
@@ -102,8 +104,9 @@ def test_normalized_evidence_uploads_cover_only_trusted_main_events() -> None:
     condition = aggregate["if"]
     assert "github.ref == 'refs/heads/main'" in condition
     assert "pull_request" not in condition
-    for event_name in ("push", "schedule", "workflow_dispatch"):
+    for event_name in ("push", "workflow_dispatch"):
         assert f"github.event_name == '{event_name}'" in condition
+    assert "schedule" not in condition
     downloads = [
         step for step in aggregate["steps"] if "actions/download-artifact@" in step.get("uses", "")
     ]

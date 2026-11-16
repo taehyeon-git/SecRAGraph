@@ -89,7 +89,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 
 전체 통합 테스트에는 [테스트 전용 Compose](tests/compose.integration.yaml)의 PostgreSQL `127.0.0.1:55432`와 Qdrant `127.0.0.1:56333`이 필요합니다. 일부 테스트는 실행 중인 API를 `SECRAGRAPH_TEST_API_URL`로 지정합니다.
 
-[CI](.github/workflows/ci.yml)는 정적 검사·단위/통합 테스트·스캐너 회귀·DAST·이미지/SBOM·Git 이력 검사를 실행하고, 신뢰된 `main` 실행의 8개 트랙 증거를 아티팩트로 게시합니다. 공개 코드의 [CodeQL 검사](.github/workflows/security-scan.yml)는 별도 워크플로입니다.
+[CI](.github/workflows/ci.yml)는 정적 검사·단위/통합 테스트·스캐너 회귀·DAST·이미지/SBOM·Git 이력 검사를 실행하고, 신뢰된 `main` 실행의 8개 트랙 증거를 아티팩트로 게시합니다. 공개 코드의 [CodeQL 검사](.github/workflows/security-scan.yml)는 별도 워크플로입니다. 두 워크플로는 `main` push·PR·수동 실행에서 동작하며 주간 예약 실행은 없습니다. Dependabot의 주간 버전 업데이트도 비활성화했습니다.
 
 ## 한계
 
