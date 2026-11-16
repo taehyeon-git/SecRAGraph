@@ -31,6 +31,11 @@ Normal scans detect supported public lockfile coordinates and query OSV.dev auto
 
 ## Runtime image evidence
 
+The CI and CodeQL workflows run on `main` pushes, pull requests, or manual
+`workflow_dispatch` only. Weekly scheduled scans and the weekly Dependabot
+version-update configuration were removed after the 2026-11-16 `main` CI
+passed. Manual runs still refresh vulnerability data before scanning.
+
 GitHub Actions builds the SecRAGraph runtime image, saves the exact local
 image ID, refreshes the Trivy 0.76.1 advisory DB, scans the tar, and creates
 a CycloneDX SBOM automatically. This is an audit of the built platform image;

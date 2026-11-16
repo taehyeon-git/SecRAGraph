@@ -397,9 +397,9 @@ def test_history_ci_gate_precedes_clean_main_only_upload() -> None:
     upload_step = steps[upload]
     condition = upload_step["if"]
     assert all(
-        f"github.event_name == '{event}'" in condition
-        for event in ("push", "schedule", "workflow_dispatch")
+        f"github.event_name == '{event}'" in condition for event in ("push", "workflow_dispatch")
     )
+    assert "schedule" not in condition
     assert "github.ref == 'refs/heads/main'" in condition
     assert "steps.history_generate.outcome == 'success'" in condition
     assert "steps.history_gate.outcome == 'success'" in condition

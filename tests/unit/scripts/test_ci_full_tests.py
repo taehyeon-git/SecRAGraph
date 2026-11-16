@@ -60,9 +60,9 @@ def test_ci_publishes_only_keyless_synthetic_evidence_on_trusted_main_runs() -> 
     condition = uploads[0]["if"]
     assert "github.ref == 'refs/heads/main'" in condition
     assert all(
-        f"github.event_name == '{event}'" in condition
-        for event in ("push", "schedule", "workflow_dispatch")
+        f"github.event_name == '{event}'" in condition for event in ("push", "workflow_dispatch")
     )
+    assert "schedule" not in condition
     assert set(uploads[0]["with"]["path"].splitlines()) == {
         "build/evidence/rag.json",
         "build/evidence/rag.md",
