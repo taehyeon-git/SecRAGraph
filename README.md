@@ -18,36 +18,41 @@ uv run --frozen python -m scripts.local_up
 
 초기 CWE 자료와 RAG 평가를 준비하고, Compose 빌드·DB 마이그레이션·서비스 준비·최초 회원 생성을 진행합니다. 이후 [웹 화면](http://127.0.0.1:8501)에서 로그인하거나 [API 문서](http://127.0.0.1:8000/docs)를 확인할 수 있습니다. 공개 포트는 로컬 루프백에 바인딩됩니다.
 
-코드 검사에는 모델 API 키가 필요하지 않습니다. 모델 기반 질의와 Qdrant 문서 검색에는 제공자 키와 인덱싱된 자료가 필요합니다. CLI 사용, 재실행·종료·복구는 [운영 문서](docs/operations.md)를 참고하세요.
+코드 검사에는 모델 API 키가 필요하지 않습니다. 모델 기반 질의와 Qdrant 문서 검색에는 제공자 키와 인덱싱된 자료가 필요합니다. CLI에서 파일을 직접 검사하려면 다음 명령을 사용합니다.
+
+```powershell
+uv run --frozen security-review scan examples/insecure/sample.py --format markdown
+```
+
+호스트 CLI 검사에는 Opengrep·Gitleaks·Checkov 실행 파일이 별도로 필요하며, 실행하지 못한 엔진은 보고서에 `not_run`으로 표시됩니다. 스택의 재실행·종료·복구는 [운영 문서](docs/operations.md)를 참고하세요.
 
 ## 핵심 아키텍처
 
-아래는 **회원 업로드와 CLI가 공유하는 소스 검사 흐름**입니다. 각 검사기의 결과를 정규화한 뒤 OSV·CWE 근거를 붙이고 보고서를 만듭니다.
+아래는 **회원 업로드와 CLI가 공유하는 소스 검사 흐름**입니다. 검사기를 순차 실행해 결과를 정규화하고, OSV 취약점 결과와 CWE 근거를 더해 보고서를 만듭니다.
 
 ```mermaid
 flowchart TD
   API["회원 API<br/>파일 · ZIP"] --> AUTH["세션 인증"]
-  CLI["CLI<br/>파일 · 디렉터리"] --> INPUT["입력 검증<br/>경로 · 크기 · 형식"]
+  CLI["CLI<br/>파일 · 디렉터리"] --> INPUT["LangGraph · validate_input<br/>요청·시간 제한 검증"]
   AUTH --> INPUT
-  INPUT --> SNAP["제한된 텍스트 스냅샷<br/>제출 코드 실행·import 없음"]
-  SNAP --> GRAPH["LangGraph 스캔 그래프"]
+  INPUT --> SNAP["deterministic_scan<br/>파일 발견 · 제한된 텍스트 스냅샷<br/>제출 코드 실행·import 없음"]
 
-  GRAPH --> SAST["SAST<br/>Opengrep · Python 파일 간 흐름"]
-  GRAPH --> SECRET["비밀정보<br/>Gitleaks"]
-  GRAPH --> CONFIG["설정<br/>Checkov · Compose 정책"]
+  SNAP --> SAST["SAST<br/>Opengrep · Python 파일 간 흐름"]
+  SNAP --> SECRET["비밀정보<br/>Gitleaks"]
+  SNAP --> CONFIG["설정<br/>Checkov · Compose 정책"]
 
   SAST --> NORMAL["규칙 결과 정규화"]
   SECRET --> NORMAL
   CONFIG --> NORMAL
-  NORMAL --> OSV["지원 잠금 파일의 정확한 버전<br/>OSV.dev 취약점 조회"]
-  OSV --> CWE["Finding · ScanExecution<br/>해당 CWE의 공식 자료 확인"]
-  CWE --> RAG["선택적 Qdrant 검색<br/>근거 출처 연결"]
-  RAG --> REPORT["위험도 · 검사 범위 · 경고<br/>ScanReport 생성"]
+  NORMAL --> OSV["audit_dependencies<br/>지원 잠금 파일의 정확한 버전 · OSV.dev"]
+  OSV --> CWE["prepare_cwe_evidence<br/>해당 CWE의 공식 자료 확인"]
+  CWE --> RAG["retrieve_finding_evidence<br/>API: Qdrant 설정 시 검색 · CLI: 건너뜀"]
+  RAG --> RISK["calculate_risk<br/>위험도 계산"]
+  RISK --> REPORT["build_report<br/>Finding · ScanExecution · 검사 범위 · 경고<br/>ScanReport 생성"]
   REPORT --> DB["회원 API<br/>PostgreSQL 보고서 저장"]
-  REPORT --> FORMAT["JSON · Markdown · SARIF"]
-  DB --> VIEW["회원 API<br/>본인 보고서 조회"]
-  FORMAT --> VIEW
-  FORMAT --> LOCAL["CLI<br/>로컬 출력"]
+  DB --> VIEW["회원 API<br/>소유자 확인 · 보고서 조회"]
+  VIEW --> API_FORMAT["JSON · Markdown · SARIF 응답"]
+  REPORT --> CLI_FORMAT["CLI<br/>JSON · Markdown · SARIF 로컬 출력"]
 ```
 
 회원 업로드와 다른 신뢰 경계의 검사는 별도 CLI·CI 경로에서 실행됩니다. 결과는 공통 보고서 모델을 사용하지만, 회원 요청이 임의의 URL·Git 이력·이미지 빌드를 실행할 수는 없습니다.
@@ -70,12 +75,12 @@ validate_input → deterministic_scan → normalize_findings
 → calculate_risk → build_report
 ```
 
-각 엔진의 실행 상태·버전·검사 파일과 시간을 `ScanExecution`에 남깁니다. OSV·CWE·검색 요청이 실패해도 확인된 `Finding`은 유지하고 보고서에 범위 경고를 표시합니다.
+각 엔진의 실행 상태·버전·적격 파일·확인 가능한 검사 경로·시간을 `ScanExecution`에 남깁니다. Gitleaks는 finding이 발생한 경로만 확인된 검사 경로로 기록합니다. OSV·CWE·검색 요청이 실패해도 확인된 `Finding`은 유지하고 보고서에 범위 경고를 표시합니다.
 
 ## RAG와 Text2SQL
 
 - **결과의 근거:** 실제 `Finding`의 CWE ID에 맞는 MITRE 공식 자료를 확인합니다. 설정된 경우 Qdrant 문서의 출처도 붙입니다. RAG가 코드의 취약 여부를 결정하거나 CWE에서 CVE를 추정하지는 않습니다.
-- **보안 지식 질의:** 별도 지식 LangGraph가 질문을 분류하고 문서를 재검색한 뒤, 인용 가능한 답변 또는 답변 보류를 선택합니다. Text2SQL은 SQLGlot 검사를 거쳐 PostgreSQL `intel.cwe`·`intel.cve`에 제한된 읽기 전용 질의만 수행합니다.
+- **보안 지식 질의:** 별도 지식 LangGraph가 일반 답변·Text2SQL·문서 검색 중 경로를 선택합니다. 문서 검색 경로에서는 근거를 재검색하고 인용 가능한 답변 또는 답변 보류를 선택합니다. Text2SQL은 SQLGlot 검사를 거쳐 PostgreSQL `intel.cwe`·`intel.cve`에 제한된 읽기 전용 질의만 수행합니다.
 
 PDF는 자동 탐색·다운로드하지 않습니다. 자료 수집은 [공식 문서 절차](docs/official-corpus.md), 질의 제한은 [Text2SQL 보안](docs/text2sql-security.md), 패키지 조회 범위는 [OSV 설명](docs/osv.md)을 참고하세요.
 
@@ -104,7 +109,7 @@ uv run pytest tests/unit/docs/test_documentation.py tests/e2e/test_cli.py
 
 전체 통합 테스트에는 [테스트 전용 Compose](tests/compose.integration.yaml)의 PostgreSQL `127.0.0.1:55432`와 Qdrant `127.0.0.1:56333`이 필요합니다. 실행 중인 API를 사용하는 일부 테스트는 `SECRAGRAPH_TEST_API_URL`을 설정합니다.
 
-[CI](.github/workflows/ci.yml)는 품질·단위/통합 테스트·스캐너 회귀·의존성·DAST·이미지/SBOM·Git 이력 검사를 실행합니다. [CodeQL](.github/workflows/security-scan.yml)은 별도 워크플로입니다. 둘 다 PR·`main` push·수동 실행에서 동작하며 주간 예약 실행은 없습니다. 성공한 신뢰된 `main` 실행의 정규화된 증거만 아티팩트로 게시합니다.
+[CI](.github/workflows/ci.yml)는 품질·단위/통합 테스트·스캐너 회귀·의존성·DAST·이미지/SBOM·Git 이력 검사를 실행합니다. [CodeQL](.github/workflows/security-scan.yml)은 별도 워크플로입니다. 둘 다 PR·`main` push·수동 실행에서 동작하며 주간 예약 실행은 없습니다. 신뢰된 `main` 실행에서 검사별 증거 아티팩트를 게시하고, 선행 작업이 모두 통과하면 합산한 파이프라인 벤치마크를 게시합니다.
 
 ## 한계
 
